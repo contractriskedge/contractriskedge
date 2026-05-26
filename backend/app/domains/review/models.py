@@ -34,6 +34,7 @@ class ReviewStatus(str, PyEnum):
     DRAFT = "draft"
     UPLOADED = "uploaded"
     ANALYZING = "analyzing"
+    AI_ANALYZED = "ai_analyzed"
     AI_REVIEWED = "ai_reviewed"
     PROCUREMENT_REVIEW = "procurement_review"
     LEGAL_REVIEW = "legal_review"
@@ -56,7 +57,8 @@ class ReviewStatus(str, PyEnum):
         return {
             cls.DRAFT: {cls.ANALYZING, cls.CLOSED},
             cls.UPLOADED: {cls.ANALYZING, cls.ARCHIVED, cls.CLOSED},
-            cls.ANALYZING: {cls.AI_REVIEWED, cls.UPLOADED, cls.CLOSED},
+            cls.ANALYZING: {cls.AI_ANALYZED, cls.AI_REVIEWED, cls.UPLOADED, cls.CLOSED},
+            cls.AI_ANALYZED: {cls.AI_REVIEWED, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.CLOSED},
             cls.AI_REVIEWED: {cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.CLOSED},
             cls.PROCUREMENT_REVIEW: {
                 cls.LEGAL_REVIEW, cls.SECURITY_REVIEW, cls.NEGOTIATION,

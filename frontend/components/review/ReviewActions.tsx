@@ -33,7 +33,7 @@ import {
   useAddComment, useDeleteReview,
 } from "@/services/hooks";
 import { api } from "@/services/api/client";
-import { useAuth } from "@/providers/AuthProvider";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { EscalationModal } from "./EscalationModal";
 import { getAllowedActions, isImmutable, WORKFLOW_STATES } from "@/lib/workflow";
 
