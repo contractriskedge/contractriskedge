@@ -1,0 +1,112 @@
+{
+  "timestamp": "2026-05-13T16:51:57.553997",
+  "week_start": "2026-05-06T16:51:57.554001",
+  "week_end": "2026-05-13T16:51:57.554009",
+  "metrics": {
+    "overall_accuracy": 1.0,
+    "macro_precision": 1.0,
+    "macro_recall": 1.0,
+    "macro_f1": 1.0,
+    "weighted_f1": 1.0,
+    "severity_mae": 0.0,
+    "severity_rmse": 0.0,
+    "severity_accuracy_within_1": 1.0,
+    "severity_accuracy_within_2": 1.0,
+    "false_positive_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "total_samples": 500,
+    "correct_classifications": 500,
+    "high_risk_accuracy": 1.0,
+    "category_metrics": {
+      "assignment": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 20,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "confidentiality": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 58,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "data_privacy": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 17,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "force_majeure": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 16,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "governing_law": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 20,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "indemnification": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 71,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "intellectual_property": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 58,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "liability_limitation": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 50,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "non_compete": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 26,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "payment_terms": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 36,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "termination": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 128,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      }
+    }
+  },
+  "metadata": {}
+}

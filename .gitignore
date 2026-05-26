@@ -1,0 +1,78 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+*.env
+.env
+backend/.env
+
+# Node
+node_modules/
+.next/
+out/
+.cache/
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfplan
+
+# Logs
+*.log
+logs/
+
+# ML
+ml/models/*.pt
+ml/models/*.h5
+ml/data/
+!ml/data/.gitkeep
+
+# Uploads
+uploads/
+
+# Secrets
+*.pem
+*.key
+*.cert
+service-account.json
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Documents / Reports
+*.rtf
+*.xlsx
+*.xls
+
+# Generated outputs
+output/
+model_registry/
+
+# Server artifacts
+server.pid
+
+# Test artifacts
+test_report_*.xlsx

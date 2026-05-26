@@ -1,0 +1,453 @@
+"""Workflow Recovery Daemon — periodic tasks for detecting and recovering stuck workflows.
+
+This module provides Celery tasks that:
+1. Detect uploads stuck in non-terminal states for >30 minutes
+2. Detect AI runs stuck in processing/pending for >30 minutes
+3. Detect reviews abandoned in draft for >24 hours
+4. Clean up expired idempotency records
+5. Aggregate and log system metrics
+
+Run via Celery Beat:
+    celery -A app.workers.celery_scheduler beat --loglevel=info
+
+Or triggered manually:
+    from app.workers.recovery import recover_stuck_workflows
+    recover_stuck_workflows.delay()
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import timedelta
+
+from celery import shared_task
+
+from app.kernel.datetime_utils import age_minutes, utc_now
+from sqlalchemy import text as sa_text, update
+
+logger = logging.getLogger(__name__)
+
+# ── Thresholds ─────────────────────────────────────────────────────
+
+STUCK_UPLOAD_MINUTES = 30      # Uploads in non-terminal state for >30 min
+STUCK_INGESTION_REDISPATCH_MINUTES = 3  # Re-queue pipeline tasks sooner for OCR/extraction stalls
+STUCK_AI_RUN_MINUTES = 30      # AI runs in processing for >30 min
+ABANDONED_REVIEW_HOURS = 48    # Reviews in draft for >48 hours
+IDEMPOTENCY_CLEANUP_HOURS = 72  # Clean up idempotency keys older than 72h
+
+
+# ── Recovery Task ──────────────────────────────────────────────────
+
+@shared_task(
+    name="recover_stuck_workflows",
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+    max_retries=3,
+    acks_late=True,
+)
+def recover_stuck_workflows():
+    """Main recovery task — detects and handles stuck workflows across the system.
+
+    Operates on ALL tenants. Each query is tenant-scoped to ensure
+    cross-tenant isolation. Recovery actions respect tenant boundaries.
+
+    This task should be scheduled via Celery Beat every 5 minutes.
+    """
+    from app.kernel.database.session import create_sync_session
+
+    logger.info("[Recovery] Starting workflow recovery scan...")
+    session = create_sync_session()
+    recovery_actions = []
+    tenant_count = 0
+
+    try:
+        # Get all active tenants
+        tenants_sql = sa_text("SELECT tenant_id FROM tenants WHERE is_active = TRUE")
+        tenants = session.execute(tenants_sql).fetchall()
+
+        for (tenant_id,) in tenants:
+            tenant_count += 1
+            tenant_id_str = str(tenant_id)
+
+            # 1. Recover stuck uploads (tenant-scoped)
+            stuck_uploads = _find_stuck_uploads(session, tenant_id_str)
+            for upload in stuck_uploads:
+                action = _handle_stuck_upload(session, upload, tenant_id_str)
+                if action:
+                    recovery_actions.append(f"[{tenant_id_str[:8]}] {action}")
+
+            # 2. Recover stuck AI runs (tenant-scoped)
+            stuck_ai_runs = _find_stuck_ai_runs(session, tenant_id_str)
+            for run in stuck_ai_runs:
+                action = _handle_stuck_ai_run(session, run, tenant_id_str)
+                if action:
+                    recovery_actions.append(f"[{tenant_id_str[:8]}] {action}")
+
+            # 3. Flag abandoned reviews (tenant-scoped)
+            abandoned_reviews = _find_abandoned_reviews(session, tenant_id_str)
+            for review in abandoned_reviews:
+                action = _flag_abandoned_review(session, review, tenant_id_str)
+                if action:
+                    recovery_actions.append(f"[{tenant_id_str[:8]}] {action}")
+
+        # 4. Clean up expired idempotency records (global — no tenant context)
+        cleanup_count = _cleanup_idempotency_records(session)
+        if cleanup_count:
+            recovery_actions.append(f"Cleaned up {cleanup_count} expired idempotency records")
+
+        session.commit()
+
+        if recovery_actions:
+            logger.info(
+                "[Recovery] Completed: %d actions across %d tenants",
+                len(recovery_actions), tenant_count,
+                extra={"actions": recovery_actions, "tenant_count": tenant_count},
+            )
+        else:
+            logger.info("[Recovery] No stuck workflows detected across %d tenants.", tenant_count)
+
+    except Exception as exc:
+        session.rollback()
+        logger.error("[Recovery] Recovery scan failed: %s", exc)
+        raise
+    finally:
+        session.close()
+
+    return {"actions_taken": len(recovery_actions), "actions": recovery_actions, "tenants_scanned": tenant_count}
+
+
+# ── Detection Functions ────────────────────────────────────────────
+
+def _find_stuck_uploads(session, tenant_id: str):
+    """Find uploads stuck in non-terminal states beyond threshold (tenant-scoped)."""
+    sql = sa_text("""
+        SELECT upload_id, tenant_id, user_id, ingestion_state, retry_count,
+               ingestion_error, updated_at
+        FROM upload_sessions
+        WHERE tenant_id = :tenant_id
+          AND ingestion_state NOT IN ('review_ready', 'failed', 'cancelled', 'quarantined')
+          AND updated_at < NOW() - INTERVAL :threshold
+        ORDER BY updated_at ASC
+        LIMIT 20
+    """)
+    result = session.execute(sql, {
+        "tenant_id": tenant_id,
+        "threshold": f"{STUCK_UPLOAD_MINUTES} minutes",
+    })
+    return result.fetchall()
+
+
+def _find_stuck_ai_runs(session, tenant_id: str):
+    """Find AI runs stuck in processing/pending beyond threshold (tenant-scoped)."""
+    sql = sa_text("""
+        SELECT run_id, upload_id, tenant_id, status, retry_count,
+               error_message, started_at, created_at
+        FROM ai_execution_runs
+        WHERE tenant_id = :tenant_id
+          AND status IN ('processing', 'pending')
+          AND started_at IS NOT NULL
+          AND started_at < NOW() - INTERVAL :threshold
+        ORDER BY started_at ASC
+        LIMIT 20
+    """)
+    result = session.execute(sql, {
+        "tenant_id": tenant_id,
+        "threshold": f"{STUCK_AI_RUN_MINUTES} minutes",
+    })
+    return result.fetchall()
+
+
+def _find_abandoned_reviews(session, tenant_id: str):
+    """Find reviews stuck in draft/ai_analyzed beyond threshold (tenant-scoped)."""
+    sql = sa_text("""
+        SELECT review_id, tenant_id, status, assigned_to, created_at, updated_at
+        FROM contract_reviews
+        WHERE tenant_id = :tenant_id
+          AND is_deleted = FALSE
+          AND status IN ('draft', 'ai_analyzed')
+          AND created_at < NOW() - INTERVAL :threshold
+        ORDER BY updated_at ASC
+        LIMIT 20
+    """)
+    result = session.execute(sql, {
+        "tenant_id": tenant_id,
+        "threshold": f"{ABANDONED_REVIEW_HOURS} hours",
+    })
+    return result.fetchall()
+
+
+# ── Recovery Handlers ──────────────────────────────────────────────
+
+def _handle_stuck_upload(session, upload, tenant_id: str) -> str | None:
+    """Handle a stuck upload by re-queuing pipeline work or marking failed (tenant-scoped)."""
+    upload_id = str(upload.upload_id)
+    state = upload.ingestion_state
+    age = age_minutes(utc_now(), upload.updated_at)
+
+    logger.warning(
+        "[Recovery] Stuck upload detected: %s (tenant=%s, state=%s, age=%dmin, retries=%d)",
+        upload_id, tenant_id[:8], state, int(age), upload.retry_count or 0,
+    )
+
+    # Re-queue ingestion tasks when stuck in active pipeline states (e.g. OCR processing)
+    if (
+        int(age) >= STUCK_INGESTION_REDISPATCH_MINUTES
+        and state in (
+            "ocr_pending",
+            "ocr_processing",
+            "storage_confirmed",
+            "ocr_complete",
+            "chunking_pending",
+            "embedding_pending",
+            "validating",
+            "validated",
+        )
+        and (upload.retry_count or 0) < 3
+    ):
+        from app.domains.ingestion.models import IngestionState, coerce_ingestion_state
+        from workers.ingestion_dispatch import redispatch_ingestion
+
+        ing_state = coerce_ingestion_state(state)
+        user_id = str(upload.user_id or "system")
+        action = redispatch_ingestion(upload_id, tenant_id, user_id, ing_state)
+        if action:
+            session.execute(
+                sa_text("""
+                    UPDATE upload_sessions
+                    SET retry_count = retry_count + 1,
+                        ingestion_error = :error,
+                        updated_at = NOW()
+                    WHERE upload_id = :upload_id AND tenant_id = :tenant_id
+                """).bindparams(
+                    upload_id=upload_id,
+                    tenant_id=tenant_id,
+                    error=f"Auto-retry: re-queued {action} after {int(age)}min in {state}",
+                )
+            )
+            return (
+                f"Re-queued {action} for stuck upload {upload_id[:8]} "
+                f"(state={state}, age={int(age)}min)"
+            )
+
+    # If retries exceeded, mark as failed
+    if (upload.retry_count or 0) >= 3:
+        session.execute(
+            sa_text("""
+                UPDATE upload_sessions
+                SET ingestion_state = 'failed',
+                    ingestion_error = :error,
+                    updated_at = NOW()
+                WHERE upload_id = :upload_id AND tenant_id = :tenant_id
+            """).bindparams(
+                upload_id=upload_id, tenant_id=tenant_id,
+                error=f"Auto-recovered: stuck in {state} for {int(age)}min after {upload.retry_count} retries",
+            )
+        )
+        return f"Marked stuck upload {upload_id[:8]} as failed (state={state}, age={int(age)}min)"
+
+    # Otherwise increment retry count
+    session.execute(
+        sa_text("""
+            UPDATE upload_sessions
+            SET retry_count = retry_count + 1,
+                ingestion_error = :error,
+                updated_at = NOW()
+            WHERE upload_id = :upload_id AND tenant_id = :tenant_id
+        """).bindparams(
+            upload_id=upload_id, tenant_id=tenant_id,
+            error=f"Auto-retry: stuck in {state} for {int(age)}min",
+        )
+    )
+    return f"Flagged stuck upload {upload_id[:8]} for retry (state={state}, age={int(age)}min)"
+
+
+def _handle_stuck_ai_run(session, run, tenant_id: str) -> str | None:
+    """Handle a stuck AI run by marking it as failed (tenant-scoped)."""
+    run_id = str(run.run_id)
+    status = run.status
+    ref_time = run.started_at or run.created_at
+    age = age_minutes(utc_now(), ref_time)
+
+    logger.warning(
+        "[Recovery] Stuck AI run detected: %s (tenant=%s, status=%s, age=%dmin, retries=%d)",
+        run_id, tenant_id[:8], status, int(age), run.retry_count or 0,
+    )
+
+    # Mark as failed (tenant-scoped)
+    session.execute(
+        sa_text("""
+            UPDATE ai_execution_runs
+            SET status = 'failed',
+                error_message = :error,
+                completed_at = NOW()
+            WHERE run_id = :run_id AND tenant_id = :tenant_id
+        """).bindparams(
+            run_id=run_id, tenant_id=tenant_id,
+            error=f"Auto-recovered: stuck in {status} for {int(age)}min",
+        )
+    )
+
+    # Also record the failure (tenant-scoped)
+    session.execute(sa_text("""
+        INSERT INTO ai_failures (run_id, tenant_id, failure_type, error_message, retry_count, created_at)
+        VALUES (:run_id, :tenant_id, 'timeout', :error_message, :retry_count, :created_at)
+    """), {
+        "run_id": run_id,
+        "tenant_id": tenant_id,
+        "error_message": f"Auto-recovered: stuck in {status} for {int(age)}min",
+        "retry_count": run.retry_count or 0,
+        "created_at": utc_now(),
+    })
+
+    return f"Recovered stuck AI run {run_id[:8]} (status={status}, age={int(age)}min)"
+
+
+def _flag_abandoned_review(session, review, tenant_id: str) -> str | None:
+    """Flag an abandoned review for attention (tenant-scoped)."""
+    review_id = str(review.review_id)
+    age = age_minutes(utc_now(), review.updated_at) / 60.0
+
+    logger.info(
+        "[Recovery] Abandoned review detected: %s (tenant=%s, status=%s, age=%dh, assigned=%s)",
+        review_id, tenant_id[:8], review.status, int(age), review.assigned_to,
+    )
+
+    # Update the review metadata to flag it (tenant-scoped)
+    session.execute(
+        sa_text("""
+            UPDATE contract_reviews
+            SET priority = 'high',
+                updated_at = NOW()
+            WHERE review_id = :review_id AND tenant_id = :tenant_id
+        """).bindparams(review_id=review_id, tenant_id=tenant_id)
+    )
+
+    return f"Flagged abandoned review {review_id[:8]} as high priority (status={review.status}, age={int(age)}h)"
+
+
+def _cleanup_idempotency_records(session) -> int:
+    """Clean up expired idempotency records."""
+    result = session.execute(
+        sa_text("""
+            DELETE FROM idempotency_records
+            WHERE expires_at < NOW()
+            RETURNING record_id
+        """)
+    )
+    count = len(result.fetchall())
+    if count:
+        logger.info("[Recovery] Cleaned up %d expired idempotency records", count)
+    return count
+
+
+# ── Metrics Aggregation Task ───────────────────────────────────────
+
+@shared_task(
+    name="aggregate_system_metrics",
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    max_retries=2,
+    acks_late=True,
+)
+def aggregate_system_metrics():
+    """Aggregate and log system metrics for observability.
+
+    Should be scheduled via Celery Beat every 15 minutes.
+    Logs structured metric events that can be ingested by log aggregation tools.
+    """
+    from app.kernel.database.session import create_sync_session
+
+    session = create_sync_session()
+
+    try:
+        # Get all active tenants for per-tenant metrics
+        tenants_sql = sa_text("SELECT tenant_id FROM tenants WHERE is_active = TRUE")
+        tenants = session.execute(tenants_sql).fetchall()
+
+        total_active_uploads: dict[str, int] = {}
+        total_active_ai: dict[str, int] = {}
+        total_recent_failures = 0
+        total_queue: dict[str, int] = {"ocr": 0, "embedding": 0, "analysis": 0}
+        tenant_metrics: list[dict] = []
+
+        for (tenant_id,) in tenants:
+            tid = str(tenant_id)
+
+            # Active uploads by state (tenant-scoped)
+            uploads_sql = sa_text("""
+                SELECT ingestion_state, COUNT(*)::int AS count
+                FROM upload_sessions
+                WHERE tenant_id = :tenant_id
+                  AND ingestion_state NOT IN ('review_ready', 'failed', 'cancelled', 'quarantined')
+                GROUP BY ingestion_state
+            """)
+            for row in session.execute(uploads_sql, {"tenant_id": tid}).fetchall():
+                total_active_uploads[row.ingestion_state] = total_active_uploads.get(row.ingestion_state, 0) + row.count
+
+            # Active AI runs (tenant-scoped)
+            ai_sql = sa_text("""
+                SELECT status, COUNT(*)::int AS count
+                FROM ai_execution_runs
+                WHERE tenant_id = :tenant_id
+                  AND status IN ('processing', 'pending')
+                GROUP BY status
+            """)
+            for row in session.execute(ai_sql, {"tenant_id": tid}).fetchall():
+                total_active_ai[row.status] = total_active_ai.get(row.status, 0) + row.count
+
+            # Recent failures (tenant-scoped)
+            failures_sql = sa_text("""
+                SELECT COUNT(*)::int FROM ai_failures
+                WHERE tenant_id = :tenant_id
+                  AND created_at > NOW() - INTERVAL '1 hour'
+            """)
+            total_recent_failures += session.execute(failures_sql, {"tenant_id": tid}).scalar() or 0
+
+            # Queue depth (tenant-scoped)
+            queue_sql = sa_text("""
+                SELECT
+                    COUNT(*) FILTER (WHERE ingestion_state = 'ocr_pending')::int AS ocr_queue,
+                    COUNT(*) FILTER (WHERE ingestion_state = 'embedding_pending')::int AS embedding_queue,
+                    COUNT(*) FILTER (WHERE ingestion_state = 'analysis_pending')::int AS analysis_queue
+                FROM upload_sessions
+                WHERE tenant_id = :tenant_id
+                  AND ingestion_state IN ('ocr_pending', 'embedding_pending', 'analysis_pending')
+            """)
+            qrow = session.execute(queue_sql, {"tenant_id": tid}).fetchone()
+            if qrow:
+                total_queue["ocr"] += qrow.ocr_queue or 0
+                total_queue["embedding"] += qrow.embedding_queue or 0
+                total_queue["analysis"] += qrow.analysis_queue or 0
+
+        logger.info(
+            "[Metrics] System metrics snapshot",
+            extra={
+                "event": "system_metrics_snapshot",
+                "active_uploads": total_active_uploads,
+                "active_ai_runs": total_active_ai,
+                "recent_failures_1h": total_recent_failures,
+                "queue_depth": total_queue,
+                "tenants_count": len(tenants),
+                "timestamp": utc_now().isoformat(),
+            },
+        )
+
+        session.commit()
+
+    except Exception as exc:
+        session.rollback()
+        logger.error("[Metrics] Metrics aggregation failed: %s", exc)
+    finally:
+        session.close()
+
+
+# ── Helpers ────────────────────────────────────────────────────────
+
+def update_sql(table: str, id_column: str, id_value: str, values: dict) -> sa_text:
+    """Build a parameterized UPDATE statement."""
+    set_clause = ", ".join(f"{k} = :{k}" for k in values)
+    bind = {**values, "id_value": id_value}
+    return sa_text(
+        f"UPDATE {table} SET {set_clause} WHERE {id_column} = :id_value"
+    ).bindparams(**bind)

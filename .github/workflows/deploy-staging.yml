@@ -1,0 +1,142 @@
+# ContractRiskEdge Staging Deployment — deploy backend and frontend to Render.
+#
+# Triggered on push to main after CI passes.
+# Runs smoke tests after deployment to verify the services are healthy.
+
+name: Deploy Staging
+
+on:
+  workflow_run:
+    workflows: ["Backend CI", "Frontend CI"]
+    branches: [main]
+    types:
+      - completed
+
+env:
+  RENDER_API_URL: https://api.render.com/v1
+  SMOKE_TEST_URL: https://staging-api.contractriskedge.com
+
+jobs:
+  deploy-backend:
+    name: Deploy Backend to Render
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trigger Render deploy (Backend API)
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          BACKEND_SERVICE_ID: ${{ secrets.RENDER_BACKEND_SERVICE_ID }}
+        run: |
+          curl -s -X POST "$RENDER_API_URL/services/$BACKEND_SERVICE_ID/deploys" \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "clearCache": "do_not_clear"
+            }' | tee /tmp/render-deploy-response.json
+
+          DEPLOY_ID=$(python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('id',''))" < /tmp/render-deploy-response.json)
+          echo "DEPLOY_ID=$DEPLOY_ID" >> $GITHUB_ENV
+          echo "Backend deploy triggered: $DEPLOY_ID"
+
+      - name: Wait for backend deploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          DEPLOY_ID: ${{ env.DEPLOY_ID }}
+        run: |
+          echo "Waiting for deploy: $DEPLOY_ID"
+          if [ -z "$DEPLOY_ID" ]; then
+            echo "No deploy ID received, waiting 60s for manual deploy..."
+            sleep 60
+          else
+            for i in $(seq 1 30); do
+              STATUS=$(curl -s "$RENDER_API_URL/services/${{ secrets.RENDER_BACKEND_SERVICE_ID }}/deploys/$DEPLOY_ID" \
+                -H "Authorization: Bearer $RENDER_API_KEY" \
+                | python3 -c "import json,sys; print(json.load(sys.stdin).get('status',''))")
+              echo "Deploy status: $STATUS (attempt $i/30)"
+              if [ "$STATUS" = "live" ]; then
+                echo "Backend deploy live!"
+                break
+              fi
+              if [ "$STATUS" = "failed" ]; then
+                echo "Backend deploy failed!"
+                exit 1
+              fi
+              sleep 10
+            done
+          fi
+
+  deploy-worker:
+    name: Deploy Celery Worker to Render
+    needs: deploy-backend
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Trigger Render deploy (Celery Worker)
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          WORKER_SERVICE_ID: ${{ secrets.RENDER_WORKER_SERVICE_ID }}
+        run: |
+          curl -s -X POST "$RENDER_API_URL/services/$WORKER_SERVICE_ID/deploys" \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"clearCache": "do_not_clear"}'
+          echo "Worker deploy triggered"
+          sleep 30
+
+  deploy-frontend:
+    name: Deploy Frontend to Render
+    needs: deploy-backend
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Trigger Render deploy (Frontend)
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          FRONTEND_SERVICE_ID: ${{ secrets.RENDER_FRONTEND_SERVICE_ID }}
+        run: |
+          curl -s -X POST "$RENDER_API_URL/services/$FRONTEND_SERVICE_ID/deploys" \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"clearCache": "do_not_clear"}'
+          echo "Frontend deploy triggered"
+          sleep 30
+
+  smoke-test:
+    name: Run Smoke Tests
+    needs: [deploy-backend, deploy-worker, deploy-frontend]
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install httpx
+
+      - name: Run smoke tests
+        env:
+          SMOKE_TEST_URL: ${{ env.SMOKE_TEST_URL }}
+          SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
+        run: |
+          python scripts/smoke_test.py \
+            --base-url "$SMOKE_TEST_URL" \
+            --api-key "$SMOKE_TEST_TOKEN"
+
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "❌ Staging smoke tests FAILED for commit ${{ github.sha }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true

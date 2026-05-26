@@ -1,0 +1,240 @@
+{
+  "report_metadata": {
+    "generated_at": "2026-05-13T16:51:57.529907Z",
+    "test_set_name": "Contract Risk Analysis Blind Test Set",
+    "test_set_version": "1.0.0",
+    "test_set_size": 500,
+    "contract_types": [
+      "nda",
+      "service_agreement",
+      "license",
+      "employment",
+      "lease"
+    ],
+    "categories_covered": [
+      "assignment",
+      "confidentiality",
+      "data_privacy",
+      "force_majeure",
+      "governing_law",
+      "indemnification",
+      "intellectual_property",
+      "liability_limitation",
+      "non_compete",
+      "payment_terms",
+      "termination"
+    ]
+  },
+  "current_metrics": {
+    "overall_accuracy": 1.0,
+    "macro_precision": 1.0,
+    "macro_recall": 1.0,
+    "macro_f1": 1.0,
+    "weighted_f1": 1.0,
+    "severity_mae": 0.0,
+    "severity_rmse": 0.0,
+    "severity_accuracy_within_1": 1.0,
+    "severity_accuracy_within_2": 1.0,
+    "false_positive_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "total_samples": 500,
+    "correct_classifications": 500,
+    "high_risk_accuracy": 1.0,
+    "category_metrics": {
+      "assignment": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 20,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "confidentiality": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 58,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "data_privacy": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 17,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "force_majeure": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 16,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "governing_law": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 20,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "indemnification": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 71,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "intellectual_property": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 58,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "liability_limitation": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 50,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "non_compete": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 26,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "payment_terms": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 36,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      },
+      "termination": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 128,
+        "severity_mae": 0.0,
+        "false_positive_rate": 0.0
+      }
+    }
+  },
+  "predictions_summary": {
+    "total": 0,
+    "successful": 0,
+    "failed": 0
+  },
+  "category_details": {
+    "assignment": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 20,
+      "true_positives": 20,
+      "false_positives": 0,
+      "false_negatives": 0
+    },
+    "confidentiality": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 58,
+      "true_positives": 58,
+      "false_positives": 0,
+      "false_negatives": 0
+    },
+    "data_privacy": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 17,
+      "true_positives": 17,
+      "false_positives": 0,
+      "false_negatives": 0
+    },
+    "force_majeure": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 16,
+      "true_positives": 16,
+      "false_positives": 0,
+      "false_negatives": 0
+    },
+    "governing_law": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 20,
+      "true_positives": 20,
+      "false_positives": 0,
+      "false_negatives": 0
+    },
+    "indemnification": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 71,
+      "true_positives": 71,
+      "false_positives": 0,
+      "false_negatives": 0
+    },
+    "intellectual_property": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 58,
+      "true_positives": 58,
+      "false_positives": 0,
+      "false_negatives": 0
+    },
+    "liability_limitation": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 50,
+      "true_positives": 50,
+      "false_positives": 0,
+      "false_negatives": 0
+    },
+    "non_compete": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 26,
+      "true_positives": 26,
+      "false_positives": 0,
+      "false_negatives": 0
+    },
+    "payment_terms": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 36,
+      "true_positives": 36,
+      "false_positives": 0,
+      "false_negatives": 0
+    },
+    "termination": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 128,
+      "true_positives": 128,
+      "false_positives": 0,
+      "false_negatives": 0
+    }
+  }
+}

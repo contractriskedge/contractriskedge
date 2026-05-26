@@ -1,0 +1,35 @@
+# ContractRiskEdge Celery Worker Dockerfile
+#
+# Build:
+#   docker build -t contractrisk-worker -f Dockerfile.worker .
+#
+# Run:
+#   docker run contractrisk-worker celery -A app.workers.celery_app worker -Q ingestion,ai,notifications,embeddings,default
+
+FROM python:3.12-slim AS builder
+
+WORKDIR /build
+COPY requirements.txt .
+RUN pip install --user --no-cache-dir -r requirements.txt
+
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /root/.local /root/.local
+ENV PATH=/root/.local/bin:$PATH
+
+WORKDIR /app
+COPY . .
+
+RUN addgroup --system --gid 1001 appuser && \
+    adduser --system --uid 1001 --gid 1001 appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD celery -A app.workers.celery_app inspect ping || exit 1
+
+CMD ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info", "--concurrency=4", "-Q", "ingestion,ai,notifications,embeddings,default"]

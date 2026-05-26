@@ -1,0 +1,1 @@
+"""Kernel — shared infrastructure layer."""

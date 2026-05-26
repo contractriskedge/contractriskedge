@@ -1,0 +1,180 @@
+# ContractRiskEdge — Render Blueprint Deployment Configuration
+#
+# Deploy with:
+#   render blueprint apply
+#
+# Or manually via Render Dashboard:
+#   1. Create a PostgreSQL instance
+#   2. Create a Redis instance
+#   3. Deploy the API service
+#   4. Deploy the Celery worker
+#   5. Deploy the frontend
+#
+# Environment variables marked with "sync: false" must be set manually.
+
+services:
+  # ── Backend API ─────────────────────────────────────────────────
+  - type: web
+    name: contractrisk-api
+    runtime: python
+    repo: https://github.com/your-org/contractrisk-edge
+    branch: main
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 4
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        fromDatabase:
+          name: contractrisk-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: contractrisk-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: contractrisk-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: contractrisk-redis
+          property: connectionString
+      - key: AUTH0_DOMAIN
+        sync: false
+      - key: AUTH0_AUDIENCE
+        sync: false
+      - key: AUTH0_ISSUER
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: OTEL_ENABLED
+        value: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: APP_URL
+        value: https://app.contractriskedge.com
+      - key: DEV_AUTH_BYPASS
+        value: false
+    disk:
+      name: tmp
+      mountPath: /tmp
+      sizeGB: 1
+
+  # ── Celery Worker ───────────────────────────────────────────────
+  - type: worker
+    name: contractrisk-worker
+    runtime: python
+    repo: https://github.com/your-org/contractrisk-edge
+    branch: main
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4 -Q ingestion,ai,notifications,embeddings,default
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: contractrisk-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: contractrisk-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: contractrisk-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: contractrisk-redis
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: AUTH0_DOMAIN
+        sync: false
+      - key: AUTH0_AUDIENCE
+        sync: false
+      - key: DEV_AUTH_BYPASS
+        value: false
+
+  # ── Celery Beat Scheduler ───────────────────────────────────────
+  - type: worker
+    name: contractrisk-beat
+    runtime: python
+    repo: https://github.com/your-org/contractrisk-edge
+    branch: main
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: celery -A app.workers.celery_beat beat --loglevel=info
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: contractrisk-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: contractrisk-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: contractrisk-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: contractrisk-redis
+          property: connectionString
+
+  # ── Frontend ────────────────────────────────────────────────────
+  - type: web
+    name: contractrisk-frontend
+    runtime: node
+    repo: https://github.com/your-org/contractrisk-edge
+    branch: main
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        value: https://api.contractriskedge.com/api/v1
+      - key: AUTH0_SECRET
+        sync: false
+      - key: AUTH0_BASE_URL
+        value: https://app.contractriskedge.com
+      - key: AUTH0_ISSUER_BASE_URL
+        sync: false
+      - key: AUTH0_CLIENT_ID
+        sync: false
+      - key: AUTH0_CLIENT_SECRET
+        sync: false
+
+databases:
+  - name: contractrisk-db
+    plan: starter
+    databaseName: contractrisk_prod
+    ipAllowList: []
+
+redis:
+  - name: contractrisk-redis
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
