@@ -74,7 +74,7 @@ def _create_dev_token() -> str:
     ).rstrip(b"=").decode()
 
     # Simple dev secret for signing
-    secret = os.getenv("DEV_JWT_SECRET", "dev-secret-change-in-production")
+    secret = os.getenv("DEV_JWT_SECRET", "")
     signature = base64.urlsafe_b64encode(
         hmac.new(
             secret.encode(),

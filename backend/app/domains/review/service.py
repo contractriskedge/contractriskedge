@@ -252,6 +252,38 @@ class ReviewService:
                 rationale=note or "",
             )
             await self.risk_delta.persist_delta(delta)
+
+            # ── Persist review_decision_impact as audit event for cross-session timeline ──
+            try:
+                from app.domains.review.models import ContractReview as CRModel
+                review_row = await self.review_repo.session.execute(
+                    select(CRModel).where(
+                        CRModel.review_id == str(finding_row.review_id),
+                        CRModel.tenant_id == self.tenant_id,
+                    )
+                )
+                review_obj = review_row.scalar_one_or_none()
+                review_status_str = (
+                    review_obj.status.value if hasattr(review_obj.status, 'value')
+                    else str(review_obj.status) if review_obj else "unknown"
+                ) if review_obj else "unknown"
+
+                await self.audit_trail.record_decision_impact(
+                    review_id=str(finding_row.review_id),
+                    finding_id=finding_id,
+                    actor_id=self.user.id,
+                    decision_type=resolution,
+                    previous_state=old_resolution or "open",
+                    new_state=resolution,
+                    delta_amount=delta.delta_amount if hasattr(delta, 'delta_amount') else 0.0,
+                    delta_pct=delta.delta_pct if hasattr(delta, 'delta_pct') else 0.0,
+                    review_status=review_status_str,
+                    description=note or f"Finding resolved as {resolution}",
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to record decision impact audit event for finding %s", finding_id,
+                )
         except Exception:
             logger.exception("Failed to record risk delta for finding %s", finding_id)
 
@@ -550,6 +582,56 @@ class ReviewService:
                     rationale=review_notes or "",
                 )
                 await self.risk_delta.persist_delta(delta)
+
+                # ── Auto-sync: when redline is accepted/modified, auto-resolve linked finding ──
+                if decision in ("accepted", "modified") and finding and redline_row.finding_id:
+                    try:
+                        old_res = str(finding.resolution.value) if hasattr(finding.resolution, 'value') else (
+                            finding.resolution if finding.resolution else None
+                        )
+                        # Only auto-resolve if finding is still open
+                        if old_res is None or old_res in ("acknowledged",):
+                            res = FindingResolution("resolved")
+                            await self.review_repo.resolve_finding(
+                                str(redline_row.finding_id),
+                                self.tenant_id,
+                                res,
+                                f"Auto-resolved: redline {status}",
+                                self.user.id,
+                            )
+                            # Record audit event for the auto-resolution
+                            await self.audit_trail.record_finding_action(
+                                finding_id=str(redline_row.finding_id),
+                                review_id=str(redline_row.review_id),
+                                actor_id=self.user.id,
+                                resolution="resolved",
+                                before_resolution=old_res,
+                                description=(
+                                    f"Auto-resolved via redline {status} by {self.user.id}"
+                                ),
+                            )
+                            # Record decision impact audit event for cross-session timeline
+                            await self.audit_trail.record_decision_impact(
+                                review_id=str(redline_row.review_id),
+                                finding_id=str(redline_row.finding_id),
+                                actor_id=self.user.id,
+                                decision_type="resolved",
+                                previous_state=old_res or "open",
+                                new_state="resolved",
+                                delta_amount=delta.delta_amount if hasattr(delta, 'delta_amount') else 0.0,
+                                delta_pct=delta.delta_pct if hasattr(delta, 'delta_pct') else 0.0,
+                                review_status=status,
+                                description=f"Auto-resolved via redline {status}",
+                            )
+                            logger.info(
+                                "Auto-resolved finding %s via redline %s (%s)",
+                                redline_row.finding_id, redline_id, status,
+                            )
+                    except Exception:
+                        logger.exception(
+                            "Failed to auto-resolve finding %s via redline %s",
+                            redline_row.finding_id, redline_id,
+                        )
         except Exception:
             logger.exception("Failed to record risk delta for redline %s", redline_id)
 

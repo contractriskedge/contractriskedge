@@ -3,6 +3,13 @@
 Provides:
 - /api/v1/ws/events — WebSocket connection for real-time events
 - /api/v1/ws/health — Health check for the event system
+
+Delivery Protocol:
+- All events include a ``sequence_id`` for ordering
+- Clients should send ``{ type: "ack", event_id: "..." }`` to acknowledge delivery
+- On reconnect, clients can send ``{ type: "replay", last_sequence_id: 123 }``
+  to receive missed events from the outbox
+- Server sends ``{ type: "heartbeat" }`` every 30 seconds for keepalive
 """
 
 from __future__ import annotations
@@ -48,6 +55,17 @@ async def websocket_events(websocket: WebSocket):
     - upload.completed
     - ai.completed
     - recommendation.created
+    - recovery.action_taken
+    - recovery.review_flagged
+    - recovery.review_assigned
+    - recovery.max_escalation_reached
+    - recovery.cooldown_active
+
+    Client messages:
+    - ``{ type: "auth", token: "..." }`` — Authentication (required first message)
+    - ``{ type: "ack", event_id: "..." }`` — Acknowledge event delivery
+    - ``{ type: "replay", last_sequence_id: 123 }`` — Request replay of missed events
+    - ``{ type: "ping" }`` — Keepalive ping (server responds with pong)
 
     Usage:
         const ws = new WebSocket(`ws://localhost:8000/api/v1/ws/events`);
@@ -58,12 +76,29 @@ async def websocket_events(websocket: WebSocket):
             token: "your-jwt-token"
         }));
 
+        // Acknowledge events after processing
         ws.onmessage = (event) => {
-            const { type, data } = JSON.parse(event.data);
+            const { type, data, event_id } = JSON.parse(event.data);
+            // Process event...
+            // Send acknowledgement
+            ws.send(JSON.stringify({ type: "ack", event_id }));
+        };
+
+        // On reconnect, replay missed events
+        // Store last_sequence_id in localStorage
+        ws.onopen = () => {
+            const lastSeq = localStorage.getItem("ws_last_sequence");
+            if (lastSeq) {
+                ws.send(JSON.stringify({
+                    type: "replay",
+                    last_sequence_id: parseInt(lastSeq)
+                }));
+            }
         };
     """
     tenant_id = "unknown"
     authenticated = False
+    last_sequence_id = 0  # Track last seen sequence for replay
 
     try:
         # Accept the connection immediately
@@ -101,27 +136,66 @@ async def websocket_events(websocket: WebSocket):
         # Register connection
         await event_manager.connect(websocket, tenant_id)
 
-        # Send confirmation
+        # Send confirmation with server timestamp for clock skew estimation
         await websocket.send_json({
             "type": "connected",
             "data": {
                 "tenant_id": tenant_id[:8] + "...",
-                "timestamp": time.time(),
+                "server_time": time.time(),
+                "protocol_version": 1,
             },
         })
+
+        # Record reconnect (this is a reconnecting client if they have a sequence_id)
+        if msg.get("last_sequence_id"):
+            event_manager.record_reconnect(tenant_id)
+
+        # Check for replay request in the auth message
+        if msg.get("last_sequence_id"):
+            await _send_replay_events(websocket, tenant_id, msg["last_sequence_id"])
 
         # Keep connection alive, handle incoming messages
         while True:
             try:
                 raw = await asyncio.wait_for(websocket.receive_text(), timeout=30)
                 msg = json.loads(raw)
-                # Handle ping/pong for keepalive
-                if msg.get("type") == "ping":
-                    await websocket.send_json({"type": "pong"})
+                msg_type = msg.get("type")
+
+                if msg_type == "ping":
+                    await websocket.send_json({"type": "pong", "server_time": time.time()})
+
+                elif msg_type == "ack":
+                    # Client acknowledged an event — record delivery
+                    event_id = msg.get("event_id")
+                    if event_id:
+                        logger.debug("Event acknowledged: %s (tenant=%s)", event_id[:8], tenant_id[:8])
+
+                elif msg_type == "replay":
+                    # Client requesting replay of missed events
+                    last_seq = msg.get("last_sequence_id", 0)
+                    event_manager.record_reconnect(tenant_id)
+                    await _send_replay_events(websocket, tenant_id, last_seq)
+
+                elif msg_type == "subscribe":
+                    # Client subscribing to specific event types
+                    topics = msg.get("topics", [])
+                    event_manager.set_subscriptions(websocket, topics)
+                    await websocket.send_json({
+                        "type": "subscribed",
+                        "data": {
+                            "topics": topics if topics else ["* (all)"],
+                            "server_time": time.time(),
+                        },
+                    })
+                    logger.debug(
+                        "Client subscribed to topics: %s (tenant=%s)",
+                        topics if topics else ["*"], tenant_id[:8],
+                    )
+
             except asyncio.TimeoutError:
-                # Send heartbeat
+                # Send heartbeat to detect stale connections
                 try:
-                    await websocket.send_json({"type": "heartbeat"})
+                    await websocket.send_json({"type": "heartbeat", "server_time": time.time()})
                 except Exception:
                     break
 
@@ -132,6 +206,90 @@ async def websocket_events(websocket: WebSocket):
     finally:
         if authenticated:
             await event_manager.disconnect(websocket, tenant_id)
+
+
+async def _send_replay_events(websocket: WebSocket, tenant_id: str, last_sequence_id: int) -> None:
+    """Replay missed events from the outbox for a reconnecting client.
+
+    Queries the event_outbox table for events after the given sequence_id
+    and sends them to the client. This ensures no events are lost during
+    temporary disconnections.
+
+    The outbox table provides:
+    - Durable event storage (events survive server restarts)
+    - Monotonic sequence IDs for cursor-based replay
+    - Ordered delivery (events are replayed in creation order)
+    """
+    try:
+        from app.kernel.database.session import TenantAwareSessionFactory
+        from app.kernel.database.session import db_session_factory
+        from app.kernel.events.outbox import OutboxRepository
+
+        factory = db_session_factory
+        session = await factory.create_session(
+            tenant_id=tenant_id,
+            user_id="system",
+            user_role="admin",
+        )
+        try:
+            outbox = OutboxRepository(session)
+            # Get events after the client's last seen sequence
+            from app.kernel.events.outbox import OutboxEvent
+            from sqlalchemy import select
+
+            result = await session.execute(
+                select(OutboxEvent)
+                .where(
+                    OutboxEvent.tenant_id == tenant_id,
+                    OutboxEvent.sequence_id > last_sequence_id,
+                    OutboxEvent.delivery_state.in_(["pending", "delivered"]),
+                )
+                .order_by(OutboxEvent.sequence_id.asc())
+                .limit(200)
+            )
+            events = list(result.scalars().all())
+
+            if events:
+                await websocket.send_json({
+                    "type": "replay_start",
+                    "data": {
+                        "count": len(events),
+                        "from_sequence": last_sequence_id,
+                        "to_sequence": events[-1].sequence_id,
+                    },
+                })
+
+                for event in events:
+                    await websocket.send_json({
+                        "type": event.event_type,
+                        "event_id": str(event.event_id),
+                        "event_version": event.event_version or "1.0",
+                        "sequence_id": event.sequence_id,
+                        "data": event.payload,
+                        "timestamp": event.created_at.isoformat() if event.created_at else time.time(),
+                        "replayed": True,
+                    })
+
+                await websocket.send_json({
+                    "type": "replay_complete",
+                    "data": {"count": len(events)},
+                })
+
+                # Record replay metrics
+                event_manager.record_replay(tenant_id, len(events))
+
+                logger.info(
+                    "Replayed %d missed events to tenant %s (from seq %d)",
+                    len(events), tenant_id[:8], last_sequence_id,
+                )
+        finally:
+            await session.close()
+    except Exception as exc:
+        logger.warning("Failed to replay events for tenant %s: %s", tenant_id[:8], exc)
+        await websocket.send_json({
+            "type": "replay_error",
+            "data": {"message": "Failed to replay missed events", "error": str(exc)},
+        })
 
 
 @router.get("/health")

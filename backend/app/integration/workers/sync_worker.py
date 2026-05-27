@@ -5,7 +5,7 @@ Handles external document synchronization and retry of failed sync jobs.
 """
 
 import uuid
-from typing import Any, Optional
+from typing import Any, Optional, Optional
 
 from celery import Task
 from sqlalchemy import select

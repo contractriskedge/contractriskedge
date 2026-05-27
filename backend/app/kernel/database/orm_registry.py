@@ -12,6 +12,8 @@ import importlib
 _MODEL_MODULES = (
     "app.domains.tenants.models",
     "app.domains.ingestion.models",
+    "app.domains.ingestion.batch_models",
+    "app.domains.benchmark.models",
     "app.domains.extraction.models",
     "app.domains.vectors.models",
     "app.domains.search.models",
@@ -20,6 +22,7 @@ _MODEL_MODULES = (
     "app.domains.notify.models",
     "app.domains.playbook.models",
     "app.domains.admin.models",
+    "app.domains.admin.heartbeat_models",
 )
 
 

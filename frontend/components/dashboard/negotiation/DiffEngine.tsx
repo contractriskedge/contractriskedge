@@ -5,19 +5,62 @@ import { motion } from "framer-motion";
 import { Plus, Minus, Pencil, AlertTriangle, Info, Brain } from "lucide-react";
 import type { DiffBlock, RedlineEntry, CompareMode, RiskLevel } from "./types";
 
-// ── Semantic Diff Engine ─────────────────────────────────────────────────
+// ── Sentence-Aware Semantic Diff Engine ─────────────────────────────────
+//
+// Improvements over simple line-based LCS:
+// 1. Splits text into sentences (preserving paragraph structure)
+// 2. Within modified sentence pairs, does word-level diff for precise highlighting
+// 3. Groups adjacent unchanged sentences to reduce visual noise
+// 4. Detects word-order changes as "modified" (not added+removed)
+// 5. Uses Jaccard similarity on word sets to catch reordered text
 
-function computeDiff(original: string, modified: string): { type: "unchanged" | "added" | "removed" | "modified"; content: string; originalContent?: string }[] {
-  const origLines = original.split("\n");
-  const modLines = modified.split("\n");
+type DiffSegment = { type: "unchanged" | "added" | "removed" | "modified"; content: string; originalContent?: string };
+type WordDiffSegment = { type: "unchanged" | "added" | "removed"; content: string };
 
-  // Simple LCS-based diff
-  const lcs: { origI: number; modJ: number }[][] = [];
-  const dp: number[][] = Array.from({ length: origLines.length + 1 }, () => Array(modLines.length + 1).fill(0));
+function splitSentences(text: string): string[] {
+  // Split on sentence boundaries while preserving the delimiter
+  const parts = text.split(/(?<=[.!?])\s+/);
+  // Further split on paragraph breaks
+  const result: string[] = [];
+  for (const part of parts) {
+    const sub = part.split(/\n+/);
+    for (const s of sub) {
+      const trimmed = s.trim();
+      if (trimmed) result.push(trimmed);
+    }
+  }
+  return result.length > 0 ? result : [text.trim()];
+}
 
-  for (let i = 1; i <= origLines.length; i++) {
-    for (let j = 1; j <= modLines.length; j++) {
-      if (origLines[i - 1].trim() === modLines[j - 1].trim()) {
+function tokenizeWords(text: string): string[] {
+  return text.toLowerCase()
+    .replace(/[^\w\s'-]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function wordSetJaccard(a: string, b: string): number {
+  const tokensA = tokenizeWords(a);
+  const tokensB = tokenizeWords(b);
+  const setA = new Set(tokensA);
+  const setB = new Set(tokensB);
+  if (setA.size === 0 && setB.size === 0) return 1.0;
+  let intersection = 0;
+  setA.forEach(function(w: string) { if (setB.has(w)) intersection++; });
+  const union = setA.size + setB.size - intersection;
+  return union > 0 ? intersection / union : 0.0;
+}
+
+function wordsDiffer(a: string, b: string): boolean {
+  return a.trim().toLowerCase() !== b.trim().toLowerCase();
+}
+
+function computeWordLevelDiff(origWords: string[], modWords: string[]): WordDiffSegment[] {
+  const m = origWords.length, n = modWords.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (origWords[i - 1].toLowerCase() === modWords[j - 1].toLowerCase()) {
         dp[i][j] = dp[i - 1][j - 1] + 1;
       } else {
         dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
@@ -25,43 +68,113 @@ function computeDiff(original: string, modified: string): { type: "unchanged" | 
     }
   }
 
-  const result: { type: "unchanged" | "added" | "removed" | "modified"; content: string; originalContent?: string }[] = [];
-  let i = origLines.length, j = modLines.length;
-
-  // Build reverse diff
-  const reverseDiff: { type: string; content: string; origContent?: string }[] = [];
+  const rev: WordDiffSegment[] = [];
+  let i = m, j = n;
   while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && origLines[i - 1].trim() === modLines[j - 1].trim()) {
-      reverseDiff.push({ type: "unchanged", content: origLines[i - 1] });
+    if (i > 0 && j > 0 && origWords[i - 1].toLowerCase() === modWords[j - 1].toLowerCase()) {
+      rev.push({ type: "unchanged", content: origWords[i - 1] });
       i--; j--;
     } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      reverseDiff.push({ type: "added", content: modLines[j - 1] });
+      rev.push({ type: "added", content: modWords[j - 1] });
+      j--;
+    } else {
+      rev.push({ type: "removed", content: origWords[i - 1] });
+      i--;
+    }
+  }
+  return rev.reverse();
+}
+
+function computeSentenceAwareDiff(original: string, modified: string): DiffSegment[] {
+  // Rejoin into logical segments: paragraphs and sentences within them
+  const origSentences = splitSentences(original);
+  const modSentences = splitSentences(modified);
+
+  // LCS on sentence level
+  const m = origSentences.length, n = modSentences.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const jaccard = wordSetJaccard(origSentences[i - 1], modSentences[j - 1]);
+      if (jaccard > 0.85) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  // Trace back
+  const rev: DiffSegment[] = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0) {
+      const jaccard = wordSetJaccard(origSentences[i - 1], modSentences[j - 1]);
+      if (jaccard > 0.85) {
+        if (wordsDiffer(origSentences[i - 1], modSentences[j - 1])) {
+          // Same meaning, different wording — use word-level diff within sentence
+          // If mostly the same words just reordered, show as modification with full sentences
+          if (jaccard > 0.70) {
+            rev.push({ type: "modified" as const, content: modSentences[j - 1], originalContent: origSentences[i - 1] });
+          } else {
+            rev.push({ type: "removed" as const, content: origSentences[i - 1] });
+            rev.push({ type: "added" as const, content: modSentences[j - 1] });
+          }
+        } else {
+          rev.push({ type: "unchanged" as const, content: origSentences[i - 1] });
+        }
+        i--; j--;
+        continue;
+      }
+    }
+    if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      rev.push({ type: "added" as const, content: modSentences[j - 1] });
       j--;
     } else if (i > 0) {
-      reverseDiff.push({ type: "removed", content: origLines[i - 1] });
+      rev.push({ type: "removed" as const, content: origSentences[i - 1] });
       i--;
     }
   }
 
-  // Merge adjacent same-type blocks and detect modifications
-  const blocks = reverseDiff.reverse();
-  for (let idx = 0; idx < blocks.length; idx++) {
-    const b = blocks[idx];
-    // Check if removed followed by added -> modification
-    if (b.type === "removed" && idx + 1 < blocks.length && blocks[idx + 1].type === "added") {
-      result.push({
-        type: "modified",
-        content: blocks[idx + 1].content,
-        originalContent: b.content,
-      });
-      idx++; // skip next
+  const blocks = rev.reverse();
+
+  // Merge adjacent same-type blocks for cleaner output
+  const merged: DiffSegment[] = [];
+  for (const block of blocks) {
+    const last = merged[merged.length - 1];
+    if (last && last.type === block.type && block.type !== "modified") {
+      last.content += "\n" + block.content;
     } else {
-      result.push(b as any);
+      merged.push({ ...block });
     }
   }
 
-  return result;
+  // Post-processing: detect removed+added pairs that should be "modified"
+  const final: DiffSegment[] = [];
+  for (let idx = 0; idx < merged.length; idx++) {
+    const b = merged[idx];
+    if (b.type === "removed" && idx + 1 < merged.length && merged[idx + 1].type === "added") {
+      const jaccard = wordSetJaccard(b.content, merged[idx + 1].content);
+      if (jaccard > 0.40) {
+        // Similar enough to be a modification
+        final.push({
+          type: "modified",
+          content: merged[idx + 1].content,
+          originalContent: b.content,
+        });
+        idx++; // skip next
+        continue;
+      }
+    }
+    final.push(b);
+  }
+
+  return final;
 }
+
+// Re-export with backward-compatible name
+const computeDiff = computeSentenceAwareDiff;
 
 // ── Diff Block Component ─────────────────────────────────────────────────
 

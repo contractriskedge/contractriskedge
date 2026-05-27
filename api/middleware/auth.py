@@ -55,7 +55,7 @@ def _decode_dev_token(token: str) -> Optional[TokenPayload]:
         header_b64, payload_b64, signature_b64 = parts
 
         # Verify signature with dev secret
-        secret = os.getenv("DEV_JWT_SECRET", "dev-secret-change-in-production")
+        secret = os.getenv("DEV_JWT_SECRET", "")
         expected_sig = base64.urlsafe_b64encode(
             hmac.new(
                 secret.encode(),

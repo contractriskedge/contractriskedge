@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import { Sidebar } from "./Sidebar";
@@ -14,11 +14,60 @@ import { AdminConsole } from "./AdminConsole";
 import { AiCopilot } from "@/components/ai-copilot/AiCopilot";
 import { copilotContext } from "@/components/ai-copilot/context";
 import { useReviews } from "@/services/hooks/useReviews";
+import { PortfolioDashboard } from "./PortfolioDashboard";
+import { CfoView } from "./CfoView";
+import { LegalView } from "./LegalView";
+import { ProcurementView } from "./ProcurementView";
+import { ExecutiveDashboard } from "./ExecutiveDashboard";
+import { ContractsPage } from "./ContractsPage";
+import { BenchmarkPage } from "./BenchmarkPage";
+import { SettingsPage } from "./SettingsPage";
+import { RelationshipGraph } from "./RelationshipGraph";
+import { PlaceholderView } from "./shared/PlaceholderView";
+import { PolicyCenter } from "@/components/policy/PolicyCenter";
+import { ExplainabilityPanel } from "@/components/explainability/ExplainabilityPanel";
+import { ClauseIntelligenceView } from "@/components/clause-intelligence/ClauseIntelligenceView";
+import { ExecutiveDashboardView } from "@/components/executive/ExecutiveDashboard";
+import { TenantSettings } from "@/components/tenant/TenantSettings";
+import { DashboardProvider } from "./shared/DashboardContext";
 import { Sun, Moon, ZoomIn, ZoomOut, FileText } from "lucide-react";
 
-// Only views with real backend API integration are active.
-// Non-integrated views are removed until they have real backend endpoints.
-type ViewType = "ingestion" | "search" | "analytics" | "review" | "admin";
+// ── Lazy-loaded Sprint 10 dashboards ──────────────────────────────
+const ExecutiveCommandCenter = lazy(() =>
+  import("./command-center/ExecutiveCommandCenter").then((m) => ({ default: m.ExecutiveCommandCenter }))
+);
+const ReviewerOperations = lazy(() =>
+  import("./operations/ReviewerOperations").then((m) => ({ default: m.ReviewerOperations }))
+);
+const GovernanceDashboard = lazy(() =>
+  import("./governance/GovernanceDashboard").then((m) => ({ default: m.GovernanceDashboard }))
+);
+const AiOperationsDashboard = lazy(() =>
+  import("./ai-ops/AiOperationsDashboard").then((m) => ({ default: m.AiOperationsDashboard }))
+);
+const WorkflowIntelligenceDashboard = lazy(() =>
+  import("./workflow-intelligence/WorkflowIntelligenceDashboard").then((m) => ({ default: m.WorkflowIntelligenceDashboard }))
+);
+
+function DashboardSkeleton() {
+  return (
+    <div className="p-6 space-y-4 animate-pulse">
+      <div className="h-8 bg-gray-200 dark:bg-navy-700 rounded w-64" />
+      <div className="h-4 bg-gray-200 dark:bg-navy-700 rounded w-96" />
+      <div className="grid grid-cols-2 gap-4 mt-6">
+        <div className="h-48 bg-gray-200 dark:bg-navy-700 rounded-xl" />
+        <div className="h-48 bg-gray-200 dark:bg-navy-700 rounded-xl" />
+        <div className="h-48 bg-gray-200 dark:bg-navy-700 rounded-xl" />
+        <div className="h-48 bg-gray-200 dark:bg-navy-700 rounded-xl" />
+      </div>
+    </div>
+  );
+}
+
+// Full enterprise view types — all workspaces available in the sidebar.
+// Views without full backend integration show a placeholder indicating
+// the module is available but pending backend completion.
+type ViewType = "portfolio" | "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "executive-dashboard" | "policy" | "clause-intelligence" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard";
 
 export function DashboardLayout() {
   const { user, logout } = useAuth();
@@ -50,6 +99,7 @@ export function DashboardLayout() {
 
   const renderView = () => {
     switch (activeView) {
+      // ── Core Workspaces ──
       case "ingestion":
         return <IngestionCenter onReviewNavigate={handleNavigateToReview} />;
       case "search":
@@ -63,10 +113,9 @@ export function DashboardLayout() {
                 setActiveView("review");
               } else if (view === "search" && params?.query) {
                 setActiveView("search");
-                // Store search query for SearchHub to pick up
                 sessionStorage.setItem("searchQuery", params.query);
               } else {
-                setActiveView(view);
+                setActiveView(view as ViewType);
               }
             }}
           />
@@ -88,14 +137,115 @@ export function DashboardLayout() {
             />
           </div>
         );
+
+      // ── Sprint 10 — Unified Dashboards ──
+      case "executive-command-center":
+        return (
+          <Suspense fallback={<DashboardSkeleton />}>
+            <ExecutiveCommandCenter />
+          </Suspense>
+        );
+      case "reviewer-operations":
+        return (
+          <Suspense fallback={<DashboardSkeleton />}>
+            <ReviewerOperations />
+          </Suspense>
+        );
+      case "governance-dashboard":
+        return (
+          <Suspense fallback={<DashboardSkeleton />}>
+            <GovernanceDashboard />
+          </Suspense>
+        );
+      case "ai-operations-dashboard":
+        return (
+          <Suspense fallback={<DashboardSkeleton />}>
+            <AiOperationsDashboard />
+          </Suspense>
+        );
+      case "workflow-intelligence-dashboard":
+        return (
+          <Suspense fallback={<DashboardSkeleton />}>
+            <WorkflowIntelligenceDashboard />
+          </Suspense>
+        );
+
+      // ── Enterprise Workspaces ──
+      case "portfolio":
+        return <PortfolioDashboard />;
+      case "executive-dashboard":
+        return <ExecutiveDashboard />;
+      case "cfo":
+        return <CfoView />;
+      case "legal":
+        return <LegalView />;
+      case "procurement":
+        return <ProcurementView />;
+      case "compliance":
+        return <PlaceholderView
+          title="Compliance Center"
+          description="Regulatory compliance tracking, obligation management, and audit readiness."
+          icon="shield"
+          status="In Development"
+        />;
+
+      // ── Advanced Modules ──
+      case "contracts":
+        return <ContractsPage />;
+      case "clause-library":
+        return <PlaceholderView
+          title="Clause Library"
+          description="Browse, search, and manage standard and custom contract clauses."
+          icon="library"
+          status="Coming Soon"
+        />;
+      case "obligations":
+        return <PlaceholderView
+          title="Obligations Management"
+          description="Track and manage contractual obligations across all active contracts."
+          icon="check"
+          status="Coming Soon"
+        />;
+      case "negotiation":
+        return <PlaceholderView
+          title="Negotiation Workspace"
+          description="AI-assisted contract negotiation with redline comparison and playbook guidance."
+          icon="git-merge"
+          status="In Development"
+        />;
+      case "workflows":
+        return <PlaceholderView
+          title="Workflow Automation"
+          description="Design and monitor automated review workflows, approval chains, and SLA policies."
+          icon="workflow"
+          status="In Development"
+        />;
+      case "benchmarks":
+        return <BenchmarkPage />;
+      case "relationships":
+        return <RelationshipGraph />;
+
+      // ── Sprint 7 — Enterprise Intelligence ──
+      case "policy":
+        return <PolicyCenter />;
+      case "clause-intelligence":
+        return <ClauseIntelligenceView />;
+      case "tenant-settings":
+        return user?.tenant_id ? <TenantSettings tenantId={user.tenant_id} /> : <SettingsPage />;
+
+      // ── Administration ──
       case "admin":
         return <AdminConsole />;
+      case "settings":
+        return <SettingsPage />;
+
       default:
-        return <IngestionCenter />;
+        return <IngestionCenter onReviewNavigate={handleNavigateToReview} />;
     }
   };
 
   return (
+    <DashboardProvider>
     <div
       className={`flex h-screen bg-gray-50 dark:bg-navy-900 transition-colors duration-200 ${
         prefersReducedMotion ? "" : "animate-fade-in"
@@ -108,7 +258,6 @@ export function DashboardLayout() {
         onViewChange={setActiveView}
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-        userRole={user?.role || "viewer"}
       />
       <div className="flex-1 flex flex-col min-w-0">
         <TopNav
@@ -167,5 +316,6 @@ export function DashboardLayout() {
       {/* Global AI Copilot */}
       <AiCopilot />
     </div>
+    </DashboardProvider>
   );
 }

@@ -34,6 +34,7 @@ class Roles:
     SECURITY = "security"
     READ_ONLY = "viewer"
     AUDITOR = "auditor"
+    DEVELOPER = "developer"  # Dev bypass role — scoped, NOT admin
 
     # ── Permission Sets ──
     _PERMISSIONS: dict[str, set[str]] = {
@@ -47,6 +48,15 @@ class Roles:
             "admin:tenant",
             "reviews:export",
             "notifications:manage",
+            "benchmarks:read", "benchmarks:write", "benchmarks:export", "benchmarks:seed", "benchmarks:admin",
+        },
+        DEVELOPER: {
+            "contracts:read", "contracts:write",
+            "ai:analyze", "ai:view",
+            "workflows:read", "workflows:write",
+            "audit:read",
+            "reviews:export",
+            "benchmarks:read", "benchmarks:write",
         },
         LEGAL_REVIEWER: {
             "contracts:read", "contracts:approve",
@@ -54,12 +64,14 @@ class Roles:
             "workflows:read", "workflows:write", "workflows:approve", "workflows:escalate",
             "audit:read",
             "reviews:export",
+            "benchmarks:read",
         },
         REVIEWER: {
             "contracts:read",
             "ai:view",
             "workflows:read", "workflows:write",
             "reviews:export",
+            "benchmarks:read",
         },
         PROCUREMENT: {
             "contracts:read",
@@ -67,6 +79,7 @@ class Roles:
             "workflows:read", "workflows:write", "workflows:escalate",
             "vendors:read",
             "reviews:export",
+            "benchmarks:read",
         },
         SECURITY: {
             "contracts:read",
@@ -74,6 +87,7 @@ class Roles:
             "workflows:read", "workflows:write", "workflows:approve", "workflows:escalate",
             "audit:read",
             "reviews:export",
+            "benchmarks:read",
         },
         READ_ONLY: {
             "contracts:read",

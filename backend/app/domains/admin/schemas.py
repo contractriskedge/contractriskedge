@@ -125,3 +125,52 @@ class SystemHealthResponse(BaseModel):
     ai: dict = Field(default_factory=lambda: {"model": "gpt-4o", "avg_latency_ms": 0, "failures_24h": 0, "tokens_24h": 0, "cost_24h": 0})
     storage: dict = Field(default_factory=lambda: {"total_documents": 0, "total_chunks": 0, "storage_bytes": 0})
     uptime_seconds: float = 0
+
+
+# ── Diagnostics ─────────────────────────────────────────────────
+
+class DiagnosticsResponse(BaseModel):
+    """Aggregate system diagnostics for the observability dashboard.
+
+    Combines live Prometheus metric snapshots, WebSocket health,
+    reconnect storm status, and database diagnostics into a single
+    response for the diagnostics dashboard.
+    """
+    timestamp: str = ""
+    uptime_seconds: float = 0
+    websocket: dict = Field(default_factory=dict)
+    reconnect_storms: dict = Field(default_factory=dict)
+    prometheus: dict = Field(default_factory=dict)
+    database: dict = Field(default_factory=dict)
+
+
+class EventChainResponse(BaseModel):
+    """A single event in a correlation chain."""
+    event_id: str = ""
+    event_type: str = ""
+    event_version: str = ""
+    sequence_id: int = 0
+    delivery_state: str = ""
+    delivery_attempts: int = 0
+    last_error: Optional[str] = None
+    delivered_at: Optional[str] = None
+    acknowledged_at: Optional[str] = None
+    dead_letter_reason: Optional[str] = None
+    created_at: Optional[str] = None
+    payload: Optional[dict] = None
+
+
+class OutboxDiagnosticsResponse(BaseModel):
+    """Outbox audit explorer response."""
+    counts: dict = Field(default_factory=dict)
+    pending_count: int = 0
+    recent_events: list[dict] = Field(default_factory=list)
+    dead_letters: list[dict] = Field(default_factory=list)
+
+
+class WorkerDiagnosticsResponse(BaseModel):
+    """Worker diagnostics response."""
+    workers: dict = Field(default_factory=dict)
+    queues: dict = Field(default_factory=dict)
+    stuck_jobs: dict = Field(default_factory=dict)
+    heartbeats: list[dict] = Field(default_factory=list)

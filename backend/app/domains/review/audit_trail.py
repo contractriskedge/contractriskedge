@@ -221,6 +221,54 @@ class AuditTrailService:
             },
         )
 
+    async def record_decision_impact(
+        self,
+        review_id: str,
+        finding_id: str,
+        actor_id: str,
+        decision_type: str,
+        previous_state: str,
+        new_state: str,
+        delta_amount: float = 0.0,
+        delta_pct: float = 0.0,
+        review_status: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> None:
+        """Record a review decision impact — links finding resolution to risk delta.
+
+        This creates a cross-session traceable timeline of decisions and their
+        risk impact, enabling the risk delta timeline and version impact views.
+        """
+        await self.record(
+            event_type="review.decision_impact",
+            entity_type="finding",
+            entity_id=finding_id,
+            actor_id=actor_id,
+            action="resolve",
+            before_state={
+                "finding_id": finding_id,
+                "resolution": previous_state,
+                "review_id": review_id,
+            },
+            after_state={
+                "finding_id": finding_id,
+                "resolution": new_state,
+                "delta_amount": delta_amount,
+                "delta_pct": delta_pct,
+                "review_status": review_status,
+            },
+            description=description or f"Decision impact: {previous_state} → {new_state} (Δ={delta_amount:+.4f})",
+            metadata={
+                "review_id": review_id,
+                "decision_type": decision_type,
+                "previous_state": previous_state,
+                "new_state": new_state,
+                "delta_amount": delta_amount,
+                "delta_pct": delta_pct,
+                "review_status": review_status,
+            },
+        )
+
     async def record_version_action(
         self,
         version_id: str,

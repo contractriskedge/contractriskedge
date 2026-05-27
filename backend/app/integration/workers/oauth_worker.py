@@ -6,7 +6,7 @@ Periodically refreshes expiring OAuth2 tokens to maintain connectivity.
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy import select
 from structlog import get_logger

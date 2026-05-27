@@ -10,7 +10,7 @@ Periodically runs to:
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy import delete, select, update
 from structlog import get_logger

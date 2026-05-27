@@ -13,6 +13,7 @@ from sqlalchemy import (
     Enum as SAEnum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Text,
     UniqueConstraint,
@@ -412,6 +413,137 @@ class ContractDocumentVersion(Base):
 
     __table_args__ = (
         UniqueConstraint("review_id", "version_number", name="uq_version_per_review"),
+    )
+
+
+class RecoveryAction(Base):
+    """Audit trail for automated workflow recovery actions taken by the recovery daemon.
+
+    Records every recovery action (stuck upload, stuck AI run, abandoned review)
+    with timestamps, action type, and outcome. Enables:
+    - Cooldown enforcement (same entity not re-recovered within cooldown window)
+    - Action deduplication (idempotency guards)
+    - Escalation governance (max escalation count enforcement)
+    - Operational audit trail (who recovered what and when)
+    """
+    __tablename__ = "recovery_actions"
+
+    action_id = Column(UUID, primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID, ForeignKey("tenants.tenant_id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # The entity that was recovered
+    entity_type = Column(Text, nullable=False)  # 'upload', 'ai_run', 'review'
+    entity_id = Column(Text, nullable=False, index=True)  # UUID of the recovered entity
+
+    # What was done
+    action_type = Column(Text, nullable=False)  # 're-queued', 'marked_failed', 'flagged_abandoned', 'retry_incremented', 'priority_bump'
+    previous_state = Column(Text, nullable=True)  # State before recovery
+    new_state = Column(Text, nullable=True)       # State after recovery
+
+    # Escalation governance
+    escalation_count = Column(Integer, nullable=False, default=0)
+    cooldown_until = Column(DateTime(timezone=True), nullable=True)  # No further recovery until this time
+
+    # Outcome
+    success = Column(Boolean, nullable=False, default=True)
+    message = Column(Text, nullable=True)
+
+    # Immutable audit
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_recovery_actions_entity", "entity_type", "entity_id", "created_at"),
+        Index("ix_recovery_actions_tenant_entity", "tenant_id", "entity_type", "entity_id"),
+    )
+
+
+class AssignmentAudit(Base):
+    """Immutable audit trail for all review assignment and reassignment events.
+
+    Records every assignment, reassignment, and auto-assignment with:
+    - Previous and new assignee
+    - Assignment source (manual, routing_engine, recovery_engine)
+    - Reason and context
+    - Reviewer override events
+
+    Enables:
+    - Full assignment lineage
+    - Auto-assignment explainability
+    - Reviewer override tracking
+    - Assignment dispute resolution
+    """
+    __tablename__ = "assignment_audit"
+
+    audit_id = Column(UUID, primary_key=True, default=uuid.uuid4)
+    review_id = Column(UUID, ForeignKey("contract_reviews.review_id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id = Column(UUID, ForeignKey("tenants.tenant_id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Assignment details
+    previous_assignee = Column(Text, nullable=True)  # NULL if first assignment
+    new_assignee = Column(Text, nullable=False)
+    assigned_by = Column(Text, nullable=False)  # user_id or 'routing_engine', 'recovery_engine'
+
+    # Source and context
+    assignment_source = Column(Text, nullable=False)  # 'manual', 'routing_rule', 'recovery_auto', 'recovery_reassign', 'override'
+    reason = Column(Text, nullable=True)
+
+    # Override tracking
+    is_override = Column(Boolean, nullable=False, default=False)
+    override_previous_assignee = Column(Text, nullable=True)  # Who was overridden
+    override_justification = Column(Text, nullable=True)
+
+    # Workload context at time of assignment
+    reviewer_active_count = Column(Integer, nullable=True)  # How many active reviews the assignee had
+    reviewer_max_capacity = Column(Integer, nullable=True)  # Max capacity at the time
+
+    # Explainability metadata
+    explainability = Column(JSONB, nullable=True)  # {priority_score, recovery_tier, risk_score, sla_hours_remaining, ...}
+
+    # Immutable audit
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_assignment_audit_review", "review_id", "created_at"),
+        Index("ix_assignment_audit_assignee", "tenant_id", "new_assignee", "created_at"),
+    )
+
+
+class AssignmentLock(Base):
+    """Assignment lock states to prevent conflicting auto-assignments.
+
+    When the recovery engine auto-assigns a review, it creates a lock
+    that prevents other automated processes from simultaneously
+    reassigning the same review. Locks are temporary (TTL-based).
+
+    Lock states:
+    - 'active': Assignment in progress, no other automation should touch this review
+    - 'locked': Assignment completed, review is locked to the assignee
+    - 'released': Assignment completed and released by reviewer
+    - 'expired': TTL exceeded, lock automatically expired
+    - 'overridden': Lock overridden by manual intervention
+    """
+    __tablename__ = "assignment_locks"
+
+    lock_id = Column(UUID, primary_key=True, default=uuid.uuid4)
+    review_id = Column(UUID, ForeignKey("contract_reviews.review_id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    tenant_id = Column(UUID, ForeignKey("tenants.tenant_id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Lock state
+    lock_state = Column(Text, nullable=False, default='active')  # 'active', 'locked', 'released', 'expired', 'overridden'
+    assignee_id = Column(Text, nullable=False)
+    acquired_by = Column(Text, nullable=False)  # 'recovery_engine', 'routing_engine', 'manual'
+
+    # TTL
+    acquired_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    released_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Override tracking
+    overridden_by = Column(Text, nullable=True)
+    override_reason = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_assignment_locks_state", "lock_state", "tenant_id"),
     )
 
 

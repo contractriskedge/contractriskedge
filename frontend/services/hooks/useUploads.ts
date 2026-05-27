@@ -15,6 +15,11 @@ import {
 import { uploadService } from "@/services/api/uploads";
 import { reviewKeys } from "@/services/hooks/useReviews";
 import type { UploadStatusResponse, UploadResponse } from "@/services/api/client";
+import {
+  getGlobalConnectionState,
+  processingInterval,
+  usePollCounter,
+} from "@/services/hooks/useAdaptivePolling";
 
 // ── Query Key Factory ─────────────────────────────────────────────
 
@@ -56,30 +61,57 @@ export function useUpload(uploadId: string | undefined) {
   });
 }
 
-// ── Upload Status (Polling Hook) ──────────────────────────────────
+// ── Upload Status (Adaptive Polling Hook) ─────────────────────────
 /**
- * Polls upload ingestion status with exponential backoff.
+ * Polls upload ingestion status with WebSocket-aware adaptive polling.
+ *
+ * Polling strategy:
+ * - WebSocket connected → poll every 120s (realtime events drive updates)
+ * - WebSocket reconnecting → poll every 10s
+ * - WebSocket disconnected/failed → poll every 5s
+ * - Active processing → exponential backoff (2s → 3s → 4.5s → ... → 30s max)
+ *
  * Automatically stops when state is REVIEW_READY, FAILED, CANCELLED, or QUARANTINED.
  */
 export function useUploadStatus(
   uploadId: string | undefined,
   options?: { enabled?: boolean },
 ) {
+  const { pollCount, incrementPollCount, resetPollCount } = usePollCounter();
+
   return useQuery({
     queryKey: uploadKeys.status(uploadId!),
     queryFn: () => uploadService.getStatus(uploadId!),
     enabled: !!uploadId && (options?.enabled ?? true),
     refetchInterval: (query) => {
-      if (!query.state.data) return 2000;
+      if (!query.state.data) {
+        // No data yet — use connection-aware initial interval
+        const connState = getGlobalConnectionState();
+        if (connState === "connected") return 120_000;
+        if (connState === "reconnecting") return 10_000;
+        return 5_000;
+      }
 
       const terminalStates = [
         "review_ready", "failed", "cancelled", "quarantined",
       ];
       if (terminalStates.includes(query.state.data.ingestion_state)) {
+        resetPollCount();
         return false; // Stop polling
       }
 
-      return 2000; // Poll every 2 seconds during active ingestion
+      // Active processing — use exponential backoff
+      const isProcessing = !terminalStates.includes(query.state.data.ingestion_state);
+      if (isProcessing) {
+        incrementPollCount();
+        return processingInterval(pollCount);
+      }
+
+      // WebSocket-aware fallback
+      const connState = getGlobalConnectionState();
+      if (connState === "connected") return 120_000;
+      if (connState === "reconnecting") return 10_000;
+      return 5_000;
     },
     staleTime: 0,
     gcTime: 30_000,
@@ -213,3 +245,90 @@ export function useGetOrCreateReview() {
 
 // Need to import reviewService for the mutation above
 import { reviewService } from "@/services/api/reviews";
+
+// ── Batch Upload Query Keys ───────────────────────────────────────
+
+export const batchKeys = {
+  all: ["batches"] as const,
+  lists: () => [...batchKeys.all, "list"] as const,
+  list: (params?: { page?: number; page_size?: number; status?: string }) =>
+    [...batchKeys.lists(), params] as const,
+  details: () => [...batchKeys.all, "detail"] as const,
+  detail: (id: string) => [...batchKeys.details(), id] as const,
+};
+
+/** List batch uploads */
+export function useBatches(params?: { page?: number; page_size?: number; status?: string }) {
+  return useQuery({
+    queryKey: batchKeys.list(params),
+    queryFn: () => uploadService.listBatches(params),
+    staleTime: 15_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/** Get batch details with per-file status (polls during active processing) */
+export function useBatchDetail(batchId: string | undefined) {
+  return useQuery({
+    queryKey: batchKeys.detail(batchId!),
+    queryFn: () => uploadService.getBatch(batchId!),
+    enabled: !!batchId,
+    refetchInterval: (query) => {
+      if (!query.state.data) return 3000;
+      const terminalStates = ["completed", "failed", "cancelled", "partial"];
+      if (terminalStates.includes(query.state.data.status)) {
+        return false;
+      }
+      return 3000;
+    },
+    staleTime: 0,
+    gcTime: 30_000,
+  });
+}
+
+/** Create a new batch upload container */
+export function useCreateBatch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name?: string) => uploadService.createBatch(name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: batchKeys.lists() });
+    },
+  });
+}
+
+/** Upload a file to an existing batch */
+export function useUploadBatchFile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ batchId, file }: { batchId: string; file: File }) =>
+      uploadService.uploadBatchFile(batchId, file),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: batchKeys.detail(variables.batchId) });
+    },
+  });
+}
+
+/** Trigger batch processing */
+export function useProcessBatch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (batchId: string) => uploadService.processBatch(batchId),
+    onSuccess: (_data, batchId) => {
+      queryClient.invalidateQueries({ queryKey: batchKeys.detail(batchId) });
+    },
+  });
+}
+
+/** Cancel a batch */
+export function useCancelBatch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (batchId: string) => uploadService.cancelBatch(batchId),
+    onSuccess: (_data, batchId) => {
+      queryClient.invalidateQueries({ queryKey: batchKeys.detail(batchId) });
+      queryClient.invalidateQueries({ queryKey: batchKeys.lists() });
+    },
+  });
+}

@@ -218,6 +218,110 @@ export async function getBenchmarkScore(
   );
 }
 
+// ── Benchmark Corpus ──
+
+export interface BenchmarkCorpus {
+  corpus_id: string;
+  name: string;
+  description: string | null;
+  source: string;
+  industry: string | null;
+  geography: string | null;
+  contract_type: string | null;
+  document_count: number;
+  clause_count: number;
+  is_active: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BenchmarkClause {
+  clause_id: string;
+  corpus_id: string;
+  category: string;
+  clause_text: string;
+  clause_text_snippet: string | null;
+  source_document: string | null;
+  risk_score: number | null;
+  is_favorable: string | null;
+  created_at: string;
+}
+
+export interface ClauseBenchmarkScore {
+  clause_type: string;
+  your_score: number;
+  market_median: number;
+  market_p25: number | null;
+  market_p75: number | null;
+  deviation: number | null;
+  deviation_percent: number | null;
+  direction: string | null;
+  percentile: number;
+  sample_size: number;
+  confidence: number | null;
+  category: string;
+}
+
+export interface BenchmarkDashboardData {
+  kpis: BenchmarkKpi[];
+  clause_benchmarks: ClauseBenchmarkScore[];
+  industry_comparisons: IndustryComparison[];
+  total_corpora: number;
+  total_clauses: number;
+}
+
+export interface BenchmarkKpi {
+  label: string;
+  value: string;
+  trend: number;
+  trend_direction: string;
+  severity: string;
+  tooltip: string;
+}
+
+export interface IndustryComparison {
+  industry: string;
+  your_score: number;
+  industry_avg: number;
+  industry_p10: number | null;
+  industry_p90: number | null;
+  deviation: number | null;
+  sample_size: number;
+}
+
+export async function listBenchmarkCorpora(token: string): Promise<{ items: BenchmarkCorpus[]; total: number }> {
+  return fetchApi("/benchmarks/corpora", { token });
+}
+
+export async function getBenchmarkCorpus(token: string, corpusId: string): Promise<BenchmarkCorpus> {
+  return fetchApi(`/benchmarks/corpora/${corpusId}`, { token });
+}
+
+export async function createBenchmarkCorpus(token: string, data: { name: string; description?: string; industry?: string; geography?: string; contract_type?: string }): Promise<BenchmarkCorpus> {
+  return fetchApi("/benchmarks/corpora", { method: "POST", body: JSON.stringify(data), token });
+}
+
+export async function listBenchmarkClauses(token: string, corpusId: string, category?: string): Promise<BenchmarkClause[]> {
+  const params = category ? `?category=${encodeURIComponent(category)}` : "";
+  return fetchApi(`/benchmarks/corpora/${corpusId}/clauses${params}`, { token });
+}
+
+export async function addBenchmarkClause(token: string, corpusId: string, data: { category: string; clause_text: string; source_document?: string; risk_score?: number; is_favorable?: string }): Promise<BenchmarkClause> {
+  return fetchApi(`/benchmarks/corpora/${corpusId}/clauses`, { method: "POST", body: JSON.stringify(data), token });
+}
+
+export async function scoreClauses(token: string, data: { upload_id: string; corpus_id: string; clauses: { category: string; score: number }[] }): Promise<{ scores: ClauseBenchmarkScore[]; overall_percentile?: number; overall_risk_level?: string }> {
+  return fetchApi("/benchmarks/score", { method: "POST", body: JSON.stringify(data), token });
+}
+
+export async function getBenchmarkDashboard(token: string): Promise<BenchmarkDashboardData> {
+  return fetchApi("/benchmarks/dashboard", { token });
+}
+
+export async function seedBenchmarkData(token: string): Promise<{ message: string; corpora: Record<string, number> }> {
+  return fetchApi("/benchmarks/seed", { method: "POST", token });
+}
+
 // ── Evaluation ──
 
 export interface EvaluationMetrics {

@@ -209,6 +209,109 @@ async def get_governance_analytics(
     return await repo.get_governance_analytics(tenant_id)
 
 
+@router.get("/recovery-audit")
+async def get_recovery_audit(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    entity_type: Optional[str] = Query(None, description="Filter by entity type: upload, ai_run, review"),
+    action_type: Optional[str] = Query(None, description="Filter by action type: re-queued, marked_failed, priority_bump, max_escalation_reached"),
+    limit: int = Query(50, ge=1, le=200),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Get recovery action audit trail for operational visibility.
+
+    Returns recovery actions taken by the automated recovery daemon,
+    including cooldown state, escalation counts, and outcomes.
+
+    This endpoint enables:
+    - Operational dashboards showing recovery activity
+    - Auditing recovery decisions and their outcomes
+    - Monitoring cooldown state and escalation saturation
+    - Detecting recurring failure patterns
+    """
+    from sqlalchemy import text as sa_text
+
+    conditions = ["ra.tenant_id = :tenant_id"]
+    params = {"tenant_id": tenant_id}
+
+    if entity_type:
+        conditions.append("ra.entity_type = :entity_type")
+        params["entity_type"] = entity_type
+    if action_type:
+        conditions.append("ra.action_type = :action_type")
+        params["action_type"] = action_type
+
+    where_clause = " AND ".join(conditions)
+
+    query = sa_text(f"""
+        SELECT
+            ra.action_id,
+            ra.entity_type,
+            ra.entity_id,
+            ra.action_type,
+            ra.previous_state,
+            ra.new_state,
+            ra.escalation_count,
+            ra.cooldown_until,
+            ra.success,
+            ra.message,
+            ra.created_at,
+            CASE
+                WHEN ra.cooldown_until IS NULL THEN 'expired'
+                WHEN ra.cooldown_until > NOW() THEN 'active'
+                ELSE 'expired'
+            END AS cooldown_status
+        FROM recovery_actions ra
+        WHERE {where_clause}
+        ORDER BY ra.created_at DESC
+        LIMIT :limit
+    """).bindparams(**params, limit=limit)
+
+    result = await db.execute(query)
+    rows = result.fetchall()
+
+    # Get summary stats
+    stats_query = sa_text(f"""
+        SELECT
+            COUNT(*)::int AS total_actions,
+            COUNT(*) FILTER (WHERE success = true)::int AS successful_actions,
+            COUNT(*) FILTER (WHERE success = false)::int AS failed_actions,
+            COUNT(*) FILTER (WHERE cooldown_until > NOW())::int AS active_cooldowns,
+            COUNT(*) FILTER (WHERE action_type = 'max_escalation_reached')::int AS max_escalation_events
+        FROM recovery_actions
+        WHERE {where_clause}
+    """)
+    stats_result = await db.execute(stats_query, params)
+    stats = stats_result.fetchone()
+
+    return {
+        "actions": [
+            {
+                "action_id": str(row.action_id),
+                "entity_type": row.entity_type,
+                "entity_id": str(row.entity_id)[:8] + "..." if row.entity_id else None,
+                "action_type": row.action_type,
+                "previous_state": row.previous_state,
+                "new_state": row.new_state,
+                "escalation_count": row.escalation_count,
+                "cooldown_until": row.cooldown_until.isoformat() if row.cooldown_until else None,
+                "cooldown_status": row.cooldown_status,
+                "success": row.success,
+                "message": row.message,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ],
+        "summary": {
+            "total_actions": stats.total_actions if stats else 0,
+            "successful_actions": stats.successful_actions if stats else 0,
+            "failed_actions": stats.failed_actions if stats else 0,
+            "active_cooldowns": stats.active_cooldowns if stats else 0,
+            "max_escalation_events": stats.max_escalation_events if stats else 0,
+        },
+    }
+
+
 @router.get("/{review_id}", response_model=ReviewDetail)
 async def get_review(
     review_id: str,
@@ -220,6 +323,269 @@ async def get_review(
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
     return review
+
+
+# ── Workspace Hydration ────────────────────────────────────────────
+
+
+@router.get("/{review_id}/workspace")
+async def hydrate_workspace(
+    review_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Hydrate a complete review workspace in a single request.
+
+    Replaces 10+ parallel API calls with one unified response.
+    Returns review details, status, findings, risk breakdown,
+    versions, workflow state, notifications, and recovery audit.
+
+    Frontend should call this once on workspace load instead of:
+        GET /reviews/{id}
+        GET /reviews/{id}/status
+        GET /reviews/{id}/findings
+        GET /reviews/{id}/risk-breakdown
+        GET /reviews/{id}/versions
+        GET /reviews/{id}/risk-delta-timeline
+        GET /reviews/{id}/comments
+        GET /reviews/{id}/history
+        GET /notifications?entity_id={id}
+    """
+    from datetime import datetime
+    from app.domains.review.repository import ReviewRepository
+    from app.domains.ingestion.repository import IngestionRepository
+    from app.domains.ai.repository import AIRepository
+    from app.domains.review.service import _compute_review_status, _enum_value
+    from sqlalchemy import text as sa_text, select
+    from app.domains.review.models import ContractReview
+
+    review_repo = ReviewRepository(db, tenant_id=tenant_id)
+    ingest_repo = IngestionRepository(db, tenant_id=tenant_id)
+    ai_repo = AIRepository(db, tenant_id=tenant_id)
+
+    # ── 1. Get review ────────────────────────────────────────────
+    service = ReviewService(
+        review_repo=review_repo,
+        ai_repo=ai_repo,
+        event_bus=__import__('app.kernel.events.bus', fromlist=['EventBus']).EventBus(),
+        user=user,
+        tenant_id=tenant_id,
+    )
+    review = await service.get_review(review_id)
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    # ── 2. Get status ────────────────────────────────────────────
+    upload = await ingest_repo.get_by_id(str(review.upload_id))
+    ingestion_state = None
+    ingestion_error = None
+    if upload:
+        raw_state = upload.ingestion_state
+        ingestion_state = raw_state.value if hasattr(raw_state, 'value') else str(raw_state) if raw_state else None
+        ingestion_error = upload.ingestion_error
+
+    ai_run = await ai_repo.get_latest_run_for_upload(str(review.upload_id))
+    ai_status = None
+    ai_error = None
+    if ai_run:
+        raw_status = ai_run.status
+        ai_status = raw_status.value if hasattr(raw_status, 'value') else raw_status
+        ai_error = ai_run.error_message
+
+    progress, current_step, overall_status, error, error_code, can_retry = _compute_review_status(
+        review_status=_enum_value(review.status),
+        ingestion_state=ingestion_state,
+        ai_status=ai_status,
+        ingestion_error=ingestion_error,
+    )
+
+    status_response = {
+        "review_id": review_id,
+        "upload_id": str(review.upload_id),
+        "status": overall_status,
+        "ingestion_state": ingestion_state,
+        "ai_status": ai_status,
+        "review_status": _enum_value(review.status),
+        "progress": progress,
+        "current_step": current_step,
+        "error": error,
+        "error_code": error_code,
+        "can_retry": can_retry,
+        "created_at": review.created_at,
+        "updated_at": review.updated_at,
+        "completed_at": getattr(review, 'completed_at', None),
+    }
+
+    # ── 3. Get findings (first page) ─────────────────────────────
+    findings_data = await review_repo.get_findings_for_review(review_id, tenant_id)
+    findings = [
+        {
+            "finding_id": str(f.finding_id),
+            "clause_type": f.clause_type,
+            "severity": f.severity,
+            "title": f.title,
+            "description": f.description,
+            "recommendation": f.recommendation,
+            "confidence": f.confidence,
+            "risk_score": f.risk_score,
+            "page_numbers": f.page_numbers or [],
+            "resolution": f.resolution.value if hasattr(f.resolution, 'value') else f.resolution,
+            "resolution_note": f.resolution_note,
+            "resolved_by": f.resolved_by,
+            "resolved_at": f.resolved_at,
+            "created_at": f.created_at,
+        }
+        for f in (findings_data or [])
+    ]
+
+    # ── 4. Get risk breakdown ────────────────────────────────────
+    risk_breakdown = None
+    try:
+        from app.domains.review.risk_scoring import compute_risk_breakdown
+        risk_breakdown = await compute_risk_breakdown(review_id, tenant_id, db)
+    except Exception:
+        pass
+
+    # ── 5. Get document versions ─────────────────────────────────
+    versions_result = await db.execute(
+        sa_text("""
+            SELECT version_id, review_id, version_number, label, status,
+                   source_document_id, storage_key, change_summary,
+                   accepted_redline_ids, file_size_bytes, mime_type,
+                   checksum_sha256, created_by, created_at
+            FROM contract_document_versions
+            WHERE review_id = :review_id AND tenant_id = :tenant_id
+            ORDER BY version_number DESC
+        """), {"review_id": review_id, "tenant_id": tenant_id}
+    )
+    version_rows = versions_result.fetchall()
+    versions = [
+        {
+            "version_id": str(v.version_id),
+            "review_id": str(v.review_id),
+            "version_number": v.version_number,
+            "label": v.label,
+            "status": v.status,
+            "source_document_id": str(v.source_document_id) if v.source_document_id else None,
+            "storage_key": v.storage_key,
+            "change_summary": v.change_summary,
+            "accepted_redline_ids": list(v.accepted_redline_ids) if v.accepted_redline_ids else None,
+            "file_size_bytes": v.file_size_bytes,
+            "mime_type": v.mime_type,
+            "checksum_sha256": v.checksum_sha256,
+            "created_by": v.created_by,
+            "created_at": v.created_at,
+        }
+        for v in version_rows
+    ]
+    current_version = versions[0] if versions else None
+
+    # ── 6. Get recent activity ───────────────────────────────────
+    activity_result = await db.execute(
+        sa_text("""
+            SELECT h.history_id, h.from_status, h.to_status, h.changed_by,
+                   h.reason, h.created_at
+            FROM review_status_history h
+            WHERE h.review_id = :review_id AND h.tenant_id = :tenant_id
+            ORDER BY h.created_at DESC
+            LIMIT 10
+        """), {"review_id": review_id, "tenant_id": tenant_id}
+    )
+    recent_activity = [
+        {
+            "activity_id": str(a.history_id),
+            "from_status": a.from_status,
+            "to_status": a.to_status,
+            "changed_by": a.changed_by,
+            "reason": a.reason,
+            "created_at": a.created_at,
+        }
+        for a in activity_result.fetchall()
+    ]
+
+    # ── 7. Get unread notifications ──────────────────────────────
+    notif_result = await db.execute(
+        sa_text("""
+            SELECT COUNT(*)::int AS unread_count
+            FROM notifications
+            WHERE tenant_id = :tenant_id
+              AND user_id = :user_id
+              AND entity_id = :entity_id
+              AND is_read = FALSE
+        """), {"tenant_id": tenant_id, "user_id": user.id, "entity_id": review_id}
+    )
+    unread_count = notif_result.scalar() or 0
+
+    # ── 8. Get reviewer workload ─────────────────────────────────
+    reviewer_workload = 0
+    if review.assigned_to:
+        workload_result = await db.execute(
+            sa_text("""
+                SELECT COUNT(*)::int AS active_count
+                FROM contract_reviews
+                WHERE assigned_to = :assignee
+                  AND tenant_id = :tenant_id
+                  AND is_deleted = FALSE
+                  AND status NOT IN ('approved', 'rejected', 'closed', 'archived', 'finalized', 'executed')
+            """), {"assignee": review.assigned_to, "tenant_id": tenant_id}
+        )
+        reviewer_workload = workload_result.scalar() or 0
+
+    # ── 9. Get last recovery action ──────────────────────────────
+    recovery_result = await db.execute(
+        sa_text("""
+            SELECT action_type, escalation_count, cooldown_until, success, message, created_at
+            FROM recovery_actions
+            WHERE entity_type = 'review'
+              AND entity_id = :review_id
+              AND tenant_id = :tenant_id
+            ORDER BY created_at DESC
+            LIMIT 1
+        """), {"review_id": review_id, "tenant_id": tenant_id}
+    )
+    last_recovery = recovery_result.fetchone()
+    last_recovery_action = None
+    if last_recovery:
+        last_recovery_action = {
+            "action_type": last_recovery.action_type,
+            "escalation_count": last_recovery.escalation_count,
+            "cooldown_until": last_recovery.cooldown_until.isoformat() if last_recovery.cooldown_until else None,
+            "success": last_recovery.success,
+            "message": last_recovery.message,
+            "created_at": last_recovery.created_at,
+        }
+
+    # ── Assemble response ────────────────────────────────────────
+    import json
+    response = {
+        "review": review,
+        "status": status_response,
+        "findings": findings,
+        "total_findings": len(findings),
+        "risk_breakdown": risk_breakdown,
+        "risk_score": getattr(review, 'risk_score', None),
+        "versions": versions,
+        "current_version": current_version,
+        "workflow_stage": getattr(review, 'workflow_stage', None),
+        "escalation_count": getattr(review, 'escalation_count', 0),
+        "sla_status": getattr(review, 'sla_status', 'on_track'),
+        "sla_deadline": getattr(review, 'sla_deadline', None),
+        "assigned_to": getattr(review, 'assigned_to', None),
+        "reviewer_active_count": reviewer_workload,
+        "recent_activity": recent_activity,
+        "unread_notifications": unread_count,
+        "last_recovery_action": last_recovery_action,
+        "hydrated_at": datetime.utcnow(),
+        "response_size_estimate_bytes": len(json.dumps({
+            "review": str(review_id),
+            "findings_count": len(findings),
+            "versions_count": len(versions),
+        })),
+    }
+
+    return response
 
 
 # ── Status Polling ─────────────────────────────────────────────────
@@ -853,6 +1219,29 @@ async def add_comment(
     return await service.add_comment(
         review_id, body.body, body.entity_type, body.entity_id,
         body.parent_comment_id, body.mentions,
+    )
+
+
+@router.get("/{review_id}/routing-recommendation")
+async def get_routing_recommendation(
+    review_id: str,
+    preferred_role: Optional[str] = Query(None, description="Preferred reviewer role"),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _: None = Depends(require_permission(Permissions.WORKFLOWS_READ)),
+):
+    """Get intelligent routing recommendation for a review.
+
+    Scores eligible reviewers based on workload, historical speed,
+    domain expertise, and escalation rate. Returns top candidate
+    with explainability data.
+    """
+    from app.domains.review.routing_engine import RoutingEngine
+
+    engine = RoutingEngine(db, tenant_id)
+    return await engine.recommend_reviewer(
+        review_id=review_id,
+        preferred_role=preferred_role,
     )
 
 

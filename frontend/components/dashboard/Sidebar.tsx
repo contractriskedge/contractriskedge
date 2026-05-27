@@ -25,30 +25,72 @@ import {
   ShieldCheck,
   Eye,
   LayoutGrid,
+  Briefcase,
+  PieChart,
+  Users,
+  FileCheck,
+  Gavel,
+  Building2,
+  ScrollText,
+  Network,
+  Sliders,
+  Cpu,
 } from "lucide-react";
 
-type ViewType = "portfolio" | "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "executive-dashboard";
+type ViewType = "portfolio" | "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "executive-dashboard" | "policy" | "clause-intelligence" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard";
 
 interface SidebarProps {
   activeView: ViewType;
   onViewChange: (view: ViewType) => void;
   collapsed: boolean;
   onToggle: () => void;
-  userRole: string;
 }
 
-// Only modules with real backend API integration are shown.
-// Non-integrated modules (CFO, Portfolio, Compliance, etc.) are hidden
-// until they have real backend endpoints.
-const navItems: { id: ViewType; label: string; icon: React.ElementType; roles: string[] }[] = [
-  { id: "ingestion", label: "Ingestion", icon: Upload, roles: ["admin", "analyst"] },
-  { id: "review", label: "Review", icon: Eye, roles: ["admin", "analyst"] },
-  { id: "search", label: "Search & Discovery", icon: Search, roles: ["admin", "analyst", "viewer"] },
-  { id: "analytics", label: "Analytics", icon: TrendingUp, roles: ["admin", "analyst", "viewer"] },
-  { id: "admin", label: "Admin Console", icon: ShieldAlert, roles: ["admin"] },
+// Full navigation with all enterprise workspaces.
+// All items are shown to all users — role-based access control
+// is enforced at the API level (backend permissions), not in the UI.
+const navItems: { id: ViewType; label: string; icon: React.ElementType }[] = [
+  // ── Core Workspaces ──
+  { id: "ingestion", label: "Ingestion", icon: Upload },
+  { id: "review", label: "Review", icon: Eye },
+  { id: "search", label: "Search & Discovery", icon: Search },
+  { id: "analytics", label: "Analytics", icon: TrendingUp },
+
+  // ── Sprint 10 — Unified Dashboards ──
+  { id: "executive-command-center", label: "Command Center", icon: LayoutDashboard },
+  { id: "reviewer-operations", label: "Reviewer Operations", icon: ClipboardCheck },
+  { id: "governance-dashboard", label: "Governance", icon: ShieldCheck },
+  { id: "ai-operations-dashboard", label: "AI Operations", icon: Cpu },
+  { id: "workflow-intelligence-dashboard", label: "Workflow Intel", icon: BarChart3 },
+
+  // ── Enterprise Workspaces ──
+  { id: "portfolio", label: "Portfolio Dashboard", icon: PieChart },
+  { id: "executive-dashboard", label: "Executive Dashboard", icon: LayoutDashboard },
+  { id: "cfo", label: "CFO Workspace", icon: Briefcase },
+  { id: "legal", label: "Legal Workspace", icon: Gavel },
+  { id: "procurement", label: "Procurement Workspace", icon: ShoppingCart },
+  { id: "compliance", label: "Compliance Center", icon: ShieldCheck },
+
+  // ── Advanced Modules ──
+  { id: "contracts", label: "Contracts", icon: FileText },
+  { id: "clause-library", label: "Clause Library", icon: Library },
+  { id: "obligations", label: "Obligations", icon: ClipboardCheck },
+  { id: "negotiation", label: "Negotiation", icon: GitMerge },
+  { id: "workflows", label: "Workflows", icon: Workflow },
+  { id: "benchmarks", label: "Benchmarks", icon: BarChart3 },
+  { id: "relationships", label: "Relationship Graph", icon: Share2 },
+
+  // ── Sprint 7 — Enterprise Intelligence ──
+  { id: "policy", label: "Policy Engine", icon: ScrollText },
+  { id: "clause-intelligence", label: "Clause Intelligence", icon: Network },
+  { id: "tenant-settings", label: "Tenant Settings", icon: Sliders },
+
+  // ── Administration ──
+  { id: "admin", label: "Admin Console", icon: ShieldAlert },
+  { id: "settings", label: "Settings", icon: Settings },
 ];
 
-export function Sidebar({ activeView, onViewChange, collapsed, onToggle, userRole }: SidebarProps) {
+export function Sidebar({ activeView, onViewChange, collapsed, onToggle }: SidebarProps) {
   return (
     <aside
       className={`${
@@ -67,9 +109,7 @@ export function Sidebar({ activeView, onViewChange, collapsed, onToggle, userRol
 
       {/* Navigation */}
       <nav className="flex-1 py-4 space-y-1 px-2 overflow-y-auto">
-        {navItems
-          .filter((item) => item.roles.includes(userRole) || userRole === "admin")
-          .map((item) => {
+        {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeView === item.id;
             return (

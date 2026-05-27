@@ -20,8 +20,8 @@ from structlog import get_logger
 logger = get_logger(__name__)
 
 # Meter and tracer for integration subsystem
-_meter = metrics.get_meter("contractriskedge.integration", version="1.0.0")
-_tracer = trace.get_tracer("contractriskedge.integration", version="1.0.0")
+_meter = metrics.get_meter("contractriskedge.integration")
+_tracer = trace.get_tracer("contractriskedge.integration")
 
 
 @dataclass

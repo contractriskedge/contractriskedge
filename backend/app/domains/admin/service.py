@@ -16,7 +16,9 @@ from app.domains.admin.schemas import (
     TenantSettingsUpdate, TenantSettingsResponse,
     SystemHealthResponse,
 )
+from app.domains.admin.heartbeat_models import WorkerHeartbeat
 from app.kernel.events.realtime import EventTypes, emit_event
+from app.kernel.telemetry.metrics import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -275,3 +277,75 @@ class AdminService:
             created_at=settings.created_at,
             updated_at=settings.updated_at,
         )
+
+    # ── Worker Heartbeat ──────────────────────────────────────────
+
+    async def record_heartbeat(
+        self,
+        worker_id: str,
+        queue: str,
+        status: str = "active",
+        tasks_completed: int = 0,
+        tasks_failed: int = 0,
+    ) -> dict:
+        """Record or update a worker heartbeat.
+
+        Upserts the worker heartbeat row. Also updates Prometheus
+        active_workers gauge and worker_heartbeats_total counter.
+        """
+        from datetime import datetime, timezone
+        from sqlalchemy import select
+
+        result = await self.repo.session.execute(
+            select(WorkerHeartbeat).where(WorkerHeartbeat.worker_id == worker_id)
+        )
+        heartbeat = result.scalar_one_or_none()
+
+        now = datetime.now(timezone.utc)
+        if heartbeat:
+            heartbeat.last_heartbeat_at = now
+            heartbeat.status = status
+            heartbeat.tasks_completed = tasks_completed
+            heartbeat.tasks_failed = tasks_failed
+            heartbeat.queue = queue
+        else:
+            heartbeat = WorkerHeartbeat(
+                worker_id=worker_id,
+                queue=queue,
+                status=status,
+                tasks_completed=tasks_completed,
+                tasks_failed=tasks_failed,
+                last_heartbeat_at=now,
+                started_at=now,
+            )
+            self.repo.session.add(heartbeat)
+
+        await self.repo.session.flush()
+
+        # Prometheus metrics
+        metrics.worker_heartbeats_total.labels(
+            worker_id=worker_id, queue=queue,
+        ).inc()
+        metrics.active_workers.labels(queue=queue).set(
+            await self._count_active_workers(queue)
+        )
+
+        return {
+            "worker_id": worker_id,
+            "queue": queue,
+            "status": status,
+            "last_heartbeat_at": now.isoformat(),
+        }
+
+    async def _count_active_workers(self, queue: Optional[str] = None) -> int:
+        """Count active workers (heartbeat within last 5 minutes)."""
+        from sqlalchemy import select, func, text
+
+        query = select(func.count()).select_from(WorkerHeartbeat).where(
+            WorkerHeartbeat.last_heartbeat_at
+            > func.now() - text("INTERVAL '5 minutes'")
+        )
+        if queue:
+            query = query.where(WorkerHeartbeat.queue == queue)
+        result = await self.repo.session.execute(query)
+        return result.scalar() or 0

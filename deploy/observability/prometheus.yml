@@ -1,0 +1,49 @@
+# ── Prometheus Configuration for ContractRiskEdge ─────────────────
+#
+# Scrapes the API /metrics endpoint for application metrics.
+# Update targets to match your deployment (localhost for dev,
+# service names for Docker Compose, pod IPs for Kubernetes).
+
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: "contractriskedge"
+
+# Alerting rules
+rule_files:
+  - "alerts/*.yml"
+
+scrape_configs:
+  # ── API Server ──────────────────────────────────────────────────
+  - job_name: "contractrisk-api"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets:
+          - "host.docker.internal:8000"  # Dev: API on host
+          # - "api:8000"                 # Docker Compose: API service name
+          # - "localhost:8000"           # Direct host access
+        labels:
+          service: "api"
+          environment: "development"
+
+  # ── Celery Workers ──────────────────────────────────────────────
+  # Workers expose metrics on port 9100 via prometheus_client
+  - job_name: "contractrisk-workers"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets:
+          # - "worker-ingestion:9100"
+          # - "worker-ai:9100"
+          # - "worker-notifications:9100"
+        labels:
+          service: "workers"
+          environment: "development"
+
+  # ── Node (Host) Metrics ─────────────────────────────────────────
+  - job_name: "node"
+    static_configs:
+      - targets:
+          # - "node-exporter:9100"
+        labels:
+          service: "infrastructure"

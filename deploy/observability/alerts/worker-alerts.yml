@@ -1,0 +1,58 @@
+# ── Prometheus Alerting Rules: Workers / Async ────────────────────
+
+groups:
+  - name: contractrisk_workers
+    interval: 30s
+    rules:
+
+      # ── Queue Depth Alert ─────────────────────────────────────────
+      # Fires when any Celery queue depth exceeds 100 for more than 5 minutes.
+      - alert: QueueDepthHigh
+        expr: queue_depth > 100
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Queue depth high for {{ $labels.queue }}"
+          description: "Queue '{{ $labels.queue }}' has {{ $value }} pending tasks. Consider scaling workers."
+
+      # ── Critical Queue Depth Alert ────────────────────────────────
+      # Fires when any queue exceeds 500 tasks.
+      - alert: QueueDepthCritical
+        expr: queue_depth > 500
+        for: 2m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "Queue depth critical for {{ $labels.queue }}"
+          description: "Queue '{{ $labels.queue }}' has {{ $value }} pending tasks. Immediate action required."
+
+      # ── No Active Workers Alert ──────────────────────────────────
+      # Fires when a queue has pending tasks but no active workers.
+      - alert: NoActiveWorkersForQueue
+        expr: queue_depth > 0 and on(queue) active_workers == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "No active workers for queue {{ $labels.queue }}"
+          description: "Queue '{{ $labels.queue }}' has {{ $value }} pending tasks but no active workers. Workers may be down."
+
+      # ── High Task Failure Rate ────────────────────────────────────
+      # Fires when task failures exceed 10% of total tasks in any queue.
+      - alert: HighTaskFailureRate
+        expr: (
+          sum by(queue) (rate(queue_task_total{status="failed"}[10m]))
+          /
+          sum by(queue) (rate(queue_task_total[10m]))
+        ) > 0.10
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "High task failure rate for queue {{ $labels.queue }}"
+          description: "Queue '{{ $labels.queue }}' has a {{ $value | humanizePercentage }} task failure rate."

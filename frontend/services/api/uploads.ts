@@ -146,6 +146,42 @@ export const uploadService = {
   /** Get ingestion queue statistics from Redis/Celery */
   getQueueStats: () =>
     api.get<QueueStatsResponse>("/uploads/queue/stats"),
+
+  // ── Batch Uploads ──
+
+  /** Create a new batch upload container */
+  createBatch: (name?: string) =>
+    api.post<BatchUploadResponse>("/uploads/batch", { name }),
+
+  /** Upload a file to an existing batch */
+  uploadBatchFile: (batchId: string, file: File) =>
+    api.uploadFile<BatchUploadFileItem>(`/uploads/batch/${batchId}/files`, file),
+
+  /** Get batch details with per-file status */
+  getBatch: (batchId: string) =>
+    api.get<BatchUploadDetailResponse>(`/uploads/batch/${batchId}`),
+
+  /** List batch uploads */
+  listBatches: (params?: { page?: number; page_size?: number; status?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.page_size) query.set("page_size", String(params.page_size));
+    if (params?.status) query.set("status", params.status);
+    const qs = query.toString();
+    return api.get<BatchUploadListResponse>(`/uploads/batches${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Trigger processing of all files in a batch */
+  processBatch: (batchId: string) =>
+    api.post<{ message: string; batch_id: string; total_files: number }>(
+      `/uploads/batch/${batchId}/process`,
+    ),
+
+  /** Cancel a batch */
+  cancelBatch: (batchId: string) =>
+    api.post<{ message: string; batch_id: string }>(
+      `/uploads/batch/${batchId}/cancel`,
+    ),
 };
 
 export interface QueueStatsResponse {
@@ -167,4 +203,41 @@ export interface ProcessingQueueInfo {
   failedCount: number;
   throughput: number;
   avgLatency: number;
+}
+
+// ── Batch Upload DTOs ─────────────────────────────────────────────
+
+export interface BatchUploadResponse {
+  batch_id: string;
+  name: string | null;
+  status: string;
+  total_files: number;
+  completed_files: number;
+  failed_files: number;
+  total_bytes: number;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface BatchUploadFileItem {
+  upload_id: string;
+  filename: string;
+  file_size: number;
+  status: string;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface BatchUploadDetailResponse extends BatchUploadResponse {
+  files: BatchUploadFileItem[];
+}
+
+export interface BatchUploadListResponse {
+  items: BatchUploadResponse[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
 }

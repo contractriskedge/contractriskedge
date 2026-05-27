@@ -1,0 +1,218 @@
+/**
+ * Policy API service — Policy-as-Code engine.
+ *
+ * Sprint 7 Priority 1.
+ *
+ * Provides typed API client methods for:
+ * - Policy CRUD (list, get, create, update, delete)
+ * - Policy evaluation (dry-run and live)
+ * - Policy version management
+ * - Policy audit trail
+ * - Policy simulation
+ *
+ * Backend dependency: app/domains/playbook/ (exists)
+ *
+ * Usage:
+ *   import { policyService } from '@/services/api/policy';
+ *   const policies = await policyService.list({ tenant_id: 'tenant-123' });
+ *   const result = await policyService.evaluate(policyId, contractId);
+ */
+
+"use client";
+
+import { api } from "@/services/api/client";
+
+// ── Types ─────────────────────────────────────────────────────────
+
+export type PolicyEffect = "allow" | "block" | "flag_for_review" | "require_approval";
+
+export type RuleOperator =
+  | "equals"
+  | "not_equals"
+  | "contains"
+  | "not_contains"
+  | "greater_than"
+  | "less_than"
+  | "greater_than_or_equal"
+  | "less_than_or_equal"
+  | "in"
+  | "not_in"
+  | "matches_regex"
+  | "threshold"
+  | "exists"
+  | "not_exists";
+
+export type ConditionGroupType = "AND" | "OR";
+
+export interface RuleCondition {
+  condition_id?: string;
+  field: string;
+  operator: RuleOperator;
+  value: unknown;
+  field_type?: "string" | "number" | "boolean" | "date" | "currency" | "enum";
+  label?: string;
+}
+
+export interface ConditionGroup {
+  group_id?: string;
+  type: ConditionGroupType;
+  conditions: (RuleCondition | ConditionGroup)[];
+}
+
+export interface PolicyDefinition {
+  policy_id: string;
+  name: string;
+  description: string;
+  scope: "tenant" | "global";
+  tenant_id?: string;
+  rules: ConditionGroup;
+  effect: PolicyEffect;
+  priority: number;
+  enabled: boolean;
+  version: number;
+  category: string;
+  tags: string[];
+  valid_from: string | null;
+  valid_until: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PolicyCreateRequest {
+  name: string;
+  description: string;
+  scope: "tenant" | "global";
+  tenant_id?: string;
+  rules: ConditionGroup;
+  effect: PolicyEffect;
+  priority?: number;
+  category?: string;
+  tags?: string[];
+  valid_from?: string;
+  valid_until?: string;
+}
+
+export interface PolicyEvaluationRequest {
+  policy_id: string;
+  contract_id: string;
+  simulation_mode?: boolean;
+  context?: Record<string, unknown>;
+}
+
+export interface TriggeredRule {
+  condition_id: string;
+  field: string;
+  operator: RuleOperator;
+  expected_value: unknown;
+  actual_value: unknown;
+  matched: boolean;
+  contribution: number;
+}
+
+export interface PolicyEvaluationResult {
+  evaluation_id: string;
+  policy_id: string;
+  policy_name: string;
+  contract_id: string;
+  contract_name?: string;
+  triggered_rules: TriggeredRule[];
+  overall_effect: PolicyEffect;
+  passed: boolean;
+  explanation: string;
+  simulation_mode: boolean;
+  evaluated_at: string;
+  execution_time_ms: number;
+}
+
+export interface PolicyVersion {
+  version_id: string;
+  policy_id: string;
+  version_number: number;
+  snapshot: PolicyDefinition;
+  change_summary: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface PolicyAuditEntry {
+  audit_id: string;
+  policy_id: string;
+  action: "created" | "updated" | "deleted" | "enabled" | "disabled" | "evaluated" | "simulated";
+  actor: string;
+  details: string;
+  timestamp: string;
+}
+
+// ── Query Key Factory ─────────────────────────────────────────────
+
+export const policyKeys = {
+  all: ["policies"] as const,
+  lists: () => [...policyKeys.all, "list"] as const,
+  list: (params?: { tenant_id?: string; scope?: string; enabled?: boolean; category?: string }) =>
+    [...policyKeys.lists(), params] as const,
+  details: () => [...policyKeys.all, "detail"] as const,
+  detail: (id: string) => [...policyKeys.details(), id] as const,
+  versions: (id: string) => [...policyKeys.all, "versions", id] as const,
+  evaluations: (id: string) => [...policyKeys.all, "evaluations", id] as const,
+  audit: (id: string) => [...policyKeys.all, "audit", id] as const,
+};
+
+// ── Service ───────────────────────────────────────────────────────
+
+export const policyService = {
+  /** List policies with optional filters */
+  list: (params?: {
+    tenant_id?: string;
+    scope?: string;
+    enabled?: boolean;
+    category?: string;
+    page?: number;
+    page_size?: number;
+  }) => api.get<{ data: PolicyDefinition[]; pagination: Record<string, unknown> }>("/policies", { ...params } as Record<string, unknown>),
+
+  /** Get a single policy by ID */
+  get: (policyId: string) => api.get<PolicyDefinition>(`/policies/${policyId}`),
+
+  /** Create a new policy */
+  create: (body: PolicyCreateRequest) =>
+    api.post<PolicyDefinition>("/policies", body, { idempotencyKey: api.generateIdempotencyKey() }),
+
+  /** Update an existing policy */
+  update: (policyId: string, body: Partial<PolicyCreateRequest>) =>
+    api.put<PolicyDefinition>(`/policies/${policyId}`, body),
+
+  /** Delete a policy */
+  delete: (policyId: string) => api.delete(`/policies/${policyId}`),
+
+  /** Toggle policy enabled/disabled */
+  toggle: (policyId: string, enabled: boolean) =>
+    api.post<PolicyDefinition>(`/policies/${policyId}/toggle`, { enabled }),
+
+  /** Evaluate a policy against a contract (live) */
+  evaluate: (body: PolicyEvaluationRequest) =>
+    api.post<PolicyEvaluationResult>("/policies/evaluate", body, { idempotencyKey: api.generateIdempotencyKey() }),
+
+  /** Simulate a policy change without saving (dry-run) */
+  simulate: (body: PolicyEvaluationRequest & { proposed_rules: ConditionGroup }) =>
+    api.post<PolicyEvaluationResult>("/policies/simulate", body),
+
+  /** Get policy version history */
+  listVersions: (policyId: string) =>
+    api.get<{ data: PolicyVersion[] }>(`/policies/${policyId}/versions`),
+
+  /** Rollback to a specific version */
+  rollback: (policyId: string, versionNumber: number) =>
+    api.post<PolicyDefinition>(`/policies/${policyId}/rollback`, { version_number: versionNumber }),
+
+  /** Get policy audit trail */
+  getAuditLog: (policyId: string) =>
+    api.get<{ data: PolicyAuditEntry[] }>(`/policies/${policyId}/audit`),
+
+  /** Bulk evaluate multiple policies against a contract */
+  bulkEvaluate: (contractId: string, options?: { tenant_id?: string; simulation_mode?: boolean }) =>
+    api.post<{ results: PolicyEvaluationResult[]; summary: { passed: number; failed: number; total: number } }>(
+      "/policies/bulk-evaluate",
+      { contract_id: contractId, ...options },
+    ),
+};

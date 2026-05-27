@@ -46,21 +46,35 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
         auth_header = request.headers.get("Authorization", "")
         request_id = getattr(request.state, "request_id", "")
 
-        # Development-only: act as a full-permission tenant admin when no Bearer token is sent.
-        # Never enable in production — send a real JWT to test auth in development.
+        # ── Determine if auth bypass is allowed ──────────────────────
+        # Bypass is ONLY permitted when ALL of the following are true:
+        #   1. environment == "development"
+        #   2. dev_auth_bypass config flag is explicitly set to true
+        #   3. The host is localhost (not a deployed staging/production URL)
+        #
+        # This triple gate prevents accidental bypass in deployed environments
+        # even if the .env file is misconfigured.
+        _is_local_dev = settings.environment == "development" and settings.dev_auth_bypass
+        _host = request.url.hostname or ""
+        _bypass_allowed = _is_local_dev and _host in ("localhost", "127.0.0.1", "0.0.0.0")
+
+        # Development-only: act as a scoped dev user when no Bearer token is sent.
+        # Never enable outside local dev — send a real JWT to test auth in any other environment.
+        # NOTE: Dev bypass uses a restricted role (not admin) to prevent automation
+        # actions from accidentally succeeding without real auth validation.
         if (
-            settings.environment == "development"
-            and settings.dev_auth_bypass
+            _bypass_allowed
             and not auth_header.startswith("Bearer ")
         ):
+            from app.kernel.security.roles import Roles
             request.state.user = UserContext(
                 id=dev_user_id(),
                 email="dev@localhost",
                 tenant_id=dev_tenant_id(),
-                role="admin",
-                permissions=[Permissions.ALL],
+                role=Roles.DEVELOPER,
+                permissions=list(Roles._PERMISSIONS.get(Roles.DEVELOPER, set())),
             )
-            logger.debug("DEV auth bypass: %s %s", request.method, request.url.path)
+            logger.debug("DEV auth bypass (no token): %s %s", request.method, request.url.path)
             return await call_next(request)
 
         if not auth_header.startswith("Bearer "):
@@ -81,19 +95,23 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
             user = await self.validator.validate(token)
         except TokenValidationError as exc:
             # Stale/invalid localStorage tokens are common in dev — fall back to dev user.
-            if settings.environment == "development" and settings.dev_auth_bypass:
+            # This fallback is ONLY active in local development with bypass enabled.
+            # NOTE: Uses restricted DEVELOPER role, NOT admin, to prevent automation
+            # actions from accidentally succeeding without real auth validation.
+            if _bypass_allowed:
                 logger.warning(
-                    "DEV auth bypass: invalid Bearer token (%s) for %s %s",
+                    "DEV auth bypass (invalid token): %s for %s %s",
                     exc,
                     request.method,
                     request.url.path,
                 )
+                from app.kernel.security.roles import Roles
                 request.state.user = UserContext(
                     id=dev_user_id(),
                     email="dev@localhost",
                     tenant_id=dev_tenant_id(),
-                    role="admin",
-                    permissions=[Permissions.ALL],
+                    role=Roles.DEVELOPER,
+                    permissions=list(Roles._PERMISSIONS.get(Roles.DEVELOPER, set())),
                 )
                 return await call_next(request)
 

@@ -1,0 +1,76 @@
+version: "3.8"
+
+# ── Observability Stack for ContractRiskEdge ─────────────────────
+#
+# Deploys:
+#   - Prometheus: Metrics scraping from the API /metrics endpoint
+#   - Grafana: Dashboards for operational visibility
+#   - Loki: Log aggregation (optional, for structured log ingestion)
+#
+# Usage:
+#   docker compose -f deploy/observability/docker-compose.observability.yml up -d
+#
+# Access:
+#   - Prometheus: http://localhost:9090
+#   - Grafana:    http://localhost:3001 (admin / admin)
+#   - Loki:       http://localhost:3100
+#
+# Configure the API's /metrics endpoint by setting PROMETHEUS_SCRAPE_TARGETS
+# or update the prometheus.yml scrape config below.
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: cre-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    networks:
+      - cre-observability
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: cre-grafana
+    restart: unless-stopped
+    volumes:
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    depends_on:
+      - prometheus
+    networks:
+      - cre-observability
+
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: cre-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - cre-observability
+
+networks:
+  cre-observability:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:

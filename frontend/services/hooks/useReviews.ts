@@ -45,6 +45,11 @@ import type {
   DashboardResponse,
   PaginatedResponse,
 } from "@/services/api/client";
+import {
+  getGlobalConnectionState,
+  processingInterval,
+  usePollCounter,
+} from "@/services/hooks/useAdaptivePolling";
 
 /** Resolve a review row from list/queue caches while the detail query is in flight. */
 export function findReviewInQueryCache(
@@ -118,13 +123,20 @@ export function useReview(reviewId: string | undefined) {
   });
 }
 
-// ── Review Status (Polling Hook) ──────────────────────────────────
+// ── Review Status (Adaptive Polling Hook) ─────────────────────────
 /**
- * Polls the review status endpoint with exponential backoff.
+ * Polls the review status endpoint with WebSocket-aware adaptive polling.
+ *
+ * Polling strategy:
+ * - WebSocket connected + stable state → stop polling (realtime drives updates)
+ * - WebSocket connected + processing → exponential backoff (2s→3s→4.5s→...→30s)
+ * - WebSocket reconnecting → poll every 10s
+ * - WebSocket disconnected/failed → poll every 5s
  *
  * Automatically stops polling when:
  * - Status is "completed" (progress === 100)
  * - Status is "failed" and not retryable
+ * - Review reaches stable post-analysis state (ai_analyzed, under_review, etc.)
  * - Component unmounts
  *
  * Exposes progress, current_step, error for UI rendering.
@@ -136,6 +148,8 @@ export function useReviewStatus(
     enabled?: boolean;
   },
 ) {
+  const { pollCount, incrementPollCount, resetPollCount } = usePollCounter();
+
   return useQuery({
     queryKey: reviewKeys.status(reviewId!),
     queryFn: async (): Promise<ReviewStatusResponse> => {
@@ -153,29 +167,45 @@ export function useReviewStatus(
       return status;
     },
     enabled: !!reviewId && (options?.enabled ?? true),
-    // Exponential backoff polling: starts at 2s, maxes at 30s
+    // WebSocket-aware adaptive polling
     refetchInterval: (query) => {
-      if (!query.state.data) return (options?.pollInterval ?? 2000);
+      if (!query.state.data) {
+        // No data yet — use connection-aware initial interval
+        const connState = getGlobalConnectionState();
+        if (connState === "connected") return 120_000;
+        if (connState === "reconnecting") return 10_000;
+        return 5_000;
+      }
 
       const { status, progress, can_retry, review_status } = query.state.data;
 
       // Terminal states — stop polling entirely
       const terminalStatuses = ["completed", "failed", "approved", "rejected", "closed"];
-      if (terminalStatuses.includes(status)) return false;
+      if (terminalStatuses.includes(status)) {
+        resetPollCount();
+        return false;
+      }
 
       // Review has reached a stable post-analysis state — stop polling
       const stableReviewStatuses = ["ai_analyzed", "under_review", "legal_review", "procurement_review", "security_review", "escalated"];
-      if (review_status && stableReviewStatuses.includes(review_status)) return false;
+      if (review_status && stableReviewStatuses.includes(review_status)) {
+        resetPollCount();
+        return false;
+      }
 
       // Stop polling on non-retryable failure
-      if (status === "failed" && !can_retry) return false;
-      if (progress === 100) return false;
+      if (status === "failed" && !can_retry) {
+        resetPollCount();
+        return false;
+      }
+      if (progress === 100) {
+        resetPollCount();
+        return false;
+      }
 
-      // Exponential backoff based on progress
-      if (progress < 25) return 2000;  // Every 2s during early stages
-      if (progress < 50) return 3000;  // Every 3s during mid stages
-      if (progress < 75) return 4000;  // Every 4s during later stages
-      return 5000;                      // Every 5s near completion
+      // Active processing — use exponential backoff
+      incrementPollCount();
+      return processingInterval(pollCount, { base: options?.pollInterval ?? 2000 });
     },
     staleTime: 0, // Always consider status stale (we want fresh polls)
     gcTime: 30_000,

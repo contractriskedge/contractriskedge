@@ -2,6 +2,7 @@
 Shared dependencies for integration routers.
 
 Provides tenant context, database sessions, and service factories.
+Uses the kernel's TenantAwareSessionFactory for tenant-safe session management.
 """
 
 import uuid
@@ -10,7 +11,8 @@ from typing import AsyncGenerator, Optional
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_async_session
+from app.config import settings
+from app.kernel.database.session import TenantAwareSessionFactory
 from app.integration.services.audit_service import IntegrationAuditService
 from app.integration.services.governance_service import (
     GovernanceService,
@@ -23,23 +25,50 @@ from app.integration.services.telemetry import IntegrationTelemetry, get_telemet
 from app.integration.services.webhook_service import WebhookService
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Yield database session."""
-    async with get_async_session() as session:
+# Reuse the kernel's database factory from app state (set during lifespan)
+async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
+    """Yield a tenant-isolated database session using the kernel factory."""
+    factory: TenantAwareSessionFactory = request.app.state.db_factory
+    if not factory:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not initialized",
+        )
+    # Extract tenant context from the authenticated request
+    user = getattr(request.state, "user", None)
+    tenant_id = getattr(user, "tenant_id", settings.dev_tenant_id) if user else settings.dev_tenant_id
+    user_id = getattr(user, "id", "system") if user else "system"
+    user_role = getattr(user, "role", "viewer") if user else "viewer"
+
+    session = await factory.create_session(
+        tenant_id=str(tenant_id),
+        user_id=str(user_id),
+        user_role=user_role,
+    )
+    try:
         yield session
+    finally:
+        await session.close()
 
 
 async def get_tenant_id(request: Request) -> uuid.UUID:
     """
-    Extract tenant ID from request context.
+    Extract tenant ID from the authenticated user context.
 
-    In production, this comes from the auth token/JWT.
+    In production, this comes from the JWT token validated by AuthContextMiddleware.
     """
+    user = getattr(request.state, "user", None)
+    if user and getattr(user, "tenant_id", None):
+        try:
+            return uuid.UUID(user.tenant_id)
+        except ValueError:
+            pass
+    # Fallback to header for backward compatibility
     tenant_id = request.headers.get("X-Tenant-ID")
     if not tenant_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="X-Tenant-ID header is required",
+            detail="Tenant context not found. Authenticate or provide X-Tenant-ID header.",
         )
     try:
         return uuid.UUID(tenant_id)
@@ -51,7 +80,14 @@ async def get_tenant_id(request: Request) -> uuid.UUID:
 
 
 async def get_user_id(request: Request) -> Optional[uuid.UUID]:
-    """Extract user ID from request context (from auth token)."""
+    """Extract user ID from the authenticated user context."""
+    user = getattr(request.state, "user", None)
+    if user and getattr(user, "id", None):
+        try:
+            return uuid.UUID(user.id) if isinstance(user.id, str) else user.id
+        except (ValueError, AttributeError):
+            pass
+    # Fallback to header
     user_id = request.headers.get("X-User-ID")
     if user_id:
         try:

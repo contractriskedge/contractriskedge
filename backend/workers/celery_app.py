@@ -94,6 +94,32 @@ celery_app.conf.update(
             "args": (),
             "options": {"queue": "default"},
         },
+
+        # ── Benchmark Orchestration ───────────────────────────────────
+
+        # Stale score detection — every 6 hours
+        "benchmark-detect-stale": {
+            "task": "benchmark.detect_stale",
+            "schedule": crontab(minute="0", hour="*/6"),
+            "args": (),
+            "options": {"queue": "default"},
+        },
+
+        # Full benchmark recompute — nightly at 2:00 AM
+        "benchmark-recompute-daily": {
+            "task": "benchmark.recompute",
+            "schedule": crontab(minute="0", hour="2"),
+            "args": (),
+            "options": {"queue": "default"},
+        },
+
+        # Embedding refresh — weekly on Sunday at 3:00 AM
+        "benchmark-refresh-embeddings-weekly": {
+            "task": "benchmark.refresh_embeddings",
+            "schedule": crontab(minute="0", hour="3", day_of_week="sunday"),
+            "args": (),
+            "options": {"queue": "default"},
+        },
     },
     timezone="UTC",
 )
@@ -112,4 +138,5 @@ celery_app.conf.imports = (
     "app.workers.ingestion_pipeline",
     "app.workers.sla_check",
     "app.workers.recovery",
+    "app.workers.benchmark",
 )

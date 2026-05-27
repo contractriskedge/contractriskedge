@@ -5,6 +5,8 @@
  * - Global retry policy with exponential backoff
  * - Stale-while-revalidate by default
  * - Network status tracking for stale-state recovery
+ * - Background tab throttling (reduces polling when tab is hidden)
+ * - RefetchOnFocus burst protection (debounced refocus handler)
  * - DevTools in development mode
  * - QueryClient with sensible defaults for async workflows
  *
@@ -21,11 +23,12 @@
 
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   QueryClient,
   QueryClientProvider,
   onlineManager,
+  focusManager,
 } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 
@@ -44,6 +47,55 @@ if (typeof window !== "undefined") {
       window.removeEventListener("offline", handleOffline);
     };
   });
+
+  // ── Background Tab Throttling ──────────────────────────────────
+  //
+  // When the tab is hidden (user switched to another tab), we mark
+  // the focus as "offline" which pauses refetchOnWindowFocus and
+  // refetchInterval (polling). When the tab becomes visible again,
+  // we restore focus. This prevents:
+  //
+  // - 20+ tabs all polling simultaneously
+  // - Burst of API calls on tab focus (refetch storm)
+  // - Unnecessary network usage when user isn't looking
+  //
+  // Implementation uses a debounce on focus to prevent the "all
+  // queries refetch at once" storm when returning to the tab.
+  let focusDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  focusManager.setEventListener((handleFocus) => {
+    const handleVisibility = () => {
+      if (document.hidden) {
+        // Tab hidden → mark as unfocused (pauses polling + refetchOnFocus)
+        handleFocus(false);
+      } else {
+        // Tab visible → debounce focus to prevent refetch storm
+        if (focusDebounceTimer) clearTimeout(focusDebounceTimer);
+        focusDebounceTimer = setTimeout(() => {
+          handleFocus(true);
+        }, 2000); // 2-second debounce — allows all queries to settle
+      }
+    };
+
+    // Also handle window focus directly (user clicks back to the tab)
+    const handleWindowFocus = () => {
+      if (!document.hidden) {
+        if (focusDebounceTimer) clearTimeout(focusDebounceTimer);
+        focusDebounceTimer = setTimeout(() => {
+          handleFocus(true);
+        }, 2000);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleWindowFocus);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleWindowFocus);
+      if (focusDebounceTimer) clearTimeout(focusDebounceTimer);
+    };
+  });
 }
 
 function makeQueryClient(): QueryClient {
@@ -56,6 +108,7 @@ function makeQueryClient(): QueryClient {
         // Keep data in cache for 5 minutes after last observer detaches
         gcTime: 5 * 60 * 1000,
         // Refetch when window regains focus (catches stale data)
+        // Focus manager handles debouncing to prevent refetch storms
         refetchOnWindowFocus: true,
         // Refetch when network reconnects (stale-state recovery)
         refetchOnReconnect: true,

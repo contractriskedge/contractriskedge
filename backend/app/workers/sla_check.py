@@ -29,13 +29,14 @@ async def check_sla_overdue() -> dict:
 
     Returns a summary dict with counts of affected reviews.
     """
-    from app.kernel.database.session import create_sync_session
+    from app.kernel.database.sync_session import get_sync_factory
 
     now = datetime.now(timezone.utc)
     affected = 0
     critical = 0
 
-    session = create_sync_session()
+    factory = get_sync_factory()
+    session = factory.create_session(tenant_id="system", user_id="system", user_role="admin")
     try:
         # Get all active tenants
         tenants_sql = sa_text("SELECT tenant_id FROM tenants WHERE is_active = TRUE")

@@ -5,6 +5,7 @@
  * - Dashboard: Platform overview with KPI cards
  * - Users: User and role management
  * - Health: System infrastructure monitoring
+ * - Diagnostics: Operational observability (WebSocket, events, workers)
  * - Settings: Tenant configuration
  */
 
@@ -17,9 +18,10 @@ import {
   LayoutDashboard, Users, Activity, Settings, Shield,
   RefreshCw, Loader2, Search, Plus, X, Check, AlertTriangle,
   Server, Database, HardDrive, Bell, Brain, Zap, Clock,
-  UserPlus, UserX, ChevronDown, MoreHorizontal,
+  UserPlus, UserX, ChevronDown, MoreHorizontal, Wifi, Archive,
 } from "lucide-react";
 import { api } from "@/services/api/client";
+import { DiagnosticsPanel } from "@/components/dashboard/admin/DiagnosticsPanel";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -116,7 +118,7 @@ function StatusBadge({ status }: { status: string }) {
 
 // ── Main Component ───────────────────────────────────────────────
 
-type AdminTab = "dashboard" | "users" | "health" | "settings";
+type AdminTab = "dashboard" | "users" | "health" | "diagnostics" | "settings";
 
 export function AdminConsole() {
   const [activeTab, setActiveTab] = useState<AdminTab>("dashboard");
@@ -131,6 +133,7 @@ export function AdminConsole() {
     { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard className="w-4 h-4" /> },
     { id: "users", label: "Users", icon: <Users className="w-4 h-4" /> },
     { id: "health", label: "Health", icon: <Activity className="w-4 h-4" /> },
+    { id: "diagnostics", label: "Diagnostics", icon: <Wifi className="w-4 h-4" /> },
     { id: "settings", label: "Settings", icon: <Settings className="w-4 h-4" /> },
   ];
 
@@ -217,6 +220,9 @@ export function AdminConsole() {
           )}
         </div>
       )}
+
+      {/* ── DIAGNOSTICS TAB ── */}
+      {activeTab === "diagnostics" && <DiagnosticsPanel />}
 
       {/* ── USERS TAB ── */}
       {activeTab === "users" && (

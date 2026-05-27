@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { BarChart3, Download, RefreshCw, Search } from "lucide-react";
+import { BarChart3, Download, RefreshCw, Search, Database, Loader2 } from "lucide-react";
 import { BenchmarkKpiCards } from "./BenchmarkKpiCards";
 import { ClauseBenchmarkChart, DeviationHeatmap, IndustryComparisonChart, VendorAggressivenessChart, ComplianceBenchmarkChart, ClauseFrequencyChart } from "./BenchmarkCharts";
 import { BenchmarkAiInsights } from "./AiInsights";
@@ -11,6 +11,7 @@ import { BenchmarkDetailDrawer } from "./BenchmarkDetailDrawer";
 import { BenchmarkFilterBar } from "./BenchmarkFilterBar";
 import { benchmarkKpis, clauseBenchmarks, industryComparisons, marketInsights, vendorBenchmarks, negotiationIntel, complianceBenchmarks, clauseLibrary } from "./mockData";
 import type { ClauseBenchmark, BenchmarkFilterState } from "./types";
+import { useBenchmarkData } from "./useBenchmarkData";
 
 const defaultFilters: BenchmarkFilterState = {
   industry: "", geography: "", contractType: "", clauseCategory: "", vendorType: "", companySize: "", regulation: "", dateRange: "",
@@ -19,6 +20,7 @@ const defaultFilters: BenchmarkFilterState = {
 export function BenchmarkPage() {
   const [filters, setFilters] = useState<BenchmarkFilterState>({ ...defaultFilters });
   const [selectedBenchmark, setSelectedBenchmark] = useState<ClauseBenchmark | null>(null);
+  const { loading, error, kpis, corpora, seeded, refresh, seedData } = useBenchmarkData();
 
   const handleFilterChange = useCallback((key: keyof BenchmarkFilterState, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -42,7 +44,7 @@ export function BenchmarkPage() {
           <button className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
             <Search className="w-3.5 h-3.5" /> Smart Search
           </button>
-          <button className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+          <button onClick={refresh} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
             <RefreshCw className="w-3.5 h-3.5" /> Refresh
           </button>
           <button className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-navy-700 text-white hover:bg-navy-800 transition-colors shadow-sm">
@@ -52,7 +54,37 @@ export function BenchmarkPage() {
       </motion.div>
 
       {/* KPI Row */}
-      <BenchmarkKpiCards metrics={benchmarkKpis} />
+      <BenchmarkKpiCards metrics={kpis} />
+
+      {/* Loading / Error / Seed states */}
+      {loading && (
+        <div className="flex items-center justify-center py-8 text-gray-400">
+          <Loader2 className="w-5 h-5 animate-spin mr-2" />
+          Loading benchmark data...
+        </div>
+      )}
+      {error && (
+        <div className="flex items-center justify-between px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+          <span>{error}</span>
+          <button onClick={refresh} className="px-3 py-1 text-xs font-medium bg-amber-100 rounded-md hover:bg-amber-200 transition-colors">
+            Retry
+          </button>
+        </div>
+      )}
+      {!loading && !error && !seeded && (
+        <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center gap-2 text-sm text-blue-700">
+            <Database className="w-4 h-4" />
+            <span>No benchmark data found. Seed with industry-standard clause data to get started.</span>
+          </div>
+          <button
+            onClick={seedData}
+            className="px-4 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+          >
+            Seed Data
+          </button>
+        </div>
+      )}
 
       {/* Filter Bar */}
       <BenchmarkFilterBar filters={filters} onChange={handleFilterChange} onReset={resetFilters} />

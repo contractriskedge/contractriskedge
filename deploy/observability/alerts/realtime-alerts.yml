@@ -1,0 +1,69 @@
+# ── Prometheus Alerting Rules: Realtime / Event System ────────────
+
+groups:
+  - name: contractrisk_realtime
+    interval: 30s
+    rules:
+
+      # ── Dead-Letter Alert ─────────────────────────────────────────
+      # Fires when any tenant accumulates dead-letter events.
+      - alert: DeadLetterEventsAccumulating
+        expr: increase(outbox_events_dead_letter_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Dead-letter events accumulating for tenant {{ $labels.tenant_id }}"
+          description: "Tenant {{ $labels.tenant_id }} has dead-letter events in the outbox. Investigate delivery failures."
+
+      # ── Reconnect Storm Alert ─────────────────────────────────────
+      # Fires when a reconnect storm is detected for any tenant.
+      - alert: ReconnectStormDetected
+        expr: increase(reconnect_storm_detections_total[5m]) > 0
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "WebSocket reconnect storm detected"
+          description: "Tenant {{ $labels.tenant_id }} is experiencing a reconnect storm. Check network stability and WebSocket health."
+
+      # ── WebSocket Connection Drop Alert ───────────────────────────
+      # Fires when active WebSocket connections drop to zero across all tenants.
+      - alert: NoWebSocketConnections
+        expr: sum(ws_active_connections) == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "No active WebSocket connections"
+          description: "All WebSocket connections have dropped. The realtime event system may be unavailable."
+
+      # ── High Delivery Failure Rate ────────────────────────────────
+      # Fires when the WebSocket delivery failure rate exceeds 5% of total messages.
+      - alert: HighWebSocketDeliveryFailureRate
+        expr: (
+          sum(rate(ws_delivery_failures_total[5m]))
+          /
+          (sum(rate(ws_messages_sent_total[5m])) + sum(rate(ws_delivery_failures_total[5m])))
+        ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "High WebSocket delivery failure rate (>{{ $value | humanizePercentage }})"
+          description: "WebSocket delivery failure rate has exceeded 5%. Check for stale connections or network issues."
+
+      # ── Stale Event Rejection Rate ────────────────────────────────
+      # Fires when stale events are being rejected at a high rate (potential replay issue).
+      - alert: HighStaleEventRejectionRate
+        expr: rate(stale_events_rejected_total[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "High stale event rejection rate ({{ $value | humanize }} events/s)"
+          description: "Stale events are being rejected at an elevated rate. Check event ordering and replay cursor logic."

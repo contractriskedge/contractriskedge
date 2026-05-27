@@ -459,3 +459,65 @@ class CreateDocumentVersionRequest(BaseModel):
     change_summary: Optional[str] = None
     accepted_redline_ids: Optional[list[str]] = None
 
+
+# ── Workspace Hydration ────────────────────────────────────────────
+
+
+class WorkspaceHydration(BaseModel):
+    """Unified workspace payload — replaces parallel REST fanout.
+
+    Returns everything needed to render a review workspace in a single
+    response, eliminating the need for 10+ parallel API calls.
+
+    Frontend should call this once instead of:
+        GET /reviews/{id}
+        GET /reviews/{id}/status
+        GET /reviews/{id}/findings
+        GET /reviews/{id}/risk-breakdown
+        GET /reviews/{id}/versions
+        GET /reviews/{id}/risk-delta-timeline
+        GET /reviews/{id}/comments
+        GET /reviews/{id}/history
+        GET /notifications?entity_id={id}
+    """
+    # Core review data
+    review: ReviewDetail
+
+    # Lifecycle status
+    status: ReviewStatusResponse
+
+    # Findings (paginated, first page)
+    findings: list[FindingItem] = Field(default_factory=list)
+    total_findings: int = 0
+
+    # Risk intelligence
+    risk_breakdown: Optional[dict] = None
+    risk_score: Optional[float] = None
+
+    # Document versions
+    versions: list[DocumentVersionItem] = Field(default_factory=list)
+    current_version: Optional[DocumentVersionItem] = None
+
+    # Workflow state
+    workflow_stage: Optional[str] = None
+    escalation_count: int = 0
+    sla_status: str = "on_track"
+    sla_deadline: Optional[datetime] = None
+
+    # Reviewer context
+    assigned_to: Optional[str] = None
+    reviewer_active_count: int = 0  # How many active reviews this reviewer has
+
+    # Recent activity
+    recent_activity: list[dict] = Field(default_factory=list)
+
+    # Notifications summary
+    unread_notifications: int = 0
+
+    # Recovery governance (if any recovery actions were taken)
+    last_recovery_action: Optional[dict] = None
+
+    # Metadata
+    hydrated_at: datetime = Field(default_factory=datetime.utcnow)
+    response_size_estimate_bytes: int = 0
+

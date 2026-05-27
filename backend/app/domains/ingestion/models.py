@@ -115,6 +115,9 @@ class UploadSession(Base):
     storage_key = Column(Text, nullable=True)  # S3/MinIO object key
     storage_bucket = Column(Text, nullable=True)
 
+    # Batch upload association
+    batch_id = Column(UUID, ForeignKey("batch_uploads.batch_id", ondelete="SET NULL"), nullable=True, index=True)
+
       # Ingestion state machine (PostgreSQL enum type already exists from migrations)
     ingestion_state = Column(
         SAEnum(

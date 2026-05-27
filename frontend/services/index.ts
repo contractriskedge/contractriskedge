@@ -81,3 +81,19 @@ export {
   useGetOrCreateReview,
   uploadKeys,
 } from "./hooks/useUploads";
+export {
+  useWorkspace,
+  prefetchWorkspace,
+  useWorkspaceRealtime,
+  workspaceKeys,
+} from "./hooks/useWorkspace";
+export type {
+  WorkspaceData,
+  ReviewStatusHydration,
+  DocumentVersionItem,
+  ActivityItem,
+  RecoveryActionItem,
+} from "./hooks/useWorkspace";
+
+export { RealtimeClient, getRealtimeClient, disconnectRealtimeClient } from "@/lib/realtime";
+export type { RealtimeEvent, ConnectionState, RealtimeOptions } from "@/lib/realtime";

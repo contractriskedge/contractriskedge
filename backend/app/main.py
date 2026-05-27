@@ -34,6 +34,55 @@ from app.kernel.web.exceptions import AppError
 logger = logging.getLogger(__name__)
 
 
+def _validate_secrets() -> None:
+    """Validate that no default/placeholder secrets are in use.
+
+    Raises a warning if secrets are not properly configured.
+    In production, this can be escalated to prevent startup.
+    """
+    env = settings.environment
+
+    # SECRET_KEY validation
+    if not settings.secret_key:
+        logger.warning(
+            "SECRET_KEY is not configured! Set SECRET_KEY in .env. "
+            "Using an empty secret key is a security risk."
+        )
+    elif settings.secret_key in ("change-this-in-production",):
+        logger.warning(
+            "SECRET_KEY is still set to the default placeholder '%s'. "
+            "Generate a unique secret key for production.",
+            settings.secret_key,
+        )
+
+    # DEV_JWT_SECRET validation (only relevant in development)
+    if env == "development":
+        if not settings.dev_jwt_secret:
+            logger.warning(
+                "DEV_JWT_SECRET is not configured! Set DEV_JWT_SECRET in .env. "
+                "Development JWT auth will fail without it."
+            )
+        elif settings.dev_jwt_secret in ("dev-secret-change-in-production",):
+            logger.warning(
+                "DEV_JWT_SECRET is still set to the default placeholder '%s'. "
+                "Change it to a unique value for your development environment.",
+                settings.dev_jwt_secret,
+            )
+
+    # Auth0 validation (required for production)
+    if env == "production":
+        if not settings.auth0_domain:
+            logger.error(
+                "AUTH0_DOMAIN is not configured! "
+                "Production environment requires Auth0 for authentication."
+            )
+        if not settings.secret_key or settings.secret_key in ("change-this-in-production",):
+            logger.error(
+                "SECRET_KEY is not properly configured for production! "
+                "Application startup should be blocked."
+            )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown."""
@@ -44,6 +93,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     setup_logging(settings.environment, settings.log_level)
     setup_tracing(app)
+
+    # ── Security validation on startup ─────────────────────────────
+    _validate_secrets()
 
     # Initialize Sentry if DSN configured
     if settings.sentry_dsn:
@@ -107,7 +159,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Recovered %d stuck upload(s) during startup", len(recovered))
     except Exception as exc:
         logger.warning("Startup upload recovery failed (non-fatal): %s", exc)
-
+    # ── Route Permission Validation ────────────────────────────────
+    # Validates that ALL non-excluded routes have proper permission
+    # dependencies. Catches decorator misuse and unprotected routes.
+    # In staging/production, this raises PermissionValidationError
+    # which blocks application startup.
+    try:
+        from app.kernel.security.route_validator import validate_routes, PermissionValidationError
+        issues = validate_routes(app)
+        if issues:
+            errors = [i for i in issues if i["severity"] == "error"]
+            if errors:
+                logger.warning(
+                    "Found %d route(s) without permission dependencies. "
+                    "These routes may be accessible without authentication.",
+                    len(errors),
+                )
+    except PermissionValidationError:
+        logger.critical(
+            "STARTUP BLOCKED: Route permission validation failed. "
+            "Fix unprotected routes before deploying to %s.",
+            settings.environment,
+        )
+        raise
+    except Exception as exc:
+        logger.warning("Route permission validation failed: %s", exc)
     logger.info(
         "Application started",
         extra={"environment": settings.environment, "version": "1.0.0"},
@@ -132,7 +208,11 @@ def create_app() -> FastAPI:
     )
 
     # ── Middleware (Starlette: last added = outermost on the request) ─
+    # Rate limiting runs early (before auth) to reject floods quickly.
     # Auth must run before Tenant so request.state.user is set first.
+    #
+    # CRITICAL ordering: RequestIDMiddleware must be added AFTER LoggingMiddleware
+    # (so it runs FIRST in the chain, setting request_id before logging reads it).
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -140,10 +220,13 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    if settings.rate_limit_enabled:
+        from app.kernel.middleware.rate_limit import RateLimitMiddleware
+        app.add_middleware(RateLimitMiddleware)
     app.add_middleware(RequestDeadlineMiddleware, timeout_seconds=settings.request_timeout_seconds)
     app.add_middleware(RequestBodySizeMiddleware, max_bytes=settings.max_request_body_bytes)
-    app.add_middleware(RequestIDMiddleware)
     app.add_middleware(LoggingMiddleware)
+    app.add_middleware(RequestIDMiddleware)
     app.add_middleware(TenantContextMiddleware)
     app.add_middleware(AuthContextMiddleware)
 
@@ -247,6 +330,8 @@ def create_app() -> FastAPI:
     from app.domains.admin.router import router as admin_router
     from app.domains.cases.router import router as cases_router
     from app.kernel.events.router import router as events_router
+    # ── Integration subsystem (connectors, OAuth, webhooks, sync) ──
+    from app.integration.router import integration_router
 
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(health_router)  # /health, /ready for probes and local checks
@@ -267,6 +352,38 @@ def create_app() -> FastAPI:
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(cases_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")
+    # ── Integration router (connectors, OAuth, webhooks, sync) ──
+    app.include_router(integration_router, prefix="/api/v1")
+    # ── Batch upload router ──
+    from app.domains.ingestion.batch_router import router as batch_router
+    app.include_router(batch_router, prefix="/api/v1")
+    # ── Benchmark router ──
+    from app.domains.benchmark.router import router as benchmark_router
+    app.include_router(benchmark_router, prefix="/api/v1")
+    # ── Policy Engine router ──
+    from app.domains.policy.router import router as policy_router
+    app.include_router(policy_router, prefix="/api/v1")
+    # ── AI Explainability router ──
+    from app.domains.explainability.router import router as explainability_router
+    app.include_router(explainability_router, prefix="/api/v1")
+    # ── Clause Intelligence router ──
+    from app.domains.clause_intel.router import router as clause_intel_router
+    app.include_router(clause_intel_router, prefix="/api/v1")
+    # ── Tenant Configuration router ──
+    from app.domains.tenant_config.router import router as tenant_config_router
+    app.include_router(tenant_config_router, prefix="/api/v1")
+    # ── AI Governance router ──
+    from app.domains.ai_governance.router import router as ai_governance_router
+    app.include_router(ai_governance_router, prefix="/api/v1")
+    # ── Cost & Resource Governance router ──
+    from app.domains.cost_governance.router import router as cost_governance_router
+    app.include_router(cost_governance_router, prefix="/api/v1")
+    # ── Human Oversight router ──
+    from app.domains.human_oversight.router import router as human_oversight_router
+    app.include_router(human_oversight_router, prefix="/api/v1")
+    # ── Enterprise Workflow Packs router ──
+    from app.domains.workflow_packs.router import router as workflow_packs_router
+    app.include_router(workflow_packs_router, prefix="/api/v1")
 
     # ── Prometheus metrics endpoint (no prefix, no auth) ──
     from app.kernel.telemetry.metrics import metrics_endpoint

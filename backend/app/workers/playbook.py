@@ -78,14 +78,10 @@ if celery_app:
             import asyncio
 
             async def _run_evaluation():
-                from app.kernel.database.session import TenantAwareSessionFactory
-                from app.config import settings
+                from app.kernel.database.sync_session import get_sync_factory
 
-                factory = TenantAwareSessionFactory(
-                    database_url=settings.database_url,
-                    pool_size=2, max_overflow=2,
-                )
-                session = await factory.create_session(
+                factory = get_sync_factory()
+                session = factory.create_session(
                     tenant_id=tenant_id, user_id=user_id, user_role="admin",
                 )
 
@@ -132,7 +128,7 @@ if celery_app:
                     raise
                 finally:
                     await session.close()
-                    await factory.close()
+                    # NOTE: factory.close() is NOT called here — the engine is shared
 
             result = asyncio.run(_run_evaluation())
             logger.info(
@@ -188,14 +184,10 @@ if celery_app:
             import asyncio
 
             async def _run_detection():
-                from app.kernel.database.session import TenantAwareSessionFactory
-                from app.config import settings
+                from app.kernel.database.sync_session import get_sync_factory
 
-                factory = TenantAwareSessionFactory(
-                    database_url=settings.database_url,
-                    pool_size=2, max_overflow=2,
-                )
-                session = await factory.create_session(
+                factory = get_sync_factory()
+                session = factory.create_session(
                     tenant_id=tenant_id, user_id="system", user_role="admin",
                 )
 
@@ -260,7 +252,6 @@ if celery_app:
                     raise
                 finally:
                     await session.close()
-                    await factory.close()
 
             result = asyncio.run(_run_detection())
             logger.info("Deviation detection completed",
@@ -306,14 +297,10 @@ if celery_app:
             import asyncio
 
             async def _run():
-                from app.kernel.database.session import TenantAwareSessionFactory
-                from app.config import settings
+                from app.kernel.database.sync_session import get_sync_factory
 
-                factory = TenantAwareSessionFactory(
-                    database_url=settings.database_url,
-                    pool_size=2, max_overflow=2,
-                )
-                session = await factory.create_session(
+                factory = get_sync_factory()
+                session = factory.create_session(
                     tenant_id=tenant_id, user_id="system", user_role="admin",
                 )
 
@@ -390,7 +377,6 @@ if celery_app:
                     raise
                 finally:
                     await session.close()
-                    await factory.close()
 
             result = asyncio.run(_run())
             logger.info("Recommendations generated",
@@ -434,14 +420,10 @@ if celery_app:
             import asyncio
 
             async def _run():
-                from app.kernel.database.session import TenantAwareSessionFactory
-                from app.config import settings
+                from app.kernel.database.sync_session import get_sync_factory
 
-                factory = TenantAwareSessionFactory(
-                    database_url=settings.database_url,
-                    pool_size=2, max_overflow=2,
-                )
-                session = await factory.create_session(
+                factory = get_sync_factory()
+                session = factory.create_session(
                     tenant_id=tenant_id, user_id="system", user_role="admin",
                 )
 
@@ -482,7 +464,6 @@ if celery_app:
                     raise
                 finally:
                     await session.close()
-                    await factory.close()
 
             result = asyncio.run(_run())
             logger.info("Playbook re-evaluation queued",

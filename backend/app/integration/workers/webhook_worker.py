@@ -5,7 +5,7 @@ Processes webhook events asynchronously with retry and dead-letter support.
 """
 
 import uuid
-from typing import Any, Optional
+from typing import Any, Optional, Optional
 
 from celery import Task
 from sqlalchemy import select

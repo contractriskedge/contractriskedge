@@ -44,3 +44,42 @@ export {
   useGetOrCreateReview,
   uploadKeys,
 } from "./useUploads";
+export {
+  useWorkspace,
+  prefetchWorkspace,
+  useWorkspaceRealtime,
+  workspaceKeys,
+} from "./useWorkspace";
+export type {
+  WorkspaceData,
+  ReviewStatusHydration,
+  DocumentVersionItem,
+  ActivityItem,
+  RecoveryActionItem,
+} from "./useWorkspace";
+
+export {
+  useSystemDiagnostics,
+  useEventChain,
+  useOutboxDiagnostics,
+  useWorkerDiagnostics,
+  diagnosticsKeys,
+} from "./useDiagnostics";
+export type {
+  DiagnosticsData,
+  EventChainItem,
+  OutboxDiagnosticsData,
+  WorkerDiagnosticsData,
+} from "./useDiagnostics";
+
+export { useRealtime } from "./useRealtime";
+
+export { useSessionGovernance } from "./useSessionGovernance";
+
+export {
+  adaptiveInterval,
+  processingInterval,
+  usePollCounter,
+  getGlobalConnectionState,
+  setGlobalConnectionState,
+} from "./useAdaptivePolling";

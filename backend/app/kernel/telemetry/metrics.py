@@ -222,6 +222,110 @@ class AppMetrics:
             ["stat"],  # size, checked_in, checked_out, overflow
         )
 
+        # ── WebSocket / Realtime Metrics ──
+        self.ws_connections_total = Counter(
+            "ws_connections_total",
+            "Total WebSocket connections by tenant",
+            ["tenant_id"],
+        )
+        self.ws_disconnections_total = Counter(
+            "ws_disconnections_total",
+            "Total WebSocket disconnections by tenant",
+            ["tenant_id"],
+        )
+        self.ws_active_connections = Gauge(
+            "ws_active_connections",
+            "Current active WebSocket connections",
+            ["tenant_id"],
+        )
+        self.ws_messages_sent_total = Counter(
+            "ws_messages_sent_total",
+            "Total WebSocket messages sent by tenant and event type",
+            ["tenant_id", "event_type"],
+        )
+        self.ws_messages_delivered_total = Counter(
+            "ws_messages_delivered_total",
+            "Total WebSocket messages delivered (ACK'd) by tenant",
+            ["tenant_id"],
+        )
+        self.ws_delivery_failures_total = Counter(
+            "ws_delivery_failures_total",
+            "Total WebSocket delivery failures by tenant and reason",
+            ["tenant_id", "reason"],
+        )
+        self.ws_reconnect_events_total = Counter(
+            "ws_reconnect_events_total",
+            "Total WebSocket reconnection events by tenant",
+            ["tenant_id"],
+        )
+        self.ws_replay_events_total = Counter(
+            "ws_replay_events_total",
+            "Total replay events sent by tenant",
+            ["tenant_id"],
+        )
+        self.ws_delivery_latency_seconds = Histogram(
+            "ws_delivery_latency_seconds",
+            "WebSocket event delivery latency (create → client receipt)",
+            ["tenant_id"],
+            buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+        )
+
+        # ── Event Outbox / Diagnostics Metrics ──
+        self.outbox_events_created_total = Counter(
+            "outbox_events_created_total",
+            "Total outbox events created by tenant and event type",
+            ["tenant_id", "event_type"],
+        )
+        self.outbox_events_dead_letter_total = Counter(
+            "outbox_events_dead_letter_total",
+            "Total outbox events moved to dead-letter by tenant",
+            ["tenant_id"],
+        )
+        self.outbox_events_replayed_total = Counter(
+            "outbox_events_replayed_total",
+            "Total outbox events replayed from dead-letter by tenant",
+            ["tenant_id"],
+        )
+        self.outbox_queue_depth = Gauge(
+            "outbox_queue_depth",
+            "Current pending outbox event count by tenant",
+            ["tenant_id"],
+        )
+
+        # ── Stale Event / Idempotency Metrics ──
+        self.stale_events_rejected_total = Counter(
+            "stale_events_rejected_total",
+            "Total stale events rejected by review_id and reason",
+            ["reason"],
+        )
+        self.duplicate_invalidations_suppressed_total = Counter(
+            "duplicate_invalidations_suppressed_total",
+            "Total duplicate cache invalidations suppressed by debounce",
+            ["resource_type"],
+        )
+        self.reconnect_storm_detections_total = Counter(
+            "reconnect_storm_detections_total",
+            "Total reconnect storm detections by tenant",
+            ["tenant_id"],
+        )
+
+        # ── Worker Heartbeat Metrics ──
+        self.worker_heartbeats_total = Counter(
+            "worker_heartbeats_total",
+            "Total worker heartbeats received by worker and queue",
+            ["worker_id", "queue"],
+        )
+        self.worker_stuck_jobs_total = Counter(
+            "worker_stuck_jobs_total",
+            "Total stuck jobs detected by queue",
+            ["queue"],
+        )
+        self.active_workers = Gauge(
+            "active_workers",
+            "Currently active workers by queue",
+            ["queue"],
+        )
+
 
 # ── Singleton ──────────────────────────────────────────────────────
 

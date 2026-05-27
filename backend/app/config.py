@@ -33,7 +33,19 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return v.lower() in ("true", "1", "yes", "on")
         return bool(v)
-    secret_key: str = "change-this-in-production"
+    secret_key: str = ""
+
+    @field_validator("secret_key")
+    @classmethod
+    def warn_if_default_secret(cls, v: str) -> str:
+        """Warn if secret_key is still the placeholder or empty."""
+        if not v or v in ("change-this-in-production",):
+            import logging
+            logging.warning(
+                "SECRET_KEY is not set or still using default. "
+                "Set a strong, unique SECRET_KEY in your .env file for production."
+            )
+        return v
 
     # ── Database ───────────────────────────────────────────────────
     database_url: str = "postgresql+asyncpg://dev_user:dev_password@localhost:5432/contract_risk_dev"
@@ -51,6 +63,18 @@ class Settings(BaseSettings):
     max_upload_file_bytes: int = 100_000_000    # 100MB
     request_timeout_seconds: int = 30           # 30s default API timeout
 
+    # ── Rate Limiting ──────────────────────────────────────────────
+    rate_limit_enabled: bool = True
+    """Enable or disable API rate limiting globally."""
+    rate_limit_anonymous: int = 20
+    """Max requests per minute for unauthenticated users."""
+    rate_limit_authenticated: int = 100
+    """Max requests per minute for authenticated users."""
+    rate_limit_admin: int = 500
+    """Max requests per minute for admin users."""
+    rate_limit_window_seconds: int = 60
+    """Sliding window size in seconds for rate limit tracking."""
+
     # ── Redis ──────────────────────────────────────────────────────
     redis_url: str = "redis://localhost:6379/0"
 
@@ -66,7 +90,21 @@ class Settings(BaseSettings):
         return f"https://{self.auth0_domain}/.well-known/jwks.json" if self.auth0_domain else ""
 
     # ── Development Auth ───────────────────────────────────────────
-    dev_jwt_secret: str = "dev-secret-change-in-production"
+    dev_jwt_secret: str = ""
+
+    @field_validator("dev_jwt_secret")
+    @classmethod
+    def warn_if_default_dev_secret(cls, v: str) -> str:
+        """Warn if dev_jwt_secret is still the placeholder or empty."""
+        if not v or v in ("dev-secret-change-in-production",):
+            import logging
+            logging.warning(
+                "DEV_JWT_SECRET is not set or still using default. "
+                "Set DEV_JWT_SECRET in your .env file. "
+                "This secret is used ONLY in development mode."
+            )
+        return v
+
     dev_auth_bypass: bool = False
     dev_tenant_id: str = "00000000-0000-4000-8000-000000000001"
     dev_user_id: str = "dev-user"

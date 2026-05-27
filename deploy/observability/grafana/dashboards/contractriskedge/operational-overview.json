@@ -1,0 +1,199 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "title": "ContractRiskEdge — Operational Overview",
+  "description": "Live operational dashboard for WebSocket health, event outbox, worker status, and distributed state protections.",
+  "tags": ["contractriskedge", "operations", "realtime"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "panels": [
+    {
+      "title": "WebSocket Connections",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "sum(ws_active_connections)", "legendFormat": "Active Connections"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "red", "value": 0},
+            {"color": "yellow", "value": 1},
+            {"color": "green", "value": 5}
+          ]}
+        }
+      }
+    },
+    {
+      "title": "Messages Sent (rate)",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+      "targets": [
+        {"expr": "sum(rate(ws_messages_sent_total[5m]))", "legendFormat": "msgs/s"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {"mode": "palette-classic"}
+        }
+      }
+    },
+    {
+      "title": "Dead-Letter Events",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+      "targets": [
+        {"expr": "sum(increase(outbox_events_dead_letter_total[24h]))", "legendFormat": "24h"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": 0},
+            {"color": "yellow", "value": 5},
+            {"color": "red", "value": 20}
+          ]}
+        }
+      }
+    },
+    {
+      "title": "Stale Events Rejected",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+      "targets": [
+        {"expr": "sum(increase(stale_events_rejected_total[24h]))", "legendFormat": "24h"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": 0},
+            {"color": "yellow", "value": 10},
+            {"color": "red", "value": 100}
+          ]}
+        }
+      }
+    },
+    {
+      "title": "Reconnect Storms",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+      "targets": [
+        {"expr": "sum(increase(reconnect_storm_detections_total[1h]))", "legendFormat": "1h"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": 0},
+            {"color": "red", "value": 1}
+          ]}
+        }
+      }
+    },
+    {
+      "title": "Duplicate Suppressions",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+      "targets": [
+        {"expr": "sum(increase(duplicate_invalidations_suppressed_total[24h]))", "legendFormat": "24h"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"}
+        }
+      }
+    },
+    {
+      "title": "WebSocket Connections by Tenant",
+      "type": "bargauge",
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 4},
+      "targets": [
+        {"expr": "ws_active_connections", "legendFormat": "{{tenant_id}}"}
+      ]
+    },
+    {
+      "title": "Messages Sent by Event Type (rate)",
+      "type": "timeseries",
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 4},
+      "targets": [
+        {"expr": "rate(ws_messages_sent_total[5m])", "legendFormat": "{{event_type}}"}
+      ]
+    },
+    {
+      "title": "Delivery Failures by Reason",
+      "type": "timeseries",
+      "gridPos": {"h": 6, "w": 8, "x": 16, "y": 4},
+      "targets": [
+        {"expr": "rate(ws_delivery_failures_total[5m])", "legendFormat": "{{reason}}"}
+      ]
+    },
+    {
+      "title": "Outbox Queue Depth by Tenant",
+      "type": "bargauge",
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 10},
+      "targets": [
+        {"expr": "outbox_queue_depth", "legendFormat": "{{tenant_id}}"}
+      ]
+    },
+    {
+      "title": "Event Delivery Latency (p50/p95/p99)",
+      "type": "timeseries",
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 10},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum(rate(ws_delivery_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p50"},
+        {"expr": "histogram_quantile(0.95, sum(rate(ws_delivery_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p95"},
+        {"expr": "histogram_quantile(0.99, sum(rate(ws_delivery_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p99"}
+      ]
+    },
+    {
+      "title": "Active Workers by Queue",
+      "type": "bargauge",
+      "gridPos": {"h": 6, "w": 8, "x": 16, "y": 10},
+      "targets": [
+        {"expr": "active_workers", "legendFormat": "{{queue}}"}
+      ]
+    },
+    {
+      "title": "HTTP Request Rate by Endpoint",
+      "type": "timeseries",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 16},
+      "targets": [
+        {"expr": "rate(http_requests_total[5m])", "legendFormat": "{{method}} {{endpoint}}"}
+      ]
+    },
+    {
+      "title": "HTTP p95 Latency by Endpoint",
+      "type": "timeseries",
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 16},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint))", "legendFormat": "{{endpoint}}"}
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "tenant",
+        "type": "query",
+        "query": "label_values(ws_active_connections, tenant_id)",
+        "current": {"text": "All", "value": "$__all"},
+        "includeAll": true,
+        "multi": true
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "name": "Deploy",
+        "type": "webhook",
+        "showIn": 0,
+        "iconColor": "blue"
+      }
+    ]
+  }
+}

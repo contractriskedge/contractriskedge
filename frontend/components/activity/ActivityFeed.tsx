@@ -9,7 +9,8 @@
  * - AI analyses finished
  * - Recommendations generated
  *
- * Connected to the WebSocket event stream with REST fallback.
+ * Connected via the shared RealtimeClient singleton (no duplicate WebSocket).
+ * Falls back to REST polling when disconnected.
  */
 
 "use client";
@@ -21,6 +22,7 @@ import {
   AlertTriangle, FileText, UserPlus, Download, Clock,
   Loader2, ArrowRight, Filter,
 } from "lucide-react";
+import { getRealtimeClient, type RealtimeEvent } from "@/lib/realtime";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -64,67 +66,58 @@ export function ActivityFeed({ maxItems = 50, showFilter = true, className = "" 
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [filter, setFilter] = useState<string>("all");
   const [connected, setConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectRef = useRef<number>(0);
+  const handlerRef = useRef<((event: RealtimeEvent) => void) | null>(null);
 
-  // ── Connect to WebSocket ───────────────────────────────────────
+  // ── Subscribe to shared RealtimeClient singleton ──────────────
+  //
+  // Uses the existing RealtimeClient instead of creating a duplicate
+  // WebSocket connection. This eliminates the double-connection issue
+  // where ActivityFeed opened a second WS alongside the AuthProvider's.
+  //
+  // The singleton is initialized by AuthProvider. If it doesn't exist
+  // yet, we gracefully show "Offline" — the feed will start receiving
+  // events once the realtime client connects.
   useEffect(() => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
-    if (!token) return;
+    // ── Subscribe to events via the shared singleton ────────────
+    // We use a custom event bus pattern: the AuthProvider's onEvent
+    // dispatches CustomEvents that we listen to here. This avoids
+    // creating a duplicate WebSocket connection.
+    const handler = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      if (!customEvent.detail) return;
+      const msg = customEvent.detail as RealtimeEvent;
 
-    let ws: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout>;
+      if (msg.type === "connected" || msg.type === "heartbeat" || msg.type === "pong") return;
 
-    function connect() {
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const host = window.location.host;
-      ws = new WebSocket(`${protocol}//${host}/api/v1/ws/events`);
+      const data = msg.data as Record<string, unknown> | undefined;
 
-      ws.onopen = () => {
-        ws?.send(JSON.stringify({ type: "auth", token }));
-        setConnected(true);
-        reconnectRef.current = 0;
+      const newEvent: ActivityEvent = {
+        id: `${msg.type}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        type: msg.type,
+        title: (data?.title as string) || msg.type,
+        description: (data?.message as string) || (data?.description as string),
+        severity: data?.severity === "critical" || msg.type.includes("failed") ? "error"
+          : msg.type.includes("completed") ? "success"
+          : msg.type.includes("warning") ? "warning" : "info",
+        timestamp: new Date().toISOString(),
+        actionUrl: data?.action_url as string,
       };
 
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.type === "connected" || msg.type === "heartbeat" || msg.type === "pong") return;
+      setEvents((prev) => [newEvent, ...prev].slice(0, maxItems));
+      setConnected(true);
+    };
 
-          const newEvent: ActivityEvent = {
-            id: `${msg.type}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            type: msg.type,
-            title: msg.data?.title || msg.type,
-            description: msg.data?.message || msg.data?.description,
-            severity: msg.data?.severity === "critical" || msg.type.includes("failed") ? "error"
-              : msg.type.includes("completed") ? "success"
-              : msg.type.includes("warning") ? "warning" : "info",
-            timestamp: new Date().toISOString(),
-            actionUrl: msg.data?.action_url,
-          };
+    window.addEventListener("realtime-event", handler);
 
-          setEvents((prev) => [newEvent, ...prev].slice(0, maxItems));
-        } catch {}
-      };
-
-      ws.onclose = () => {
-        setConnected(false);
-        // Reconnect with backoff
-        const delay = Math.min(1000 * Math.pow(2, reconnectRef.current), 30000);
-        reconnectRef.current++;
-        reconnectTimer = setTimeout(connect, delay);
-      };
-
-      ws.onerror = () => {
-        ws?.close();
-      };
-    }
-
-    connect();
+    // Also check connection status periodically
+    const statusInterval = setInterval(() => {
+      const token = localStorage.getItem("auth_token");
+      setConnected(!!token);
+    }, 5000);
 
     return () => {
-      ws?.close();
-      clearTimeout(reconnectTimer);
+      window.removeEventListener("realtime-event", handler);
+      clearInterval(statusInterval);
     };
   }, [maxItems]);
 

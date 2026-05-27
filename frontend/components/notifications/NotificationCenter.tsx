@@ -15,6 +15,7 @@ import {
   ArrowRight, Loader2, Mail, MailOpen,
 } from "lucide-react";
 import { api } from "@/services/api/client";
+import { getGlobalConnectionState } from "@/services/hooks/useAdaptivePolling";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -47,7 +48,14 @@ export function useNotifications(unreadOnly = false) {
     },
     staleTime: 30_000,
     gcTime: 5 * 60_000,
-    refetchInterval: 60_000, // Poll every minute for new notifications
+    refetchInterval: (query) => {
+      // WebSocket-aware polling: when connected, poll less frequently
+      const connState = getGlobalConnectionState();
+      if (connState === "connected") return 120_000; // Every 2 min when WS connected
+      if (connState === "reconnecting") return 15_000; // Every 15s during reconnect
+      if (query.state.data) return 60_000; // Every 1 min with data
+      return 30_000; // Every 30s without data
+    },
   });
 }
 
@@ -58,7 +66,13 @@ export function useUnreadCount() {
       .then((res) => res.pagination?.total ?? 0),
     staleTime: 15_000,
     gcTime: 30_000,
-    refetchInterval: 30_000,
+    refetchInterval: (query) => {
+      const connState = getGlobalConnectionState();
+      if (connState === "connected") return 120_000;
+      if (connState === "reconnecting") return 15_000;
+      if (query.state.data) return 30_000;
+      return 15_000;
+    },
   });
 }
 

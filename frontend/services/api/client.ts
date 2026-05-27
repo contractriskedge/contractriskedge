@@ -8,6 +8,8 @@
  * - Response retry classification
  * - Request timeout handling
  * - Idempotency-Key header support for mutations
+ * - Request coalescing (deduplicates in-flight GET requests)
+ * - Stale request cancellation support
  *
  * Usage:
  *   import { api } from '@/services/api/client';
@@ -19,6 +21,14 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api/v1";
 const DEFAULT_TIMEOUT = 30_000; // 30 seconds
 const MAX_RETRIES = 3;
+
+// ── Request Coalescing ────────────────────────────────────────────
+// Deduplicates in-flight GET requests so multiple components requesting
+// the same endpoint share one HTTP call. This prevents:
+// - Duplicate network requests on page load
+// - Parallel polling calls for the same resource
+// - Infrastructure cost explosion with many concurrent users
+import { requestCoalescer } from "@/services/api/requestCoalescer";
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -627,6 +637,9 @@ interface RequestOptions {
   retries?: number;
   signal?: AbortSignal;
   headers?: Record<string, string>;
+  /** Set to false to disable request coalescing for this request.
+   *  Only applies to GET requests. Default: true for GET, false for others. */
+  coalesce?: boolean;
 }
 
 async function request<T>(
@@ -744,6 +757,36 @@ async function requestWithRetry<T>(
   options: RequestOptions = {},
 ): Promise<T> {
   const maxRetries = options.retries ?? MAX_RETRIES;
+  let lastError: Error | null = null;
+
+  // ── Request Coalescing for GET requests ───────────────────────
+  // When multiple components request the same GET endpoint simultaneously,
+  // they share one in-flight HTTP request. This prevents:
+  // - Duplicate network requests on page load
+  // - Parallel polling calls for the same resource
+  // - Infrastructure cost explosion with many concurrent users
+  //
+  // Mutations (POST, PUT, PATCH, DELETE) are never coalesced.
+  const method = options.method ?? "GET";
+  if (method === "GET" && options.coalesce !== false) {
+    return requestCoalescer.dedup(
+      `${API_BASE}${path}`,
+      () => executeWithRetry<T>(path, options, maxRetries),
+      { method: "GET", signal: options.signal },
+    );
+  }
+
+  return executeWithRetry<T>(path, options, maxRetries);
+}
+
+/**
+ * Execute a request with retry logic (inner function, no coalescing).
+ */
+async function executeWithRetry<T>(
+  path: string,
+  options: RequestOptions = {},
+  maxRetries: number = MAX_RETRIES,
+): Promise<T> {
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {

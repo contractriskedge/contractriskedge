@@ -585,3 +585,109 @@ class AnalyticsService:
         if "RATE_LIMIT" in ft or "TIMEOUT" in ft:
             return "infrastructure"
         return "unknown"
+
+    # ── Prediction Engine Integration ──────────────────────────────
+
+    async def predict_sla_breach(self, review_id: str) -> dict:
+        """Predict SLA breach probability for a single review.
+
+        Delegates to PredictionEngine. Returns a serializable dict
+        for API consumption.
+        """
+        from app.domains.analytics.prediction import PredictionEngine
+
+        engine = PredictionEngine(self.session, self.tenant_id)
+        risk = await engine.predict_sla_breach(review_id)
+        return {
+            "review_id": risk.review_id,
+            "probability": risk.probability,
+            "expected_remaining_hours": risk.expected_remaining_hours,
+            "sla_remaining_hours": risk.sla_remaining_hours,
+            "risk_factors": risk.risk_factors,
+            "recommended_action": risk.recommended_action,
+        }
+
+    async def predict_batch_sla_breaches(self, limit: int = 100) -> list[dict]:
+        """Predict SLA breach probability for all active reviews.
+
+        Returns list sorted by probability descending.
+        """
+        from app.domains.analytics.prediction import PredictionEngine
+
+        engine = PredictionEngine(self.session, self.tenant_id)
+        risks = await engine.predict_batch_sla_breaches(limit=limit)
+        return [
+            {
+                "review_id": r.review_id,
+                "probability": r.probability,
+                "expected_remaining_hours": r.expected_remaining_hours,
+                "sla_remaining_hours": r.sla_remaining_hours,
+                "risk_factors": r.risk_factors,
+                "recommended_action": r.recommended_action,
+            }
+            for r in risks
+        ]
+
+    async def get_stage_duration_percentiles(self) -> dict:
+        """Get P50/P75/P95 duration percentiles per workflow stage."""
+        from app.domains.analytics.prediction import PredictionEngine
+
+        engine = PredictionEngine(self.session, self.tenant_id)
+        preds = await engine.get_stage_duration_percentiles()
+        return {
+            stage: {
+                "p50_hours": p.p50_hours,
+                "p75_hours": p.p75_hours,
+                "p95_hours": p.p95_hours,
+                "sample_count": p.sample_count,
+            }
+            for stage, p in preds.items()
+        }
+
+    async def predict_escalation_risk(self, review_id: str) -> dict:
+        """Predict escalation probability for a review."""
+        from app.domains.analytics.prediction import PredictionEngine
+
+        engine = PredictionEngine(self.session, self.tenant_id)
+        risk = await engine.predict_escalation_risk(review_id)
+        return {
+            "review_id": risk.review_id,
+            "probability": risk.probability,
+            "expected_escalation_level": risk.expected_escalation_level,
+            "risk_factors": risk.risk_factors,
+        }
+
+    async def predict_bottlenecks(self) -> list[dict]:
+        """Predict workflow bottlenecks."""
+        from app.domains.analytics.prediction import PredictionEngine
+
+        engine = PredictionEngine(self.session, self.tenant_id)
+        bottlenecks = await engine.predict_bottlenecks()
+        return [
+            {
+                "resource_type": b.resource_type,
+                "resource_id": b.resource_id,
+                "probability": b.probability,
+                "expected_delay_hours": b.expected_delay_hours,
+                "contributing_factors": b.contributing_factors,
+            }
+            for b in bottlenecks
+        ]
+
+    async def predict_reviewer_workload(self) -> list[dict]:
+        """Predict workload risk for all active reviewers."""
+        from app.domains.analytics.prediction import PredictionEngine
+
+        engine = PredictionEngine(self.session, self.tenant_id)
+        workloads = await engine.predict_reviewer_workload()
+        return [
+            {
+                "reviewer_id": w.reviewer_id,
+                "active_review_count": w.active_review_count,
+                "max_capacity": w.max_capacity,
+                "overload_probability": w.overload_probability,
+                "avg_completion_hours": w.avg_completion_hours,
+                "predicted_backlog_hours": w.predicted_backlog_hours,
+            }
+            for w in workloads
+        ]

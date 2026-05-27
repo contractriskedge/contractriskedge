@@ -35,6 +35,13 @@ class Permissions:
     USERS_WRITE = "users:write"
     USERS_DELETE = "users:delete"
 
+    # ── Benchmarks ────────────────────────────────────────────────
+    BENCHMARK_READ = "benchmarks:read"
+    BENCHMARK_WRITE = "benchmarks:write"
+    BENCHMARK_EXPORT = "benchmarks:export"
+    BENCHMARK_SEED = "benchmarks:seed"
+    BENCHMARK_ADMIN = "benchmarks:admin"
+
     # ── Admin ─────────────────────────────────────────────────────
     ADMIN_TENANT = "admin:tenant"
     ADMIN_SYSTEM = "admin:system"

@@ -43,8 +43,6 @@ async def search_pulse(
 )
 
 
-@require_permission(Permissions.CONTRACTS_READ
-)
 @router.post("/", response_model=SearchResponse)
 async def search(
     body: SearchRequest,
@@ -60,8 +58,6 @@ async def search(
 )
 
 
-@require_permission(Permissions.CONTRACTS_READ
-)
 @router.get("/", response_model=SearchResponse)
 async def search_get(
     q: str = Query(..., min_length=1, max_length=500),
@@ -83,8 +79,6 @@ async def search_get(
 )
 
 
-@require_permission(Permissions.CONTRACTS_READ
-)
 @router.get("/findings")
 async def search_findings(
     q: str = Query(..., min_length=1, max_length=500),
@@ -110,8 +104,6 @@ async def search_findings(
 )
 
 
-@require_permission(Permissions.CONTRACTS_READ
-)
 @router.get("/clauses")
 async def search_clauses(
     q: str = Query(..., min_length=1, max_length=500),
@@ -132,8 +124,6 @@ async def search_clauses(
 )
 
 
-@require_permission(Permissions.CONTRACTS_READ
-)
 @router.post("/click")
 async def log_click(
     query_id: str = Query(...),
@@ -154,8 +144,6 @@ async def log_click(
     return {"status": "logged"}
 
 
-@require_permission(Permissions.CONTRACTS_READ
-)
 @router.get("/popular")
 async def popular_queries(
     limit: int = Query(20, ge=1, le=100),
@@ -167,8 +155,6 @@ async def popular_queries(
 )}
 
 
-@require_permission(Permissions.AUDIT_READ
-)
 @router.get("/zero-results")
 async def zero_result_queries(
     limit: int = Query(20, ge=1, le=100),

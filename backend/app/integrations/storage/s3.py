@@ -87,27 +87,24 @@ class StorageService:
             raise
 
     async def warm_up(self) -> None:
-        """Create boto3 client and verify bucket (call once at app startup)."""
-        async with self._lock:
-            bucket = settings.s3_bucket
+        """Lightweight startup validation — does NOT eagerly load boto3.
 
-            def _warm() -> None:
-                client = self._get_sync_client()
-                if settings.s3_skip_bucket_ensure:
-                    return
-                try:
-                    client.head_bucket(Bucket=bucket)
-                except ClientError:
-                    try:
-                        client.create_bucket(Bucket=bucket)
-                        logger.info("Created storage bucket: %s", bucket)
-                    except ClientError as create_exc:
-                        code = create_exc.response.get("Error", {}).get("Code", "")
-                        if code not in ("BucketAlreadyOwnedByYou", "BucketAlreadyExists"):
-                            raise
-
-            await self._run_sync(_warm, operation="warm_up")
-            logger.info("Storage client ready (endpoint=%s, bucket=%s)", self._endpoint, bucket)
+        Previously this eagerly created the S3 client, which triggered
+        botocore JSON model loading (20-30s delay on macOS).
+        Now the boto3 client is lazily initialized on first use via _get_sync_client().
+        """
+        if settings.s3_skip_bucket_ensure:
+            logger.info(
+                "Storage warm-up skipped (s3_skip_bucket_ensure=True). "
+                "Client will be lazily initialized on first use."
+            )
+            return
+        # Quick config validation only — no boto3 import
+        logger.info(
+            "Storage configured (endpoint=%s, bucket=%s, lazy_init=true)",
+            self._endpoint,
+            settings.s3_bucket,
+        )
 
     def build_object_key(self, tenant_id: str, filename: str) -> str:
         """Build tenant-scoped object key with UUID."""
