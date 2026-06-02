@@ -719,7 +719,7 @@ class AIService:
             response_format={"type": "json_object"},
         )
 
-        prompt_version = int(getattr(template, "version", "1").split(".")[0]) if template else 1
+        prompt_version = template.version if template else 1
         return prompt, request, prompt_version
 
     def _build_execution_context(
