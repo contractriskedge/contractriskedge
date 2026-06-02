@@ -10,7 +10,9 @@ import {
   X, RotateCcw,
 } from "lucide-react";
 import type { SearchCategory, SavedSearch, SearchFilter, FilterCategory } from "./types";
-import { mockSearchCategories, mockSavedSearches } from "./mockData";
+
+const mockSearchCategories: SearchCategory[] = [];
+const mockSavedSearches: SavedSearch[] = [];
 
 interface SearchLeftSidebarProps {
   categories: SearchCategory[];

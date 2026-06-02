@@ -132,8 +132,12 @@ class ConnectionManager:
         }
 
     async def connect(self, websocket: WebSocket, tenant_id: str) -> None:
-        """Accept a WebSocket connection and register it for the tenant."""
-        await websocket.accept()
+        """Register a WebSocket connection for the tenant.
+
+        NOTE: The caller (router) is responsible for calling ``websocket.accept()``
+        *before* invoking this method.  This method only registers the connection
+        in the tenant-scoped connection map and updates Prometheus metrics.
+        """
         tid_label = tenant_id[:8]
         async with self._lock:
             if tenant_id not in self._connections:

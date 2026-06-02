@@ -149,8 +149,9 @@ class ExecutiveAnalyticsService:
         # High-risk vendors
         high_risk_vendors = await self.session.execute(
             sa_text("""
-                SELECT COUNT(DISTINCT counterparty)::int FROM upload_sessions
+                SELECT COUNT(DISTINCT metadata->>'counterparty')::int FROM upload_sessions
                 WHERE tenant_id = :tid
+                  AND metadata->>'counterparty' IS NOT NULL
                   AND upload_id IN (
                       SELECT DISTINCT upload_id FROM review_findings
                       WHERE tenant_id = :tid AND severity IN ('critical', 'high')
@@ -300,7 +301,7 @@ class ExecutiveAnalyticsService:
             SELECT
                 assigned_to,
                 COUNT(*) FILTER (WHERE status IN ('draft', 'ai_analyzed', 'in_review', 'pending_approval'))::int AS active,
-                COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
+                COUNT(*) FILTER (WHERE status IN ('approved', 'rejected', 'finalized', 'executed', 'closed'))::int AS completed,
                 COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600), 0)::float AS avg_hours
             FROM contract_reviews
             WHERE tenant_id = :tid AND assigned_to IS NOT NULL AND created_at >= :cutoff
@@ -347,7 +348,7 @@ class ExecutiveAnalyticsService:
         """Build SLA risk overview."""
         # Active reviews with SLA
         sla_sql = sa_text("""
-            SELECT review_id, status, assigned_to, sla_deadline, sla_due_at,
+            SELECT review_id, status, assigned_to, sla_deadline,
                    sla_breached, sla_status,
                    metadata->>'document_name' AS document_name
             FROM contract_reviews
@@ -369,7 +370,7 @@ class ExecutiveAnalyticsService:
         high_risk_ids: list[str] = []
 
         for row in reviews:
-            deadline = row.sla_deadline or row.sla_due_at
+            deadline = row.sla_deadline
             if not deadline:
                 continue
 

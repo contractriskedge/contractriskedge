@@ -7,7 +7,20 @@ import {
   Brain, FileText, BarChart3, User, Calendar, TrendingDown,
 } from "lucide-react";
 import type { FinancialExposure, FinancialDetail } from "./types";
-import { mockFinancialDetail } from "./mockData";
+
+const mockFinancialDetail: FinancialDetail = {
+  id: "",
+  contractId: "",
+  contractName: "",
+  exposureType: "",
+  exposureAmount: 0,
+  probability: 0,
+  riskLevel: "medium",
+  description: "No detail available",
+  mitigation: "",
+  owner: "",
+  dueDate: "",
+};
 
 interface CfoDetailDrawerProps {
   exposure: FinancialExposure | null;

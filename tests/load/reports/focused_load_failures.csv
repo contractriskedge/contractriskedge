@@ -1,0 +1,15 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+GET,analytics_health,CatchResponseError('HTTP 429'),392,2026-05-28T01:46:26Z,2026-05-28T01:49:10Z
+GET,exec_dashboard,CatchResponseError('HTTP 429'),583,2026-05-28T01:46:27Z,2026-05-28T01:49:10Z
+GET,review_dashboard,CatchResponseError('HTTP 500'),36,2026-05-28T01:46:23Z,2026-05-28T01:49:02Z
+GET,analytics_health,CatchResponseError('HTTP 500'),24,2026-05-28T01:46:23Z,2026-05-28T01:49:02Z
+GET,analytics_metrics,CatchResponseError('HTTP 500'),19,2026-05-28T01:46:23Z,2026-05-28T01:49:02Z
+GET,analytics_metrics,CatchResponseError('HTTP 429'),390,2026-05-28T01:46:26Z,2026-05-28T01:49:10Z
+GET,review_detail,CatchResponseError('HTTP 500'),9,2026-05-28T01:46:24Z,2026-05-28T01:49:01Z
+GET,list_reviews,CatchResponseError('HTTP 500'),71,2026-05-28T01:46:23Z,2026-05-28T01:49:02Z
+GET,list_reviews,CatchResponseError('HTTP 429'),1158,2026-05-28T01:46:26Z,2026-05-28T01:49:10Z
+GET,review_dashboard,CatchResponseError('HTTP 429'),815,2026-05-28T01:46:26Z,2026-05-28T01:49:10Z
+GET,anomalies,CatchResponseError('HTTP 429'),186,2026-05-28T01:46:27Z,2026-05-28T01:49:10Z
+GET,anomalies,CatchResponseError('HTTP 500'),14,2026-05-28T01:46:25Z,2026-05-28T01:49:01Z
+GET,review_detail,CatchResponseError('HTTP 429'),180,2026-05-28T01:46:26Z,2026-05-28T01:49:10Z
+GET,exec_dashboard,CatchResponseError('HTTP 500'),27,2026-05-28T01:46:24Z,2026-05-28T01:49:02Z

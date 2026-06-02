@@ -322,7 +322,7 @@ class AnomalyDetector:
             sa_text("""
                 SELECT COUNT(*)::int AS breaches FROM contract_reviews
                 WHERE tenant_id = :tid AND sla_breached = TRUE
-                  AND updated_at > NOW() - :lookback::interval
+                  AND updated_at > NOW() - CAST(:lookback AS interval)
             """),
             {"tid": self.tenant_id, "lookback": timedelta(hours=lookback_hours)},
         )
@@ -333,8 +333,8 @@ class AnomalyDetector:
             sa_text("""
                 SELECT COUNT(*)::int AS breaches FROM contract_reviews
                 WHERE tenant_id = :tid AND sla_breached = TRUE
-                  AND updated_at > NOW() - :lookback::interval
-                  AND updated_at <= NOW() - :lookback_half::interval
+                  AND updated_at > NOW() - CAST(:lookback AS interval)
+                  AND updated_at <= NOW() - CAST(:lookback_half AS interval)
             """),
             {
                 "tid": self.tenant_id,
@@ -367,12 +367,12 @@ class AnomalyDetector:
         """Detect volume-related anomalies."""
         anomalies: list[AnomalyItem] = []
 
-        # Check for sudden drop in review completions
+        # Check for sudden drop in review completions (completed_at, not invalid status enum)
         recent = await self.session.execute(
             sa_text("""
                 SELECT COUNT(*)::int AS completed FROM contract_reviews
-                WHERE tenant_id = :tid AND status = 'completed'
-                  AND updated_at > NOW() - :lookback::interval
+                WHERE tenant_id = :tid AND completed_at IS NOT NULL
+                  AND updated_at > NOW() - CAST(:lookback AS interval)
             """),
             {"tid": self.tenant_id, "lookback": timedelta(hours=lookback_hours)},
         )
@@ -381,9 +381,9 @@ class AnomalyDetector:
         previous = await self.session.execute(
             sa_text("""
                 SELECT COUNT(*)::int AS completed FROM contract_reviews
-                WHERE tenant_id = :tid AND status = 'completed'
-                  AND updated_at > NOW() - :lookback::interval
-                  AND updated_at <= NOW() - :lookback_half::interval
+                WHERE tenant_id = :tid AND completed_at IS NOT NULL
+                  AND updated_at > NOW() - CAST(:lookback AS interval)
+                  AND updated_at <= NOW() - CAST(:lookback_half AS interval)
             """),
             {
                 "tid": self.tenant_id,
@@ -421,7 +421,7 @@ class AnomalyDetector:
             sa_text("""
                 SELECT COUNT(*)::int AS critical FROM review_findings
                 WHERE tenant_id = :tid AND severity IN ('critical', 'high')
-                  AND created_at > NOW() - :lookback::interval
+                  AND created_at > NOW() - CAST(:lookback AS interval)
             """),
             {"tid": self.tenant_id, "lookback": timedelta(hours=lookback_hours)},
         )
@@ -431,8 +431,8 @@ class AnomalyDetector:
             sa_text("""
                 SELECT COUNT(*)::int AS critical FROM review_findings
                 WHERE tenant_id = :tid AND severity IN ('critical', 'high')
-                  AND created_at > NOW() - :lookback::interval
-                  AND created_at <= NOW() - :lookback_half::interval
+                  AND created_at > NOW() - CAST(:lookback AS interval)
+                  AND created_at <= NOW() - CAST(:lookback_half AS interval)
             """),
             {
                 "tid": self.tenant_id,
@@ -471,7 +471,7 @@ class AnomalyDetector:
                 SELECT COALESCE(AVG(latency_ms), 0)::float AS avg_latency
                 FROM ai_execution_runs
                 WHERE tenant_id = :tid AND status = 'completed'
-                  AND created_at > NOW() - :lookback::interval
+                  AND created_at > NOW() - CAST(:lookback AS interval)
             """),
             {"tid": self.tenant_id, "lookback": timedelta(hours=lookback_hours)},
         )
@@ -482,8 +482,8 @@ class AnomalyDetector:
                 SELECT COALESCE(AVG(latency_ms), 0)::float AS avg_latency
                 FROM ai_execution_runs
                 WHERE tenant_id = :tid AND status = 'completed'
-                  AND created_at > NOW() - :lookback::interval
-                  AND created_at <= NOW() - :lookback_half::interval
+                  AND created_at > NOW() - CAST(:lookback AS interval)
+                  AND created_at <= NOW() - CAST(:lookback_half AS interval)
             """),
             {
                 "tid": self.tenant_id,
@@ -862,7 +862,7 @@ class DigestGenerator:
         completed_today = await self.session.execute(
             sa_text("""
                 SELECT COUNT(*)::int FROM contract_reviews
-                WHERE tenant_id = :tid AND status = 'completed' AND completed_at >= CURRENT_DATE
+                WHERE tenant_id = :tid AND completed_at >= CURRENT_DATE
             """),
             {"tid": self.tenant_id},
         )

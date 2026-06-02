@@ -32,6 +32,8 @@ export interface AuthContextType {
   login: () => Promise<void>;
   logout: () => void;
   hasPermission: (permission: string) => boolean;
+  /** Get a valid access token, fetching a new one if necessary. */
+  getAccessToken: () => Promise<string | null>;
   /** Connection state of the realtime WebSocket. */
   realtimeState: ConnectionState;
 }
@@ -44,6 +46,7 @@ const AuthContext = createContext<AuthContextType>({
   login: async () => {},
   logout: () => {},
   hasPermission: () => false,
+  getAccessToken: async () => null,
   realtimeState: "disconnected",
 });
 
@@ -51,39 +54,46 @@ export const useAuth = () => useContext(AuthContext);
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api/v1";
 
+function readJwtTenantId(jwt: string): string | null {
+  try {
+    if (jwt.split(".").length !== 3) return null;
+    const payload = JSON.parse(atob(jwt.split(".")[1]));
+    return typeof payload.tenant_id === "string" ? payload.tenant_id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Dev JWT aligned with appSession tenant (backend scopes all data by JWT tenant_id). */
+async function fetchDevBackendJwt(): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_URL}/auth/token`, { method: "POST" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return typeof data.access_token === "string" ? data.access_token : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Token Refresh ─────────────────────────────────────────────────
 
 /**
- * Attempt to refresh the JWT token using Auth0's silent authentication.
- * Falls back to the dev-login endpoint in development environments.
+ * Attempt to refresh the JWT token using Auth0's session.
  */
-async function refreshToken(currentToken: string | null): Promise<string | null> {
-  // If Auth0 SDK is available, use silent auth
-  if (typeof window !== "undefined") {
-    try {
-      // Check if @auth0/auth0-spa-js is loaded (for Auth0 environments)
-      const auth0Client = (window as unknown as { __auth0_client?: { getTokenSilently: () => Promise<string> } }).__auth0_client;
-      if (auth0Client && typeof auth0Client.getTokenSilently === "function") {
-        const token = await auth0Client.getTokenSilently();
-        if (token) return token;
-      }
-    } catch {
-      // Silent auth failed — fall through to dev-login
-    }
-  }
-
-  // Fallback: use the dev-login endpoint (development only)
+async function refreshToken(): Promise<string | null> {
+  // Fetch the current session from Auth0
   try {
-    const res = await fetch(`${API_URL}/auth/token`, { method: "POST" });
+    const res = await fetch("/api/auth/me");
     if (res.ok) {
       const data = await res.json();
-      return data.access_token || null;
+      // Auth0 returns the user session — the access token may be in the response
+      return data.accessToken || null;
     }
   } catch {
-    // Network error — return current token (may be expired)
+    // Session fetch failed
   }
-
-  return currentToken;
+  return null;
 }
 
 // ── Auth Provider ─────────────────────────────────────────────────
@@ -95,43 +105,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [realtimeState, setRealtimeState] = useState<ConnectionState>("disconnected");
   const realtimeStarted = useRef(false);
-
-  // ── Initialize auth on mount ───────────────────────────────────
-  useEffect(() => {
-    const storedToken = localStorage.getItem("auth_token");
-    if (storedToken) {
-      try {
-        const payload = JSON.parse(atob(storedToken.split(".")[1]));
-
-        // Check expiration
-        if (payload.exp && payload.exp * 1000 < Date.now()) {
-          // Token expired — try to refresh
-          refreshToken(storedToken).then((newToken) => {
-            if (newToken && newToken !== storedToken) {
-              applyToken(newToken);
-            } else {
-              localStorage.removeItem("auth_token");
-              setIsLoading(false);
-            }
-          });
-          return;
-        }
-
-        setUser({
-          sub: payload.sub || "",
-          email: payload.email || "",
-          name: payload.name || "",
-          tenant_id: payload.tenant_id || "",
-          role: payload.role || "",
-          permissions: payload.permissions || [],
-        });
-        setToken(storedToken);
-      } catch {
-        localStorage.removeItem("auth_token");
-      }
-    }
-    setIsLoading(false);
-  }, []);
+  const authChecked = useRef(false);
 
   // ── Apply a decoded token ──────────────────────────────────────
   const applyToken = useCallback((newToken: string) => {
@@ -151,6 +125,66 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Invalid token
     }
   }, []);
+
+  /** Keep localStorage JWT tenant_id in sync with the app session (fixes review 404s in dev). */
+  const syncBackendJwt = useCallback(
+    async (session: User) => {
+      if (typeof window === "undefined") return;
+
+      // Always mint a fresh backend dev JWT locally so POST mutations get
+      // workflows:approve (stale localStorage tokens often only had contracts:read).
+      if (process.env.NODE_ENV === "development") {
+        const devJwt = await fetchDevBackendJwt();
+        if (devJwt) {
+          applyToken(devJwt);
+          return;
+        }
+      }
+
+      const stored = localStorage.getItem("auth_token");
+      if (stored && readJwtTenantId(stored) === session.tenant_id) {
+        applyToken(stored);
+        return;
+      }
+
+      if (stored) {
+        localStorage.removeItem("auth_token");
+      }
+    },
+    [applyToken],
+  );
+
+  // ── Initialize auth on mount (ONCE) ────────────────────────────
+  useEffect(() => {
+    if (authChecked.current) return;
+    authChecked.current = true;
+
+    fetch("/api/auth/me")
+      .then((res) => {
+        if (!res.ok) throw new Error("Not authenticated");
+        return res.json();
+      })
+      .then(async (session) => {
+        if (session?.sub) {
+          const nextUser: User = {
+            sub: session.sub,
+            email: session.email || "",
+            name: session.name || "",
+            tenant_id: session.tenant_id || "",
+            role: session.role || "",
+            permissions: session.permissions || [],
+          };
+          setUser(nextUser);
+          await syncBackendJwt(nextUser);
+        }
+      })
+      .catch(() => {
+        localStorage.removeItem("auth_token");
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
+  }, [syncBackendJwt]);
 
   // ── Forced logout listener ─────────────────────────────────────
   // When the server terminates the session (admin action, concurrent
@@ -175,6 +209,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!token) return;
 
+    // Only attempt JWT parsing if token looks like a JWT (has 3 parts)
+    if (typeof token !== "string" || token.split(".").length !== 3) return;
+
     try {
       const payload = JSON.parse(atob(token.split(".")[1]));
       const expMs = payload.exp ? payload.exp * 1000 : 0;
@@ -189,7 +226,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const refreshDelay = Math.max(timeUntilExpiry - refreshMargin, 10_000);
 
       const refreshTimer = setTimeout(async () => {
-        const newToken = await refreshToken(token);
+        const newToken = await refreshToken();
         if (newToken && newToken !== token) {
           applyToken(newToken);
         }
@@ -210,7 +247,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const client = getRealtimeClient({
       getToken: async () => {
         // Try to get a fresh token, fall back to current
-        const fresh = await refreshToken(token);
+        const fresh = await refreshToken();
         return fresh || token;
       },
       onEvent: (event) => {
@@ -247,28 +284,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ── Login ──────────────────────────────────────────────────────
   const login = useCallback(async () => {
     setError(null);
+    setIsLoading(true);
+
     try {
-      const res = await fetch(`${API_URL}/auth/dev-login`, {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-      });
-
-      if (!res.ok) {
-        throw new Error("Authentication failed");
+      // Local dev: set appSession cookie so middleware allows /dashboard
+      if (process.env.NODE_ENV === "development") {
+        const res = await fetch("/api/auth/dev-login", { method: "POST" });
+        if (res.ok) {
+          const session = await res.json();
+          const nextUser: User = {
+            sub: session.sub,
+            email: session.email || "",
+            name: session.name || "",
+            tenant_id: session.tenant_id || "",
+            role: session.role || "",
+            permissions: session.permissions || [],
+          };
+          setUser(nextUser);
+          await syncBackendJwt(nextUser);
+          setIsLoading(false);
+          window.location.href = "/dashboard";
+          return;
+        }
       }
-
-      const data = await res.json();
-      const accessToken = data.access_token;
-      applyToken(accessToken);
-
-      // Register session with governance system
-      sessionGovernance.register().catch(() => {
-        // Session governance is optional — fail gracefully
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to authenticate");
+    } catch {
+      // Fall through to Auth0
     }
-  }, [applyToken]);
+
+    window.location.href = "/api/auth/login";
+  }, [syncBackendJwt]);
 
   // ── Logout ─────────────────────────────────────────────────────
   const logout = useCallback(() => {
@@ -281,7 +325,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(null);
     setRealtimeState("disconnected");
     localStorage.removeItem("auth_token");
+
+    // Redirect to Auth0 logout
+    window.location.href = "/api/auth/logout";
   }, []);
+
+  // ── getAccessToken ──────────────────────────────────────────────
+  // Returns the current token from state, or fetches a dev JWT if none is set.
+  const getAccessToken = useCallback(async (): Promise<string | null> => {
+    if (token) return token;
+
+    // Align with api client GETs (localStorage + dev mint), not only React state.
+    const { getValidToken } = await import("@/services/api/client");
+    const stored = await getValidToken();
+    if (stored) {
+      applyToken(stored);
+      return stored;
+    }
+
+    const devJwt = await fetchDevBackendJwt();
+    if (devJwt) {
+      applyToken(devJwt);
+      return devJwt;
+    }
+    return null;
+  }, [token, applyToken]);
 
   // ── Permission check ───────────────────────────────────────────
   const hasPermission = useCallback(
@@ -299,6 +367,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         logout,
         hasPermission,
+        getAccessToken,
         realtimeState,
       }}
     >

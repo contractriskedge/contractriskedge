@@ -1,0 +1,68 @@
+{
+  "contract_id": "golden_dpa_001",
+  "contract_type": "dpa",
+  "description": "Data Processing Agreement with GDPR compliance requirements",
+  "jurisdiction": "eu",
+  "risk_profile": "high_risk",
+  "tags": ["dpa", "gdpr", "privacy", "high_risk"],
+  "expected_risk_score": 0.70,
+  "expected_clause_types": [
+    "data_privacy",
+    "compliance",
+    "liability",
+    "security",
+    "termination",
+    "governing_law",
+    "indemnification"
+  ],
+  "expected_findings": [
+    {
+      "clause_type": "data_privacy",
+      "severity": "critical",
+      "title": "GDPR data processing obligations",
+      "description_contains": "data processing",
+      "min_confidence": 0.9,
+      "required": true
+    },
+    {
+      "clause_type": "compliance",
+      "severity": "critical",
+      "title": "GDPR compliance requirements",
+      "description_contains": "gdpr",
+      "min_confidence": 0.9,
+      "required": true
+    },
+    {
+      "clause_type": "security",
+      "severity": "high",
+      "title": "Technical and organizational security measures",
+      "description_contains": "security",
+      "min_confidence": 0.8,
+      "required": true
+    },
+    {
+      "clause_type": "liability",
+      "severity": "high",
+      "title": "Data breach liability",
+      "description_contains": "breach",
+      "min_confidence": 0.8,
+      "required": true
+    },
+    {
+      "clause_type": "indemnification",
+      "severity": "high",
+      "title": "Data processing indemnification",
+      "description_contains": "indemnif",
+      "min_confidence": 0.7,
+      "required": true
+    },
+    {
+      "clause_type": "termination",
+      "severity": "medium",
+      "title": "Data deletion upon termination",
+      "description_contains": "deletion",
+      "min_confidence": 0.7,
+      "required": true
+    }
+  ]
+}

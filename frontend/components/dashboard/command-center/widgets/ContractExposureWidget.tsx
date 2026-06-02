@@ -6,127 +6,98 @@
  * - Top-5 counterparties by liability
  * - Risk driver breakdown as horizontal bar chart
  * - Click navigates to portfolio view
+ *
+ * Data sourced from executive aggregation layer — no hardcoded defaults.
  */
 
 "use client";
 
 import React from "react";
-
-interface ExposureData {
-  totalAtRisk: number;
-  avgRiskScore: number;
-  trend: "up" | "down" | "stable";
-  topCounterparties: { name: string; liability: number; riskScore: number }[];
-  topRiskDrivers: { driver: string; contribution: number }[];
-}
+import type { ContractExposureData } from "@/src/lib/executive/executiveTypes";
 
 interface ContractExposureWidgetProps {
-  summary?: { contract_exposure?: ExposureData } | null;
+  exposure?: ContractExposureData | null;
 }
 
-const DEFAULT_DATA: ExposureData = {
-  totalAtRisk: 4_250_000,
-  avgRiskScore: 62,
-  trend: "up",
-  topCounterparties: [
-    { name: "Acme Corp", liability: 1_200_000, riskScore: 78 },
-    { name: "GlobalTech Inc", liability: 980_000, riskScore: 65 },
-    { name: "Prime Suppliers", liability: 750_000, riskScore: 71 },
-    { name: "DataSync LLC", liability: 540_000, riskScore: 55 },
-    { name: "West Coast Logistics", liability: 420_000, riskScore: 48 },
-  ],
-  topRiskDrivers: [
-    { driver: "Liability Caps", contribution: 32 },
-    { driver: "Indemnification", contribution: 24 },
-    { driver: "Termination Rights", contribution: 18 },
-    { driver: "Data Privacy", contribution: 15 },
-    { driver: "Force Majeure", contribution: 11 },
-  ],
-};
+export function ContractExposureWidget({ exposure }: ContractExposureWidgetProps) {
+  if (!exposure) {
+    return (
+      <div className="flex items-center justify-center h-32 text-xs text-gray-400">
+        No exposure data available
+      </div>
+    );
+  }
 
-export function ContractExposureWidget({ summary }: ContractExposureWidgetProps) {
-  const data = summary?.contract_exposure ?? DEFAULT_DATA;
-  const maxLiability = Math.max(...data.topCounterparties.map((c) => c.liability));
-  const totalDriverContrib = data.topRiskDrivers.reduce((a, b) => a + b.contribution, 0);
+  const maxLiability = Math.max(...exposure.by_category.map((c) => c.exposure_score), 1);
+  const totalDriverContrib = exposure.top_risk_drivers.reduce((a, b) => a + b.contribution_pct, 0);
 
   const formatCurrency = (val: number) =>
     new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(val);
 
+  const concentrationColor = exposure.concentration_risk === "highly_concentrated" ? "text-red-600" :
+    exposure.concentration_risk === "concentrated" ? "text-amber-600" : "text-green-600";
+
   return (
     <div className="space-y-3">
-      {/* ── KPI Row ──────────────────────────────────────────── */}
+      {/* ── KPI Row ── */}
       <div className="flex items-center gap-4">
         <div className="flex-1">
-          <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Total at Risk</span>
+          <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Total Exposure Score</span>
           <div className="flex items-center gap-2">
             <span className="text-xl font-bold text-red-600 dark:text-red-400">
-              {formatCurrency(data.totalAtRisk)}
+              {exposure.total_exposure_score.toFixed(1)}
             </span>
-            <span className={`text-xs ${
-              data.trend === "up" ? "text-red-500" : data.trend === "down" ? "text-green-500" : "text-gray-400"
-            }`}>
-              {data.trend === "up" ? "↑" : data.trend === "down" ? "↓" : "→"}
+            <span className={`text-xs ${concentrationColor}`}>
+              {exposure.concentration_risk === "highly_concentrated" ? "↑" : exposure.concentration_risk === "concentrated" ? "→" : "↓"}
             </span>
           </div>
-        </div>
-        <div className="flex-1">
-          <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Avg Risk Score</span>
-          <div className="flex items-center gap-2">
-            <span className={`text-xl font-bold ${
-              data.avgRiskScore >= 70 ? "text-red-600 dark:text-red-400" :
-              data.avgRiskScore >= 50 ? "text-amber-600 dark:text-amber-400" :
-              "text-green-600 dark:text-green-400"
-            }`}>
-              {data.avgRiskScore}
-            </span>
-            <span className="text-xs text-gray-500">/100</span>
-          </div>
+          <span className="text-[10px] text-gray-400 capitalize">{exposure.concentration_risk.replace("_", " ")}</span>
         </div>
       </div>
 
-      {/* ── Top Counterparties ────────────────────────────────── */}
+      {/* ── Categories by Exposure ── */}
       <div>
         <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase mb-1 block">
-          Top Counterparties by Liability
+          Exposure by Category
         </span>
         <div className="space-y-1">
-          {data.topCounterparties.map((cp) => (
-            <div key={cp.name} className="flex items-center gap-2">
-              <span className="text-xs text-gray-600 dark:text-gray-400 w-28 truncate">{cp.name}</span>
+          {exposure.by_category.slice(0, 5).map((cat) => (
+            <div key={cat.category} className="flex items-center gap-2">
+              <span className="text-xs text-gray-600 dark:text-gray-400 w-28 truncate">{cat.category}</span>
               <div className="flex-1 h-2 bg-gray-100 dark:bg-navy-700 rounded-full overflow-hidden">
                 <div
                   className="h-full rounded-full"
                   style={{
-                    width: `${(cp.liability / maxLiability) * 100}%`,
-                    backgroundColor: cp.riskScore >= 70 ? "#EF4444" : cp.riskScore >= 50 ? "#F59E0B" : "#10B981",
+                    width: `${(cat.exposure_score / maxLiability) * 100}%`,
+                    backgroundColor: cat.avg_severity === "critical" ? "#EF4444" : cat.avg_severity === "high" ? "#F59E0B" : "#10B981",
                   }}
                 />
               </div>
-              <span className="text-xs text-navy-900 dark:text-white font-medium w-20 text-right">
-                {formatCurrency(cp.liability)}
+              <span className="text-xs text-navy-900 dark:text-white font-medium w-12 text-right">
+                {cat.exposure_share_pct.toFixed(0)}%
               </span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* ── Risk Drivers ──────────────────────────────────────── */}
+      {/* ── Top Risk Drivers ── */}
       <div>
         <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase mb-1 block">
           Top Risk Drivers
         </span>
         <div className="space-y-1">
-          {data.topRiskDrivers.map((rd) => (
-            <div key={rd.driver} className="flex items-center gap-2">
-              <span className="text-xs text-gray-600 dark:text-gray-400 w-28 truncate">{rd.driver}</span>
+          {exposure.top_risk_drivers.slice(0, 5).map((rd) => (
+            <div key={rd.clause_type} className="flex items-center gap-2">
+              <span className="text-xs text-gray-600 dark:text-gray-400 w-28 truncate">{rd.clause_type}</span>
               <div className="flex-1 h-2 bg-gray-100 dark:bg-navy-700 rounded-full overflow-hidden">
                 <div
                   className="h-full rounded-full bg-navy-500 dark:bg-navy-400"
-                  style={{ width: `${(rd.contribution / totalDriverContrib) * 100}%` }}
+                  style={{ width: `${(rd.contribution_pct / totalDriverContrib) * 100}%` }}
                 />
               </div>
               <span className="text-xs text-navy-900 dark:text-white font-medium w-8 text-right">
-                {rd.contribution}%
+                {rd.contribution_pct.toFixed(0)}%
               </span>
             </div>
           ))}

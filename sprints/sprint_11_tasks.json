@@ -1,0 +1,68 @@
+{
+  "sprint": 11,
+  "tickets": [
+    {
+      "id": "S11-001",
+      "title": "AI Copilot: Operational AI Assistant",
+      "description": "Context-aware reviewer assistant integrated into Reviewer Workspace with explanations, feedback loop and guardrails.",
+      "priority": "Critical",
+      "complexity": "High",
+      "acceptance_criteria": [
+        "Displays explanations and model metadata for suggestions",
+        "Logs suggestions to immutable audit store with correlation IDs",
+        "Provides reviewer feedback control stored for learning pipeline",
+        "Enforces guardrails for out-of-scope actions",
+        "Includes unit and integration tests"
+      ]
+    },
+    {
+      "id": "S11-002",
+      "title": "Immutable Audit Logging",
+      "description": "Append-only audit log service for reviewer actions, AI suggestions, policy changes and exports.",
+      "priority": "Critical",
+      "complexity": "High",
+      "acceptance_criteria": [
+        "Cryptographically chained or immutable-backed audit entries",
+        "APIs for write/read with tenant scoping",
+        "Logs actor, timestamp, before/after state, and retention metadata",
+        "Administrators can export tenant-scoped audit trails"
+      ]
+    },
+    {
+      "id": "S11-003",
+      "title": "Dashboard Drilldowns & Exports (Executive)",
+      "description": "Complete Executive Dashboard drilldowns, scheduled export, and tenant-aware access controls.",
+      "priority": "Critical",
+      "complexity": "High",
+      "acceptance_criteria": [
+        "Drilldown endpoints return paginated, tenant-scoped data with RBAC enforcement",
+        "Scheduled exports write to tenant-isolated storage",
+        "APIs emit observability metrics"
+      ]
+    },
+    {
+      "id": "S11-004",
+      "title": "Reviewer Workspace Enhancements (Bulk Actions)",
+      "description": "Multi-select bulk reviewer actions with safety checks and workflow versioning support.",
+      "priority": "Critical",
+      "complexity": "High",
+      "acceptance_criteria": [
+        "UI multi-select and preview of mass action effects",
+        "Backend dry-run validation and impact summary",
+        "Bulk actions create workflow version records and are logged"
+      ]
+    },
+    {
+      "id": "S11-005",
+      "title": "Notification Prioritization",
+      "description": "Intelligent notification prioritization to reduce alert fatigue.",
+      "priority": "High",
+      "complexity": "Medium",
+      "acceptance_criteria": [
+        "Notifications ranked by rules and AI scoring",
+        "Users can configure thresholds",
+        "Observability metrics for notification throughput"
+      ]
+    }
+  ]
+}

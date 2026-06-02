@@ -9,6 +9,8 @@ from app.domains.ai.llm import StructuredOutputParser, OpenAIProvider
 from app.domains.ai.schemas import (
     AnalysisResult, RiskFinding, RedlineSuggestion,
     AnalysisRequest, AnalysisStatusResponse,
+    AIReviewCopilotRequest, AIReviewCopilotResponse,
+    AIReviewFeedbackRequest, AIReviewFeedbackResponse,
 )
 from app.domains.ai.prompts import prompt_registry
 
@@ -105,6 +107,24 @@ class TestAnalysisSchemas:
     def test_invalid_analysis_type_rejected(self):
         with pytest.raises(ValidationError):
             AnalysisRequest(upload_id="test", analysis_type="invalid")
+
+    def test_review_copilot_request_validation(self):
+        request = AIReviewCopilotRequest(
+            review_id="review-123",
+            prompt="Please summarize the highest-risk items.",
+            max_suggestions=2,
+        )
+        assert request.review_id == "review-123"
+        assert request.max_suggestions == 2
+
+    def test_review_copilot_feedback_validation(self):
+        feedback = AIReviewFeedbackRequest(
+            review_id="review-123",
+            suggestion_id="sugg-1",
+            helpful=True,
+            feedback="The recommendation was accurate and useful.",
+        )
+        assert feedback.helpful is True
 
 
 class TestPromptTemplates:

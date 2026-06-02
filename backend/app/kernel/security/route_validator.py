@@ -200,10 +200,10 @@ def validate_routes(app: FastAPI) -> list[dict[str, Any]]:
         else:
             logger.info(
                 "Route permission validation: %d warning(s), no errors",
-                len(warnings),
+                len(warnings_list),
             )
 
-        for issue in warnings:
+        for issue in warnings_list:
             logger.warning(
                 "  %s — %s (endpoint: %s)",
                 issue["route"], issue["message"], issue["endpoint"],

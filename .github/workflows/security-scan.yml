@@ -1,0 +1,137 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Every Monday 6 AM
+
+jobs:
+  # ── Dependency Scanning ─────────────────────────────────────────
+  dependency-scan:
+    name: Dependency CVE Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan Python dependencies (pip-audit)
+        uses: pypa/gh-action-pip-audit@v1
+        with:
+          inputs: backend/requirements.txt
+          summary: true
+
+      - name: Scan Python dev dependencies (pip-audit)
+        uses: pypa/gh-action-pip-audit@v1
+        with:
+          inputs: backend/requirements-dev.txt
+          summary: true
+
+      - name: Scan Node dependencies (npm audit)
+        working-directory: frontend
+        run: |
+          npm audit --audit-level=high
+        continue-on-error: true
+
+  # ── Container Scanning ──────────────────────────────────────────
+  container-scan:
+    name: Container CVE Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build API image
+        run: docker build -t contractrisk-api:scan -f backend/Dockerfile backend/
+
+      - name: Scan API image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: contractrisk-api:scan
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Build Worker image
+        run: docker build -t contractrisk-worker:scan -f backend/Dockerfile.worker backend/
+
+      - name: Scan Worker image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: contractrisk-worker:scan
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Build Frontend image
+        run: docker build -t contractrisk-frontend:scan -f frontend/Dockerfile frontend/
+
+      - name: Scan Frontend image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: contractrisk-frontend:scan
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+  # ── SBOM Generation ─────────────────────────────────────────────
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Python SBOM
+        uses: aquasecurity/trivy-action@master
+        with:
+          filesystem: backend/
+          format: cyclonedx
+          output: sbom-backend.json
+
+      - name: Generate Node SBOM
+        uses: aquasecurity/trivy-action@master
+        with:
+          filesystem: frontend/
+          format: cyclonedx
+          output: sbom-frontend.json
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom-*.json
+
+  # ── Secret Scanning ─────────────────────────────────────────────
+  secret-scan:
+    name: Secret Detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan for secrets with Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for hardcoded secrets in Python files
+        run: |
+          # Detect potential hardcoded secrets in Python
+          grep -rn "password\|secret\|api_key\|api-key\|token\|credential" \
+            --include="*.py" \
+            --exclude-dir=__pycache__ \
+            --exclude-dir=.venv \
+            --exclude-dir=.venv_py311 \
+            --exclude-dir=node_modules \
+            --exclude="*test*" \
+            --exclude="*conftest*" \
+            --exclude="*migration*" \
+            --exclude="*config.py" \
+            backend/app/ 2>/dev/null | \
+            grep -v "settings\.\|os\.getenv\|os\.environ\|config\.\|\.env\|password\s*=\s*\"\*\*\*\"" | \
+            head -20
+        continue-on-error: true

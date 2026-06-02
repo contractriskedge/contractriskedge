@@ -202,7 +202,25 @@ export function RightPanel({
     {
       id: "welcome",
       role: "assistant",
-      content: "I'm your AI Negotiation Assistant. I can help analyze clauses, suggest fallback language, summarize negotiation history, and recommend strategies. What would you like to explore?",
+      content: "I've analyzed this contract against your playbooks. Here are your top negotiation opportunities:",
+      timestamp: new Date(),
+    },
+    {
+      id: "opp-1",
+      role: "assistant",
+      content: "🔴 **Liability Cap** — 82% success rate\nCurrent 24-month cap is above market median. Consider offering 18-month compromise with full carve-out protection.",
+      timestamp: new Date(),
+    },
+    {
+      id: "opp-2",
+      role: "assistant",
+      content: "🟡 **Indemnification** — 74% success rate\n3-year survival period is above market. Vendor may accept 2-year compromise with sunset clause.",
+      timestamp: new Date(),
+    },
+    {
+      id: "opp-3",
+      role: "assistant",
+      content: "🟢 **Termination** — 68% success rate\nNo-early-termination-fee language is strong leverage. 85% of enterprise buyers successfully include this.",
       timestamp: new Date(),
     },
   ]);
@@ -322,7 +340,7 @@ export function RightPanel({
                 </button>
               </div>
               <div className="flex gap-1 mt-1">
-                {["Analyze liability cap", "SLA strategy", "Fallback options"].map(suggestion => (
+                {["Liability cap strategy", "Indemnification terms", "SLA negotiation"].map(suggestion => (
                   <button
                     key={suggestion}
                     onClick={() => { setChatInput(suggestion); }}

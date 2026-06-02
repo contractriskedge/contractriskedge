@@ -573,14 +573,21 @@ class ReviewService:
                     )
                     finding = finding_result.scalar_one_or_none()
 
+                # If the linked finding doesn't exist (orphaned reference), compute
+                # the delta using the redline's own data but with finding_id=None
+                # to avoid FK violation on risk_delta_events.finding_id.
+                delta_finding = finding if finding else None
                 delta = await self.risk_delta.compute_redline_decision_delta(
                     review_id=str(redline_row.review_id),
-                    finding=finding or redline_row,
+                    finding=delta_finding or redline_row,
                     redline=redline_row,
                     decision=decision,
                     actor_id=self.user.id,
                     rationale=review_notes or "",
                 )
+                # Null out finding_id if the finding record doesn't actually exist
+                if not finding and redline_row.finding_id:
+                    delta.finding_id = None
                 await self.risk_delta.persist_delta(delta)
 
                 # ── Auto-sync: when redline is accepted/modified, auto-resolve linked finding ──
@@ -2548,6 +2555,38 @@ class ReviewService:
             "total_changes": len(changes),
         }
 
+    # ── Stub endpoints for frontend compatibility ─────────────────────
+    # These return empty/default data until the full implementations
+    # are built out. They exist so the frontend doesn't get 404s.
+
+    async def get_policy_violations(self, review_id: str) -> dict:
+        return {"violations": []}
+
+    async def get_missing_clauses(self, review_id: str) -> dict:
+        return {"missing_clauses": []}
+
+    async def get_recommendations(self, review_id: str) -> dict:
+        return {"recommendations": []}
+
+    async def get_workflow(self, review_id: str) -> dict:
+        return {
+            "current_stage": "ai_review",
+            "available_actions": [],
+            "stages": [],
+            "sla_remaining_hours": 0,
+            "escalation_level": 0,
+            "reviewers": [],
+            "queue_position": 0,
+            "queue_total": 0,
+            "workload_score": 0,
+        }
+
+    async def get_activity(self, review_id: str) -> dict:
+        return {"events": []}
+
+    async def get_document(self, review_id: str) -> dict:
+        return {"sections": [], "total_pages": 0}
+
 
 def _default_version_label(version_number: int, accepted_redline_ids: Optional[list[str]] = None) -> str:
     """Generate a descriptive version label based on version number and content."""
@@ -2555,7 +2594,7 @@ def _default_version_label(version_number: int, accepted_redline_ids: Optional[l
         1: "Original Upload",
         2: "AI Redlines Applied",
         3: "Legal Review Updates",
-        4: "Final Approved Copy",
+        4: "Approval Candidate",
     }
     if version_number in labels:
         return labels[version_number]

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
@@ -327,11 +328,28 @@ class PlaybookService:
                                  industry: Optional[str] = None,
                                  risk_score: Optional[float] = None,
                                  findings: Optional[list[dict]] = None,
-                                 correlation_id: Optional[str] = None) -> Optional[dict]:
-        """Run full policy evaluation for a contract against a playbook."""
+                                 correlation_id: Optional[str] = None,
+                                 simulation_mode: bool = False) -> Optional[dict]:
+        """Run full policy evaluation for a contract against a playbook.
+
+        Args:
+            simulation_mode: If True, runs evaluation without persisting results
+                             (true dry-run). Returns result dict without saving.
+        """
         playbook = await self.repo.get_playbook(playbook_id, self.tenant_id)
         if not playbook:
             return None
+
+        # In simulation mode, skip persistence and return results directly
+        if simulation_mode:
+            return await self._run_simulation(
+                upload_id=upload_id, playbook_id=playbook_id,
+                playbook=playbook, review_id=review_id,
+                clauses=clauses, contract_value=contract_value,
+                jurisdiction=jurisdiction, industry=industry,
+                risk_score=risk_score, findings=findings,
+                correlation_id=correlation_id,
+            )
 
         # Check for existing evaluation
         existing = await self.repo.get_evaluation_by_upload(upload_id, self.tenant_id)
@@ -400,7 +418,7 @@ class PlaybookService:
                     "rule_name": r.rule_name,
                     "rule_type": r.rule_type,
                     "effect": r.effect,
-                    "matched": r.matched,
+                    "violation_triggered": r.violation_triggered,
                     "priority": r.priority,
                     "details": r.details,
                     "deviation_severity": r.deviation_severity,
@@ -487,6 +505,95 @@ class PlaybookService:
                 completed_at=datetime.utcnow(),
             )
             raise
+
+    async def _run_simulation(self, upload_id: str, playbook_id: str,
+                               playbook: Any,
+                               review_id: Optional[str] = None,
+                               clauses: Optional[list[ExtractedClause]] = None,
+                               contract_value: Optional[float] = None,
+                               jurisdiction: Optional[str] = None,
+                               industry: Optional[str] = None,
+                               risk_score: Optional[float] = None,
+                               findings: Optional[list[dict]] = None,
+                               correlation_id: Optional[str] = None) -> dict:
+        """Run policy engine in simulation mode without persisting results."""
+        rules = await self.repo.get_active_rules_by_playbook(playbook_id, self.tenant_id)
+        standards = await self.repo.get_active_clauses_by_playbook(playbook_id, self.tenant_id)
+        thresholds = await self.repo.get_active_thresholds_by_playbook(playbook_id, self.tenant_id)
+
+        ctx = EvaluationContext(
+            upload_id=upload_id,
+            tenant_id=self.tenant_id,
+            review_id=review_id,
+            contract_value=contract_value,
+            jurisdiction=jurisdiction,
+            industry=industry,
+            clauses=clauses or [],
+            risk_score=risk_score,
+            findings=findings or [],
+            correlation_id=correlation_id,
+        )
+
+        result: EvaluationResult = PolicyEngine.evaluate(rules, standards, thresholds, ctx)
+
+        now = datetime.utcnow()
+        return {
+            "simulation": True,
+            "evaluation_id": f"sim_{uuid.uuid4().hex[:12]}",
+            "status": "completed",
+            "playbook_id": playbook_id,
+            "playbook_name": playbook.name if hasattr(playbook, 'name') else "",
+            "upload_id": upload_id,
+            "total_rules_evaluated": result.total_rules,
+            "rules_passed": result.rules_passed,
+            "rules_failed": result.rules_failed,
+            "deviations_found": result.deviations_found,
+            "mandatory_blocks": result.mandatory_blocks,
+            "approval_required": result.approval_required,
+            "risk_score": result.risk_score,
+            "risk_level": result.risk_level,
+            "started_at": now,
+            "completed_at": now,
+            "created_at": now,
+            "results": [
+                {
+                    "rule_id": r.rule_id,
+                    "rule_name": r.rule_name,
+                    "rule_type": r.rule_type,
+                    "effect": r.effect,
+                    "violation_triggered": r.violation_triggered,
+                    "priority": r.priority,
+                    "details": r.details,
+                    "deviation_severity": r.deviation_severity,
+                }
+                for r in result.rule_results
+            ],
+            "deviations": [
+                {
+                    "clause_category": d.clause_category,
+                    "clause_text_snippet": d.clause_text_snippet,
+                    "expected": d.expected,
+                    "actual": d.actual,
+                    "severity": d.severity,
+                    "score": d.score,
+                    "rule_id": d.rule_id,
+                    "recommendation": d.recommendation,
+                    "fallback_clause_id": d.fallback_clause_id,
+                }
+                for d in result.deviations
+            ],
+            "recommendations": [
+                {
+                    "clause_category": r.clause_category,
+                    "clause_type": r.clause_type,
+                    "title": r.title,
+                    "rationale": r.rationale,
+                    "confidence_score": r.confidence_score,
+                    "priority": r.priority,
+                }
+                for r in result.recommendations
+            ],
+        }
 
     async def get_evaluation(self, evaluation_id: str) -> Optional[dict]:
         evaluation = await self.repo.get_evaluation(evaluation_id, self.tenant_id)
@@ -597,7 +704,7 @@ class PlaybookService:
             "active_version_id": str(p.active_version_id) if p.active_version_id else None,
             "version_count": p.version_count,
             "tags": list(p.tags) if p.tags else [],
-            "metadata": dict(p.metadata) if p.metadata else {},
+            "metadata": p.metadata if p.metadata else {},
             "created_by": p.created_by,
             "created_at": p.created_at,
             "updated_at": p.updated_at,

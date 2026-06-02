@@ -182,6 +182,26 @@ export const uploadService = {
     api.post<{ message: string; batch_id: string }>(
       `/uploads/batch/${batchId}/cancel`,
     ),
+
+  /** Delete an upload and stop/remove it from the ingestion queue */
+  delete: (uploadId: string) =>
+    api.delete<{ upload_id: string; deleted: boolean; message: string }>(
+      `/uploads/${uploadId}`,
+    ),
+
+  /** Reprioritize an upload (sets priority level) */
+  reprioritize: (uploadId: string, priority: "high" | "medium" | "low") =>
+    api.post<{ upload_id: string; priority: string; message: string }>(
+      `/uploads/${uploadId}/reprioritize`,
+      { priority },
+    ),
+
+  /** Assign an upload to a specific processing queue */
+  assignQueue: (uploadId: string, queue: string) =>
+    api.post<{ upload_id: string; queue: string; message: string }>(
+      `/uploads/${uploadId}/assign-queue`,
+      { queue },
+    ),
 };
 
 export interface QueueStatsResponse {

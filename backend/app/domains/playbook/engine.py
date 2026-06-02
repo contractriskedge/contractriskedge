@@ -28,6 +28,19 @@ from app.domains.playbook.models import (
 logger = logging.getLogger(__name__)
 
 
+def _resolve_effect(effect: Any) -> str:
+    """Safely resolve a rule effect to its string value.
+
+    Handles both SQLAlchemy enum objects (with .value) and plain strings
+    (from raw SQL inserts or deserialization).
+    """
+    if isinstance(effect, str):
+        return effect
+    if hasattr(effect, 'value'):
+        return effect.value
+    return str(effect)
+
+
 @dataclass
 class EvaluationContext:
     """Context for evaluating rules against a contract."""
@@ -70,7 +83,7 @@ class RuleEvaluationResult:
     rule_name: str
     rule_type: str
     effect: str
-    matched: bool
+    violation_triggered: bool
     priority: int
     details: Optional[str] = None
     deviation_severity: Optional[str] = None
@@ -152,19 +165,19 @@ class RuleEvaluator:
         """Evaluate a single rule against the evaluation context."""
         try:
             conditions = rule.conditions or {}
-            matched = RuleEvaluator._evaluate_conditions(conditions, rule, ctx)
+            violation_triggered = RuleEvaluator._evaluate_conditions(conditions, rule, ctx)
 
             severity = None
             details = None
             matched_category = None
             matched_text = None
 
-            if matched:
+            if violation_triggered:
                 # Determine deviation severity from effect config
                 if rule.effect in (RuleEffect.FLAG_FOR_REVIEW, RuleEffect.BLOCK, RuleEffect.REQUIRE_APPROVAL,
                                     RuleEffect.REQUIRE_MANDATORY_CLAUSE, RuleEffect.ESCALATE):
                     severity = RuleEvaluator._determine_severity(rule, ctx)
-                    details = f"Rule '{rule.name}' triggered: {rule.effect.value}"
+                    details = f"Rule '{rule.name}' triggered: {_resolve_effect(rule.effect)}"
 
                 # Find matching clause context
                 if rule.target_category:
@@ -178,8 +191,8 @@ class RuleEvaluator:
                 rule_id=str(rule.rule_id),
                 rule_name=rule.name,
                 rule_type=rule.rule_type,
-                effect=rule.effect.value,
-                matched=matched,
+                effect=_resolve_effect(rule.effect),
+                violation_triggered=violation_triggered,
                 priority=rule.priority,
                 details=details,
                 deviation_severity=severity,
@@ -192,8 +205,8 @@ class RuleEvaluator:
                 rule_id=str(rule.rule_id),
                 rule_name=rule.name,
                 rule_type=rule.rule_type,
-                effect=rule.effect.value,
-                matched=False,
+                effect=_resolve_effect(rule.effect),
+                violation_triggered=False,
                 priority=rule.priority,
                 details=f"Evaluation error: {exc}",
             )
@@ -318,7 +331,7 @@ class RuleEvaluator:
 
         # Rule metadata
         elif field == "rule.effect":
-            return rule.effect.value
+            return _resolve_effect(rule.effect)
         elif field == "rule.rule_type":
             return rule.rule_type
         elif field.startswith("rule.metadata."):
@@ -417,7 +430,7 @@ class DeviationDetector:
 
         # Add deviations from rule results
         for result in rule_results:
-            if result.matched and result.deviation_severity:
+            if result.violation_triggered and result.deviation_severity:
                 if not any(d.rule_id == result.rule_id for d in deviations):
                     deviations.append(DeviationResult(
                         clause_category=result.matched_clause_category or "",
@@ -534,7 +547,7 @@ class ApprovalThresholdEvaluator:
                             break
                     if not triggered:
                         for result in rule_results:
-                            if result.matched and result.matched_clause_category == threshold.target_category:
+                            if result.violation_triggered and result.matched_clause_category == threshold.target_category:
                                 triggered = True
                                 reason = f"Rule match in clause '{threshold.target_category}' triggered threshold '{threshold.name}'"
                                 break
@@ -679,7 +692,7 @@ class RiskScorer:
 
         # Score from rule results
         for result in rule_results:
-            if result.matched:
+            if result.violation_triggered:
                 weight = 1.0
                 if result.deviation_severity == "critical":
                     weight = 5.0
@@ -758,11 +771,11 @@ class PolicyEngine:
             result.rule_results.append(rule_result)
             result.total_rules += 1
 
-            if rule_result.matched:
+            if rule_result.violation_triggered:
                 result.rules_failed += 1
-                if rule.effect.value == "block":
+                if _resolve_effect(rule.effect) == "block":
                     result.mandatory_blocks += 1
-                if rule.effect.value == "require_approval":
+                if _resolve_effect(rule.effect) == "require_approval":
                     result.approval_required += 1
             else:
                 result.rules_passed += 1

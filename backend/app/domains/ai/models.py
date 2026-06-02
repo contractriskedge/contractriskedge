@@ -68,6 +68,7 @@ class AIExecutionRun(Base):
     prompt_version = Column(Integer, nullable=True, default=1)
     extraction_prompt_version = Column(Integer, nullable=True, default=1)
     analysis_prompt_version = Column(Integer, nullable=True, default=1)
+    execution_context = Column(JSONB, nullable=True, default=dict)
 
     total_chunks = Column(Integer, nullable=False, default=0)
     chunks_used = Column(Integer, nullable=False, default=0)

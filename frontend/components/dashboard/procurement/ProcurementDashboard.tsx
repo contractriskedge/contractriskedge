@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from "react";
 import { motion } from "framer-motion";
-import { ShoppingCart, Download, RefreshCw, ShieldCheck, Zap, ListChecks, Users, Sparkles, Bell } from "lucide-react";
+import { ShoppingCart, Download, RefreshCw, ShieldCheck, Zap, ListChecks, Users, Sparkles, Bell, Loader2, AlertCircle } from "lucide-react";
 import { ProcurementKpiCards } from "./ProcurementKpiCards";
 import { SpendTrendChart, VendorCategoryChart, GeoRiskChart, SupplierRiskTrendChart, SpendConcentrationChart } from "./RiskAnalytics";
 import { ProcurementAiInsights, SavingsWidget } from "./AiInsights";
@@ -10,7 +10,7 @@ import { SupplierTable } from "./SupplierTable";
 import { SupplierDrawer } from "./SupplierDrawer";
 import { ProcurementWorkflows } from "./Workflows";
 import { ProcurementFilterBar } from "./FilterBar";
-import { procurementKpis, supplierRecords, spendTrendData, vendorCategoryData, geoRiskData, riskTrendData, procurementInsights, workflowItems, savingsOpportunities } from "./mockData";
+import { useProcurementDashboard, useSuppliers } from "@/services/hooks/useProcurement";
 import type { SupplierRecord, WorkflowItem } from "./types";
 
 interface ProcurementFilters {
@@ -109,34 +109,68 @@ export function ProcurementDashboard() {
   const [filters, setFilters] = useState<ProcurementFilters>({ ...defaultFilters });
   const [selectedSupplier, setSelectedSupplier] = useState<SupplierRecord | null>(null);
 
+  // Real API hooks replacing mockData
+  const { data: dashboardData, isLoading: dashboardLoading, error: dashboardError, refetch: refetchDashboard } = useProcurementDashboard();
+  const { data: suppliersData, isLoading: suppliersLoading } = useSuppliers();
+
+  const isLoading = dashboardLoading || suppliersLoading;
+
+  const supplierRecords: SupplierRecord[] = suppliersData?.data ?? dashboardData?.suppliers ?? [];
+  const procurementInsights = dashboardData?.kpis ?? [];
+  const totalSuppliers = dashboardData?.total_suppliers ?? supplierRecords.length;
+  const criticalSuppliers = dashboardData?.high_risk_suppliers ?? supplierRecords.filter((s: any) => (s.riskScore ?? 0) >= 8).length;
+  const complianceAlerts = supplierRecords.filter((s: any) => (s as any).complianceStatus !== "compliant").length;
+  const aiAlerts = procurementInsights.length;
+  const highRiskSpend = supplierRecords.filter((s: any) => (s.riskScore ?? 0) >= 8).reduce((sum: number, s: any) => sum + (s.totalSpend ?? 0), 0);
+  const topRiskSuppliers = [...supplierRecords].sort((a: any, b: any) => (b.riskScore ?? 0) - (a.riskScore ?? 0)).slice(0, 3);
+
   const handleFilterChange = (key: keyof ProcurementFilters, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
   };
   const resetFilters = () => setFilters({ ...defaultFilters });
 
   const filteredSuppliers = useMemo(() => {
-    return supplierRecords.filter((s) => {
+    return supplierRecords.filter((s: any) => {
       if (filters.category && s.category !== filters.category) return false;
       if (filters.geography && s.country !== filters.geography) return false;
-      if (filters.owner && s.procurementOwner !== filters.owner) return false;
-      if (filters.businessUnit && s.businessUnit !== filters.businessUnit) return false;
       if (filters.riskLevel) {
-        if (filters.riskLevel === "critical" && s.riskScore < 8) return false;
-        else if (filters.riskLevel === "high" && (s.riskScore < 6 || s.riskScore >= 8)) return false;
-        else if (filters.riskLevel === "medium" && (s.riskScore < 4 || s.riskScore >= 6)) return false;
-        else if (filters.riskLevel === "low" && s.riskScore >= 4) return false;
+        if (filters.riskLevel === "critical" && (s.riskScore ?? 0) < 8) return false;
+        else if (filters.riskLevel === "high" && ((s.riskScore ?? 0) < 6 || (s.riskScore ?? 0) >= 8)) return false;
+        else if (filters.riskLevel === "medium" && ((s.riskScore ?? 0) < 4 || (s.riskScore ?? 0) >= 6)) return false;
+        else if (filters.riskLevel === "low" && (s.riskScore ?? 0) >= 4) return false;
       }
       if (filters.complianceStatus && s.complianceStatus !== filters.complianceStatus) return false;
       return true;
     });
-  }, [filters]);
+  }, [filters, supplierRecords]);
 
-  const totalSuppliers = supplierRecords.length;
-  const criticalSuppliers = supplierRecords.filter((s) => s.riskScore >= 8).length;
-  const complianceAlerts = supplierRecords.filter((s) => s.complianceStatus !== "compliant").length;
-  const aiAlerts = procurementInsights.length;
-  const highRiskSpend = supplierRecords.filter((s) => s.riskScore >= 8).reduce((sum, s) => sum + s.totalSpend, 0);
-  const topRiskSuppliers = supplierRecords.slice().sort((a, b) => b.riskScore - a.riskScore).slice(0, 3);
+  // Loading state
+  if (isLoading && supplierRecords.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 text-gold-400 animate-spin mx-auto mb-3" />
+          <p className="text-sm text-gray-500">Loading procurement data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (dashboardError && supplierRecords.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center max-w-md">
+          <AlertCircle className="w-10 h-10 text-red-400 mx-auto mb-3" />
+          <p className="text-sm font-medium text-gray-900 mb-1">Failed to load procurement data</p>
+          <p className="text-xs text-gray-500 mb-4">{(dashboardError as Error)?.message || "An unexpected error occurred"}</p>
+          <button onClick={() => refetchDashboard()} className="inline-flex items-center gap-1.5 text-xs font-medium text-gold-600 hover:text-gold-700">
+            <RefreshCw className="w-3.5 h-3.5" /> Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5 pb-24">

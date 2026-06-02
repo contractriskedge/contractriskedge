@@ -119,6 +119,82 @@ class ReviewRepository(BaseRepository):
         query = query.order_by(order)
         return await self._paginate_with_join(query, pagination.page, pagination.page_size)
 
+    async def get_my_work(self, tenant_id: str, user_id: str) -> list[ContractReview]:
+        """Get reviews assigned to the current user that are not deleted."""
+        from app.domains.ingestion.models import UploadSession
+
+        query = (
+            select(ContractReview, UploadSession.filename, UploadSession.content_type)
+            .outerjoin(UploadSession, ContractReview.upload_id == UploadSession.upload_id)
+            .where(ContractReview.tenant_id == tenant_id)
+            .where(ContractReview.is_deleted == False)
+            .where(ContractReview.assigned_to == user_id)
+            .order_by(ContractReview.created_at.desc())
+        )
+        result = await self.session.execute(query)
+        rows = result.all()
+        items = []
+        for row in rows:
+            review, filename, content_type = row
+            review._document_filename = filename
+            review._document_content_type = content_type
+            items.append(review)
+        return items
+
+    async def get_queue(
+        self,
+        tenant_id: str,
+        status: Optional[str] = None,
+        assigned_to: Optional[str] = None,
+        risk_min: Optional[float] = None,
+        risk_max: Optional[float] = None,
+        age_min_hours: Optional[float] = None,
+        age_max_hours: Optional[float] = None,
+        escalated_only: bool = False,
+        page: int = 1,
+        page_size: int = 20,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+    ) -> tuple[list[ContractReview], int]:
+        """Get the operational review queue with filters. Excludes deleted reviews."""
+        from app.domains.ingestion.models import UploadSession
+
+        query = (
+            select(ContractReview, UploadSession.filename, UploadSession.content_type)
+            .outerjoin(UploadSession, ContractReview.upload_id == UploadSession.upload_id)
+            .where(ContractReview.tenant_id == tenant_id)
+            .where(ContractReview.is_deleted == False)
+        )
+        if status:
+            query = query.where(ContractReview.status == status)
+        if assigned_to:
+            query = query.where(ContractReview.assigned_to == assigned_to)
+        if escalated_only:
+            query = query.where(ContractReview.status == "escalated")
+        if risk_min is not None or risk_max is not None:
+            from sqlalchemy import cast, Float, text
+            # risk_score is inside document_metadata JSONB
+            risk_expr = text("(r.document_metadata->>'risk_score')::float")
+            if risk_min is not None:
+                query = query.where(risk_expr >= risk_min)
+            if risk_max is not None:
+                query = query.where(risk_expr <= risk_max)
+
+        # Age filters via created_at
+        if age_min_hours is not None or age_max_hours is not None:
+            from sqlalchemy import text as sa_text
+            now = sa_text("NOW()")
+            if age_min_hours is not None:
+                query = query.where(ContractReview.created_at <= func.now() - func.make_interval(hours=int(age_min_hours)))
+            if age_max_hours is not None:
+                query = query.where(ContractReview.created_at >= func.now() - func.make_interval(hours=int(age_max_hours)))
+
+        sort_col = getattr(ContractReview, sort_by, ContractReview.created_at)
+        order = sort_col.desc() if sort_order == "desc" else sort_col.asc()
+        query = query.order_by(order)
+
+        return await self._paginate_with_join(query, page, page_size)
+
     async def update_status(self, review_id: str, tenant_id: str, new_status: ReviewStatus,
                              changed_by: str, reason: Optional[str] = None) -> Optional[ContractReview]:
         review = await self.get_review(review_id, tenant_id)
@@ -432,22 +508,40 @@ class ReviewRepository(BaseRepository):
 
         sql = sa_text("""
             SELECT
-                COUNT(*)::int AS total_reviews,
+                COUNT(DISTINCT r.review_id)::int AS total_reviews,
                 COALESCE(SUM(r.finding_count)::int, 0) AS total_findings,
                 COALESCE(SUM(r.redline_count)::int, 0) AS total_redlines,
                 AVG(f.confidence)::float AS average_confidence,
-                COUNT(*) FILTER (WHERE r.sla_breached = TRUE)::int AS sla_breach_count,
-                COUNT(*) FILTER (WHERE r.status IN ('draft', 'ai_analyzed', 'in_review', 'pending_approval'))::int AS pending_reviews,
-                COUNT(*) FILTER (WHERE r.status IN ('approved', 'rejected', 'closed'))::int AS completed_reviews,
-                COUNT(*) FILTER (WHERE r.status = 'escalated')::int AS escalated_count,
-                COUNT(*) FILTER (WHERE r.sla_deadline IS NOT NULL AND r.sla_deadline < NOW() AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS sla_at_risk
+                COUNT(DISTINCT r.review_id) FILTER (WHERE r.sla_breached = TRUE)::int AS sla_breach_count,
+                COUNT(DISTINCT r.review_id) FILTER (WHERE r.status IN ('draft', 'ai_analyzed', 'in_review', 'pending_approval'))::int AS pending_reviews,
+                COUNT(DISTINCT r.review_id) FILTER (WHERE r.status IN ('approved', 'rejected', 'closed'))::int AS completed_reviews,
+                COUNT(DISTINCT r.review_id) FILTER (WHERE r.status = 'escalated')::int AS escalated_count,
+                COUNT(DISTINCT r.review_id) FILTER (WHERE r.sla_deadline IS NOT NULL AND r.sla_deadline < NOW() AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS sla_at_risk,
+                (SELECT COUNT(*)::int FROM review_escalations e WHERE e.tenant_id = :tenant_id) AS total_escalation_events,
+                (
+                    SELECT COUNT(*)::int
+                    FROM review_escalations e
+                    JOIN contract_reviews cr ON cr.review_id = e.review_id AND cr.tenant_id = e.tenant_id
+                    WHERE e.tenant_id = :tenant_id2 AND cr.status != 'escalated'
+                ) AS resolved_escalations,
+                COUNT(DISTINCT r.review_id) FILTER (WHERE r.assigned_to IS NULL AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS unassigned_count,
+                COUNT(DISTINCT r.review_id) FILTER (WHERE r.sla_status = 'overdue')::int AS overdue_count,
+                COUNT(DISTINCT r.review_id) FILTER (WHERE r.completed_at IS NOT NULL AND r.completed_at >= NOW() - INTERVAL '7 days')::int AS completed_7d,
+                COALESCE(ROUND(AVG(CASE WHEN r.status NOT IN ('approved', 'rejected', 'closed') THEN EXTRACT(EPOCH FROM (NOW() - r.created_at))/3600 ELSE NULL END)::numeric, 1), 0)::float AS avg_review_age_hours
             FROM contract_reviews r
-            LEFT JOIN review_findings f ON f.tenant_id = r.tenant_id
-            WHERE r.tenant_id = :tenant_id
+            LEFT JOIN review_findings f ON f.review_id = r.review_id AND f.tenant_id = r.tenant_id
+            WHERE r.tenant_id = :tenant_id3 AND r.is_deleted = FALSE
         """)
-        result = await self.session.execute(sql, {"tenant_id": tenant_id})
+        result = await self.session.execute(sql, {"tenant_id": tenant_id, "tenant_id2": tenant_id, "tenant_id3": tenant_id})
         row = result.fetchone()
-        return dict(row._mapping) if row else {}
+        data = dict(row._mapping) if row else {}
+
+        # Compute resolution rate
+        total = data.get("total_escalation_events", 0)
+        resolved = data.get("resolved_escalations", 0)
+        data["escalation_resolution_rate"] = round((resolved / total) * 100, 1) if total > 0 else 0.0
+
+        return data
 
     async def get_findings_by_severity(self, tenant_id: str) -> dict[str, int]:
         """Get finding counts grouped by severity."""
@@ -457,7 +551,7 @@ class ReviewRepository(BaseRepository):
             SELECT f.severity, COUNT(*)::int AS count
             FROM review_findings f
             JOIN contract_reviews r ON r.review_id = f.review_id AND r.tenant_id = f.tenant_id
-            WHERE f.tenant_id = :tenant_id
+            WHERE f.tenant_id = :tenant_id AND r.is_deleted = FALSE
             GROUP BY f.severity
         """)
         result = await self.session.execute(sql, {"tenant_id": tenant_id})
@@ -471,7 +565,7 @@ class ReviewRepository(BaseRepository):
             SELECT f.clause_type, COUNT(*)::int AS count
             FROM review_findings f
             JOIN contract_reviews r ON r.review_id = f.review_id AND r.tenant_id = f.tenant_id
-            WHERE f.tenant_id = :tenant_id
+            WHERE f.tenant_id = :tenant_id AND r.is_deleted = FALSE
             GROUP BY f.clause_type
         """)
         result = await self.session.execute(sql, {"tenant_id": tenant_id})
@@ -484,7 +578,7 @@ class ReviewRepository(BaseRepository):
         sql = sa_text("""
             SELECT r.status, COUNT(*)::int AS count
             FROM contract_reviews r
-            WHERE r.tenant_id = :tenant_id
+            WHERE r.tenant_id = :tenant_id AND r.is_deleted = FALSE
             GROUP BY r.status
         """)
         result = await self.session.execute(sql, {"tenant_id": tenant_id})
@@ -499,7 +593,7 @@ class ReviewRepository(BaseRepository):
                     r.review_id::text, r.upload_id::text,
                     'Review created' AS description,
                     r.created_by AS actor, r.created_at AS timestamp
-             FROM contract_reviews r WHERE r.tenant_id = :tenant_id)
+             FROM contract_reviews r WHERE r.tenant_id = :tenant_id AND r.is_deleted = FALSE)
             UNION ALL
             (SELECT 'finding_resolved' AS activity_type,
                     f.review_id::text, NULL::text,
@@ -507,7 +601,7 @@ class ReviewRepository(BaseRepository):
                     f.resolved_by AS actor, f.resolved_at AS timestamp
              FROM review_findings f
              JOIN contract_reviews r ON r.review_id = f.review_id AND r.tenant_id = f.tenant_id
-             WHERE f.tenant_id = :tenant_id AND f.resolved_at IS NOT NULL)
+             WHERE f.tenant_id = :tenant_id AND f.resolved_at IS NOT NULL AND r.is_deleted = FALSE)
             UNION ALL
             (SELECT 'review_escalated' AS activity_type,
                     e.review_id::text, NULL::text,
@@ -515,7 +609,7 @@ class ReviewRepository(BaseRepository):
                     e.escalated_by AS actor, e.created_at AS timestamp
              FROM review_escalations e
              JOIN contract_reviews r ON r.review_id = e.review_id AND r.tenant_id = e.tenant_id
-             WHERE e.tenant_id = :tenant_id)
+             WHERE e.tenant_id = :tenant_id AND r.is_deleted = FALSE)
             ORDER BY timestamp DESC
             LIMIT :limit
         """)

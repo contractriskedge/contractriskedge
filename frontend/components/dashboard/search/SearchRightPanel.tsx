@@ -9,7 +9,10 @@ import {
   Share2,
 } from "lucide-react";
 import type { AiDiscoveryInsight, AiSearchSuggestion, SearchAnalytics } from "./types";
-import { mockDiscoveryInsights, mockAiSuggestions, mockSearchAnalytics } from "./mockData";
+
+const mockDiscoveryInsights: AiDiscoveryInsight[] = [];
+const mockAiSuggestions: AiSearchSuggestion[] = [];
+const mockSearchAnalytics: SearchAnalytics = { totalSearches: 0, avgResponseTime: 0, topQueries: [], zeroResultRate: 0 };
 
 // ── Discovery Insight Card ───────────────────────────────────────────────
 

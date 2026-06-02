@@ -8,7 +8,25 @@ import {
   ExternalLink, User, Calendar,
 } from "lucide-react";
 import type { ComplianceFinding, ComplianceDetail } from "./types";
-import { mockComplianceDetail } from "./mockData";
+
+const emptyComplianceDetail: ComplianceDetail = {
+  overview: {
+    regulation: "",
+    score: 0,
+    status: "pending",
+    lastAssessed: "",
+    jurisdiction: "",
+    contractsInScope: 0,
+    vendorsInScope: 0,
+  },
+  regulatoryMapping: [],
+  impactedContracts: [],
+  remediationActions: [],
+  auditTrail: [],
+  aiRecommendations: [],
+  relatedPolicies: [],
+  evidence: [],
+};
 
 interface ComplianceDetailDrawerProps {
   finding: ComplianceFinding | null;
@@ -20,7 +38,7 @@ type DetailTab = "overview" | "mapping" | "contracts" | "remediation" | "audit" 
 
 export function ComplianceDetailDrawer({ finding, isOpen, onClose }: ComplianceDetailDrawerProps) {
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
-  const data = mockComplianceDetail;
+  const data = emptyComplianceDetail;
 
   if (!finding) return null;
 

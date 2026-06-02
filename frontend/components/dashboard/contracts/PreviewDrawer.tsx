@@ -1,15 +1,20 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X, FileText, Brain, AlertTriangle, Shield, DollarSign, Clock, User,
   CheckCircle, XCircle, FileX, RefreshCw, BarChart3, PenSquare,
-  MessageSquare, Link, Activity, Calendar, ChevronRight,
+  MessageSquare, Link, Activity, Calendar, ChevronRight, ExternalLink,
 } from "lucide-react";
 import type { ContractRecord, ClauseSummary, Obligation, RelatedContract, ActivityEvent } from "./types";
 import { RISK_BG, RISK_TEXT, RISK_BG_LIGHT, AI_FLAG_CONFIG, WORKFLOW_STAGES } from "./types";
-import { mockClauses, mockObligations, mockRelatedContracts, activityEvents } from "./mockData";
+
+const mockClauses: ClauseSummary[] = [];
+const mockObligations: Obligation[] = [];
+const mockRelatedContracts: RelatedContract[] = [];
+const activityEvents: ActivityEvent[] = [];
 
 // ── Risk Badge ──────────────────────────────────────────────────────────────
 
@@ -48,6 +53,13 @@ type TabId = "overview" | "ai-insights" | "clauses" | "financials" | "activity" 
 
 export function PreviewDrawer({ contract, onClose }: PreviewDrawerProps) {
   const [tab, setTab] = useState<TabId>("overview");
+  const router = useRouter();
+
+  const openFullWorkspace = () => {
+    if (contract) {
+      router.push(`/contracts/${contract.id}`);
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -76,9 +88,19 @@ export function PreviewDrawer({ contract, onClose }: PreviewDrawerProps) {
                   <p className="text-[10px] text-gray-500">{contract.id}</p>
                 </div>
               </div>
-              <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={openFullWorkspace}
+                  className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-md bg-navy-600 text-white hover:bg-navy-700 transition-colors"
+                  title="Open full workspace"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Full Workspace
+                </button>
+                <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {/* Tabs */}

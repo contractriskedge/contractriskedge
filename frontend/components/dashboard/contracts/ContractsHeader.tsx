@@ -46,31 +46,25 @@ export function ContractsHeader({
   const activeView = savedViews.find((v) => v.id === activeViewId);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2 px-3 pt-3">
       {/* Top bar */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-navy-900">Contracts Repository</h1>
-          <p className="text-xs text-gray-500 mt-0.5">AI-powered contract intelligence workspace</p>
+          <h1 className="text-lg font-bold text-navy-900 dark:text-white">Contracts Repository</h1>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">AI-powered contract intelligence workspace</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button className="relative p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
-            <Bell className="w-4.5 h-4.5" />
-            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center">3</span>
+        <div className="flex items-center gap-1.5">
+          <button className="relative p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-navy-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
+            <Bell className="w-3.5 h-3.5" />
+            <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-red-500 text-white text-[7px] font-bold rounded-full flex items-center justify-center">3</span>
           </button>
-          <button
-            onClick={onBulkUpload}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            <Upload className="w-3.5 h-3.5" />
-            Bulk Upload
+          <button onClick={onBulkUpload}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium rounded-lg bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors">
+            <Upload className="w-3 h-3" /> Bulk Upload
           </button>
-          <button
-            onClick={onUploadClick}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-navy-700 text-white hover:bg-navy-800 transition-colors shadow-sm"
-          >
-            <Upload className="w-3.5 h-3.5" />
-            Upload Contract
+          <button onClick={onUploadClick}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm">
+            <Upload className="w-3 h-3" /> Upload Contract
           </button>
         </div>
       </div>
@@ -79,24 +73,18 @@ export function ContractsHeader({
       <div className="flex items-center gap-2">
         {/* Smart search */}
         <div className="relative flex-1" ref={suggestionRef}>
-          <div className={`flex items-center gap-2 px-3.5 py-2 bg-white border rounded-lg transition-all ${
-            focused ? "border-navy-400 shadow-sm ring-1 ring-navy-400/20" : "border-gray-200 hover:border-gray-300"
+          <div className={`flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-navy-800 border rounded-lg transition-all ${
+            focused ? "border-blue-400 shadow-sm ring-1 ring-blue-400/20" : "border-gray-200 dark:border-navy-600 hover:border-gray-300 dark:hover:border-navy-500"
           }`}>
-            <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
-            <input
-              ref={inputRef}
-              type="text"
-              value={search}
-              onChange={(e) => onSearchChange(e.target.value)}
-              onFocus={() => { setFocused(true); setShowSuggestions(true); }}
-              onBlur={() => setFocused(false)}
-              placeholder='Search contracts or try "Find NDAs expiring in 60 days"...'
-              className="flex-1 text-sm text-gray-700 placeholder-gray-400 bg-transparent border-none outline-none focus:ring-0 p-0"
-              aria-label="Search contracts"
-            />
+            <Search className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+            <input ref={inputRef} type="text" value={search} onChange={(e) => onSearchChange(e.target.value)}
+              onFocus={() => { setFocused(true); setShowSuggestions(true); }} onBlur={() => setFocused(false)}
+              placeholder='Search contracts...'
+              className="flex-1 text-[11px] text-gray-700 dark:text-gray-200 placeholder-gray-400 bg-transparent border-none outline-none focus:ring-0 p-0"
+              aria-label="Search contracts" />
             {search && (
-              <button onClick={() => { onSearchChange(""); inputRef.current?.focus(); }} className="p-0.5 rounded hover:bg-gray-100 text-gray-400">
-                <X className="w-3.5 h-3.5" />
+              <button onClick={() => { onSearchChange(""); inputRef.current?.focus(); }} className="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-navy-700 text-gray-400">
+                <X className="w-3 h-3" />
               </button>
             )}
             <Sparkles className="w-3.5 h-3.5 text-gold-400 flex-shrink-0" aria-label="AI-powered search" />

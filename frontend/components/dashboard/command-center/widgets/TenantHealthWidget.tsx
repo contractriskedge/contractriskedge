@@ -35,12 +35,14 @@ interface TenantHealthWidgetProps {
 }
 
 function getStatusColor(score: number): string {
+  if (score == null || isNaN(score)) return "#6B7280"; // gray for no data
   if (score >= 0.8) return "#10B981"; // green
   if (score >= 0.5) return "#F59E0B"; // amber
   return "#EF4444"; // red
 }
 
 function getStatusLabel(score: number): string {
+  if (score == null || isNaN(score)) return "No Data";
   if (score >= 0.8) return "Healthy";
   if (score >= 0.5) return "Degraded";
   return "Unhealthy";
@@ -59,21 +61,27 @@ function TrendIcon({ trend }: { trend: "up" | "down" | "stable" }) {
 export function TenantHealthWidget({ healthScore }: TenantHealthWidgetProps) {
   const [showDrilldown, setShowDrilldown] = useState(false);
 
-  // Default mock data when no backend data available
-  const data: HealthScoreData = healthScore ?? {
-    composite: 0.74,
-    status: "degraded",
-    dimensions: [
-      { label: "SLA Adherence", value: 0.92, trend: "up" },
-      { label: "Backlog Depth", value: 0.65, trend: "down" },
-      { label: "Escalation Rate", value: 0.88, trend: "stable" },
-      { label: "Delivery Velocity", value: 0.71, trend: "up" },
-      { label: "Replay Health", value: 0.95, trend: "stable" },
-      { label: "Worker Pool", value: 0.83, trend: "up" },
-    ],
-  };
+  // No data state — show empty state instead of fake metrics
+  if (!healthScore) {
+    return (
+      <div className="flex flex-col items-center justify-center py-8 text-center">
+        <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-navy-700 flex items-center justify-center mb-2">
+          <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+        </div>
+        <p className="text-sm font-medium text-gray-500 dark:text-gray-400">No health data available</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Connect to the backend to see tenant health metrics.</p>
+      </div>
+    );
+  }
+
+  const data = healthScore;
 
   const color = getStatusColor(data.composite);
+  const displayPercent = data.composite != null && !isNaN(data.composite)
+    ? Math.round(data.composite * 100)
+    : "—";
 
   return (
     <>
@@ -106,7 +114,7 @@ export function TenantHealthWidget({ healthScore }: TenantHealthWidgetProps) {
                 className="text-lg font-bold"
                 fill={color}
               >
-                {Math.round(data.composite * 100)}%
+                {displayPercent}{typeof displayPercent === "number" ? "%" : ""}
               </text>
             </RadialBarChart>
           </ResponsiveContainer>
@@ -118,15 +126,17 @@ export function TenantHealthWidget({ healthScore }: TenantHealthWidgetProps) {
             <span className="text-xs font-semibold text-navy-900 dark:text-white uppercase tracking-wider">
               Composite Health
             </span>
-            <span
-              className="text-xs font-medium px-2 py-0.5 rounded-full"
-              style={{
-                backgroundColor: `${color}20`,
-                color: color,
-              }}
-            >
-              {getStatusLabel(data.composite)}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span
+                className="text-xs font-medium px-2 py-0.5 rounded-full"
+                style={{
+                  backgroundColor: `${color}20`,
+                  color: color,
+                }}
+              >
+                {getStatusLabel(data.composite)}
+              </span>
+            </div>
           </div>
           <div className="space-y-1.5">
             {data.dimensions.map((dim) => (
@@ -137,14 +147,14 @@ export function TenantHealthWidget({ healthScore }: TenantHealthWidgetProps) {
                       {dim.label}
                     </span>
                     <span className="flex items-center gap-1 text-navy-900 dark:text-white font-medium">
-                      {Math.round(dim.value * 100)}% <TrendIcon trend={dim.trend} />
+                      {dim.value != null && !isNaN(dim.value) ? `${Math.round(dim.value * 100)}%` : "—"} <TrendIcon trend={dim.trend} />
                     </span>
                   </div>
                   <div className="w-full h-1.5 bg-gray-100 dark:bg-navy-700 rounded-full mt-0.5 overflow-hidden">
                     <div
                       className="h-full rounded-full transition-all duration-500"
                       style={{
-                        width: `${dim.value * 100}%`,
+                        width: dim.value != null && !isNaN(dim.value) ? `${dim.value * 100}%` : "0%",
                         backgroundColor: getStatusColor(dim.value),
                       }}
                     />
@@ -186,7 +196,7 @@ export function TenantHealthWidget({ healthScore }: TenantHealthWidgetProps) {
                 <div key={dim.label} className="p-3 bg-gray-50 dark:bg-navy-700 rounded-lg">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-sm font-medium text-navy-900 dark:text-white">{dim.label}</span>
-                    <span className="text-xs text-gray-500">{Math.round(dim.value * 100)}%</span>
+                    <span className="text-xs text-gray-500">{dim.value != null && !isNaN(dim.value) ? `${Math.round(dim.value * 100)}%` : "—"}</span>
                   </div>
                   {/* Mini sparkline placeholder */}
                   <div className="h-8 bg-gray-200 dark:bg-navy-600 rounded flex items-center justify-center">

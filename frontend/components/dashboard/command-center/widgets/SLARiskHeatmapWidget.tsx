@@ -20,7 +20,7 @@ interface SLAPrediction {
 }
 
 interface SLARiskHeatmapWidgetProps {
-  predictions?: SLAPrediction[] | null;
+  slaRisk?: import("@/src/lib/executive/executiveTypes").SLARiskOverview | null;
 }
 
 function getHeatColor(probability: number): string {
@@ -37,41 +37,34 @@ function getHeatIntensity(probability: number): string {
   return "border-red-200 dark:border-red-800";
 }
 
-const DEFAULT_DEPARTMENTS = ["Commercial", "Procurement", "Legal", "Finance", "Compliance"];
-const DEFAULT_STAGES = ["Ingestion", "AI Analysis", "Review", "Approval", "Negotiation"];
-
-const DEFAULT_PREDICTIONS: SLAPrediction[] = [
-  { department: "Commercial", stage: "Ingestion", breachProbability: 0.05, affectedReviewCount: 12 },
-  { department: "Commercial", stage: "AI Analysis", breachProbability: 0.15, affectedReviewCount: 10 },
-  { department: "Commercial", stage: "Review", breachProbability: 0.35, affectedReviewCount: 8 },
-  { department: "Commercial", stage: "Approval", breachProbability: 0.55, affectedReviewCount: 5 },
-  { department: "Commercial", stage: "Negotiation", breachProbability: 0.45, affectedReviewCount: 3 },
-  { department: "Procurement", stage: "Ingestion", breachProbability: 0.08, affectedReviewCount: 15 },
-  { department: "Procurement", stage: "AI Analysis", breachProbability: 0.22, affectedReviewCount: 12 },
-  { department: "Procurement", stage: "Review", breachProbability: 0.48, affectedReviewCount: 9 },
-  { department: "Procurement", stage: "Approval", breachProbability: 0.72, affectedReviewCount: 6 },
-  { department: "Procurement", stage: "Negotiation", breachProbability: 0.38, affectedReviewCount: 4 },
-  { department: "Legal", stage: "Ingestion", breachProbability: 0.02, affectedReviewCount: 20 },
-  { department: "Legal", stage: "AI Analysis", breachProbability: 0.10, affectedReviewCount: 18 },
-  { department: "Legal", stage: "Review", breachProbability: 0.28, affectedReviewCount: 14 },
-  { department: "Legal", stage: "Approval", breachProbability: 0.42, affectedReviewCount: 10 },
-  { department: "Legal", stage: "Negotiation", breachProbability: 0.62, affectedReviewCount: 7 },
-  { department: "Finance", stage: "Ingestion", breachProbability: 0.12, affectedReviewCount: 8 },
-  { department: "Finance", stage: "AI Analysis", breachProbability: 0.18, affectedReviewCount: 7 },
-  { department: "Finance", stage: "Review", breachProbability: 0.32, affectedReviewCount: 5 },
-  { department: "Finance", stage: "Approval", breachProbability: 0.58, affectedReviewCount: 4 },
-  { department: "Finance", stage: "Negotiation", breachProbability: 0.25, affectedReviewCount: 2 },
-  { department: "Compliance", stage: "Ingestion", breachProbability: 0.03, affectedReviewCount: 6 },
-  { department: "Compliance", stage: "AI Analysis", breachProbability: 0.08, affectedReviewCount: 5 },
-  { department: "Compliance", stage: "Review", breachProbability: 0.15, affectedReviewCount: 4 },
-  { department: "Compliance", stage: "Approval", breachProbability: 0.22, affectedReviewCount: 3 },
-  { department: "Compliance", stage: "Negotiation", breachProbability: 0.18, affectedReviewCount: 2 },
-];
-
-export function SLARiskHeatmapWidget({ predictions }: SLARiskHeatmapWidgetProps) {
+export function SLARiskHeatmapWidget({ slaRisk }: SLARiskHeatmapWidgetProps) {
   const [selectedCell, setSelectedCell] = useState<SLAPrediction | null>(null);
 
-  const data = predictions ?? DEFAULT_PREDICTIONS;
+  // No data state
+  if (!slaRisk || !slaRisk.at_risk_reviews || slaRisk.at_risk_reviews.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-8 text-center">
+        <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-navy-700 flex items-center justify-center mb-2">
+          <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+        </div>
+        <p className="text-sm font-medium text-gray-500 dark:text-gray-400">No SLA risk data available</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Connect to the backend to see SLA risk metrics.</p>
+      </div>
+    );
+  }
+
+  // Transform SLARiskOverview data into prediction format for the heatmap
+  const predictions: SLAPrediction[] = slaRisk.at_risk_reviews.map((review) => ({
+    department: review.assigned_to || "Unassigned",
+    stage: review.status || "Unknown",
+    breachProbability: review.breach_probability,
+    affectedReviewCount: 1,
+    reviewIds: [review.review_id],
+  }));
+
+  const data = predictions;
   const departments = [...new Set(data.map((p) => p.department))];
   const stages = [...new Set(data.map((p) => p.stage))];
 

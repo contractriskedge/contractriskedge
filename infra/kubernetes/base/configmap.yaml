@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: contractriskedge-config
+  namespace: contractriskedge
+data:
+  APP_ENV: "production"
+  LOG_LEVEL: "INFO"
+  DB_HOST: "postgresql-rw.database.svc.cluster.local"
+  DB_PORT: "5432"
+  DB_NAME: "contractriskedge"
+  REDIS_HOST: "redis.cache.svc.cluster.local"
+  REDIS_PORT: "6379"
+  VECTOR_DIMENSION: "1536"
+  AI_MAX_TOKENS: "128000"
+  AI_DEFAULT_MODEL: "gpt-4o"
+  PROMETHEUS_MULTIPROC_DIR: "/tmp"
+  CELERY_BROKER_URL: "redis://redis.cache.svc.cluster.local:6379/0"
+  CELERY_RESULT_BACKEND: "redis://redis.cache.svc.cluster.local:6379/1"

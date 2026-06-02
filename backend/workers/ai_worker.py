@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 
 from app.config import settings
-from app.domains.ai.llm import OpenAIProvider, llm_registry
+from app.domains.ai.llm import OpenAIProvider
+from app.domains.ai.providers.registry import llm_registry
 from app.domains.ai.repository import AIRepository
 from app.domains.ai.service import AIService
 from app.domains.vectors.repository import VectorRepository
@@ -51,11 +52,11 @@ def analyze_contract_task(self, upload_id: str, tenant_id: str,
     and populates review_findings / review_redlines.
     """
     helper = WorkerAsyncHelper()
-    return helper.run(_analyze_contract(helper, upload_id, tenant_id, user_id, analysis_type,
+    return helper.run(_analyze_contract(helper, self, upload_id, tenant_id, user_id, analysis_type,
                                          preserve_redline_ids, preserve_finding_ids))
 
 
-async def _analyze_contract(helper: WorkerAsyncHelper, upload_id: str, tenant_id: str,
+async def _analyze_contract(helper: WorkerAsyncHelper, task, upload_id: str, tenant_id: str,
                              user_id: str = None, analysis_type: str = "full",
                              preserve_redline_ids: list = None,
                              preserve_finding_ids: list = None):
@@ -92,19 +93,26 @@ async def _analyze_contract(helper: WorkerAsyncHelper, upload_id: str, tenant_id
 
             # Mark the AI run as FAILED in DB after retries exhausted
             # so the recovery daemon doesn't need to wait 30 min to detect it.
-            retries = getattr(self, "request", None)
+            retries = getattr(task, "request", None)
             retry_count = retries.retries if retries else 0
             if retry_count >= MAX_RETRIES - 1:
                 try:
-                    from app.domains.ai.repository import AIRepository
+                    # Create a fresh session for failure marking to avoid
+                    # reusing an aborted transaction from the failed analysis.
+                    fail_session = await worker_loop.create_session(tenant_id, user_id or "system", "api")
                     from app.domains.ai.models import ExecutionStatus
-                    ai_repo = AIRepository(session, tenant_id=tenant_id)
+                    ai_repo = AIRepository(fail_session, tenant_id=tenant_id)
                     run = await ai_repo.get_latest_run_for_upload(upload_id, tenant_id)
                     if run and run.status in (ExecutionStatus.PROCESSING, ExecutionStatus.PENDING):
                         await ai_repo.fail_run(run.run_id, f"Max retries exhausted: {exc}")
-                        await session.commit()
+                        await fail_session.commit()
                         logger.warning("Marked AI run %s as FAILED after retry exhaustion", run.run_id)
+                    await fail_session.close()
                 except Exception as mark_err:
                     logger.error("Failed to mark AI run as FAILED: %s", mark_err)
-                    await session.rollback()
+                    try:
+                        await fail_session.rollback()
+                        await fail_session.close()
+                    except Exception:
+                        pass
             raise

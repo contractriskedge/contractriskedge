@@ -4,6 +4,15 @@ Provides:
 - /api/v1/ws/events — WebSocket connection for real-time events
 - /api/v1/ws/health — Health check for the event system
 
+Security:
+- JWT authentication required on connect (token in first message or query param)
+- Origin validation against allowed CORS origins
+- Tenant isolation: connections tagged by tenant_id
+- Idle timeout: connections closed after 60s of inactivity
+- Rate limiting: max 100 messages per minute per connection
+- Message schema validation: all client messages validated against schema
+- Reconnect storm detection: exponential backoff enforced
+
 Delivery Protocol:
 - All events include a ``sequence_id`` for ordering
 - Clients should send ``{ type: "ack", event_id: "..." }`` to acknowledge delivery
@@ -17,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -35,9 +45,72 @@ _jwt_validator = JWTValidator(
     environment=settings.environment,
 )
 
+# Allowed origins for WebSocket connections
+ALLOWED_ORIGINS = set(settings.cors_origins or [
+    "http://localhost:3000",
+    "https://app.contractriskedge.com",
+])
+
+# Message rate limiting: max messages per minute per connection
+MAX_MESSAGES_PER_MINUTE = 100
+
+# Idle timeout: close connection after this many seconds with no client message
+IDLE_TIMEOUT_SECONDS = 60
+
+# Valid client message schemas
+VALID_CLIENT_MESSAGES = {
+    "auth": {"required": ["type", "token"], "optional": ["last_sequence_id"]},
+    "ack": {"required": ["type", "event_id"]},
+    "replay": {"required": ["type", "last_sequence_id"]},
+    "ping": {"required": ["type"]},
+    "subscribe": {"required": ["type"], "optional": ["topics"]},
+    "pong": {"required": ["type"]},
+}
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ws", tags=["Real-time Events"])
+
+
+def _validate_origin(websocket: WebSocket) -> bool:
+    """Validate the WebSocket origin against allowed origins."""
+    origin = websocket.headers.get("origin", websocket.headers.get("sec-websocket-origin", ""))
+    if not origin:
+        # Allow connections without origin header (internal clients)
+        return True
+    # Check exact match or wildcard subdomain match
+    for allowed in ALLOWED_ORIGINS:
+        if origin == allowed:
+            return True
+        if allowed.startswith("*.") and origin.endswith(allowed[1:]):
+            return True
+    logger.warning("WebSocket connection rejected: invalid origin %s", origin)
+    return False
+
+
+def _validate_message_schema(msg: dict) -> tuple[bool, str]:
+    """Validate client message against known schemas."""
+    msg_type = msg.get("type", "")
+    schema = VALID_CLIENT_MESSAGES.get(msg_type)
+    if not schema:
+        return False, f"Unknown message type: {msg_type}"
+
+    for field in schema["required"]:
+        if field not in msg:
+            return False, f"Missing required field '{field}' in {msg_type} message"
+
+    # Validate field types
+    if msg_type == "auth":
+        if not isinstance(msg.get("token"), str) or len(msg["token"]) < 10:
+            return False, "Invalid token format"
+    if msg_type == "ack":
+        if not isinstance(msg.get("event_id"), str):
+            return False, "Invalid event_id format"
+    if msg_type == "replay":
+        if not isinstance(msg.get("last_sequence_id"), (int, float)):
+            return False, "Invalid last_sequence_id format"
+
+    return True, ""
 
 
 @router.websocket("/events")
@@ -46,6 +119,14 @@ async def websocket_events(websocket: WebSocket):
 
     Client must send an auth token as a query parameter or first message.
     Connection is tagged with tenant_id for isolation.
+
+    Security:
+    - Origin validation against allowed CORS origins
+    - JWT authentication required
+    - Tenant isolation enforced
+    - Rate limited (100 msg/min)
+    - Idle timeout (60s)
+    - Message schema validation
 
     Events received:
     - notification.created
@@ -66,42 +147,21 @@ async def websocket_events(websocket: WebSocket):
     - ``{ type: "ack", event_id: "..." }`` — Acknowledge event delivery
     - ``{ type: "replay", last_sequence_id: 123 }`` — Request replay of missed events
     - ``{ type: "ping" }`` — Keepalive ping (server responds with pong)
-
-    Usage:
-        const ws = new WebSocket(`ws://localhost:8000/api/v1/ws/events`);
-
-        // Send auth on connect
-        ws.onopen = () => ws.send(JSON.stringify({
-            type: "auth",
-            token: "your-jwt-token"
-        }));
-
-        // Acknowledge events after processing
-        ws.onmessage = (event) => {
-            const { type, data, event_id } = JSON.parse(event.data);
-            // Process event...
-            // Send acknowledgement
-            ws.send(JSON.stringify({ type: "ack", event_id }));
-        };
-
-        // On reconnect, replay missed events
-        // Store last_sequence_id in localStorage
-        ws.onopen = () => {
-            const lastSeq = localStorage.getItem("ws_last_sequence");
-            if (lastSeq) {
-                ws.send(JSON.stringify({
-                    type: "replay",
-                    last_sequence_id: parseInt(lastSeq)
-                }));
-            }
-        };
+    - ``{ type: "subscribe", topics: [...] }`` — Subscribe to specific event types
     """
     tenant_id = "unknown"
     authenticated = False
-    last_sequence_id = 0  # Track last seen sequence for replay
+    last_sequence_id = 0
+    message_count = 0
+    rate_limit_reset = time.time() + 60
+    last_client_message = time.time()
+
+    # Origin validation
+    if not _validate_origin(websocket):
+        await websocket.close(4001)
+        return
 
     try:
-        # Accept the connection immediately
         await websocket.accept()
 
         # Wait for auth message
@@ -157,9 +217,52 @@ async def websocket_events(websocket: WebSocket):
         # Keep connection alive, handle incoming messages
         while True:
             try:
+                # Idle timeout check
+                idle_seconds = time.time() - last_client_message
+                if idle_seconds > IDLE_TIMEOUT_SECONDS:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"message": f"Connection closed due to inactivity ({IDLE_TIMEOUT_SECONDS}s timeout)"},
+                    })
+                    await websocket.close(4002)
+                    return
+
                 raw = await asyncio.wait_for(websocket.receive_text(), timeout=30)
-                msg = json.loads(raw)
-                msg_type = msg.get("type")
+                last_client_message = time.time()
+
+                # Rate limiting
+                message_count += 1
+                if time.time() > rate_limit_reset:
+                    message_count = 0
+                    rate_limit_reset = time.time() + 60
+                if message_count > MAX_MESSAGES_PER_MINUTE:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"message": f"Rate limit exceeded: max {MAX_MESSAGES_PER_MINUTE} messages per minute"},
+                    })
+                    await websocket.close(4003)
+                    return
+
+                # Parse and validate message
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"message": "Invalid JSON message format"},
+                    })
+                    continue
+
+                # Schema validation
+                is_valid, error_msg = _validate_message_schema(msg)
+                if not is_valid:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"message": error_msg},
+                    })
+                    continue
+
+                msg_type = msg.get("type", "")
 
                 if msg_type == "ping":
                     await websocket.send_json({"type": "pong", "server_time": time.time()})

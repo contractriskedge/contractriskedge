@@ -8,7 +8,16 @@ import {
   Brain, Layers, GitMerge, Loader2, Bell,
 } from "lucide-react";
 import type { SearchMode, AiSearchSuggestion, RecentSearch, SavedSearch } from "./types";
-import { mockAiSuggestions, mockRecentSearches, mockSavedSearches, searchModeLabels } from "./mockData";
+
+const mockAiSuggestions: AiSearchSuggestion[] = [];
+const mockRecentSearches: RecentSearch[] = [];
+const mockSavedSearches: SavedSearch[] = [];
+const searchModeLabels: Record<string, string> = {
+  semantic: "AI Semantic",
+  keyword: "Keyword",
+  hybrid: "Hybrid",
+  clause: "Clause Match",
+};
 
 interface SearchBarProps {
   onSearch: (query: string, mode: SearchMode) => void;

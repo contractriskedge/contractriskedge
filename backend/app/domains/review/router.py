@@ -25,6 +25,7 @@ from app.domains.review.schemas import (
     ReviewStatusResponse, ReAnalysisRequest, ReAnalysisResponse,
     ReviewDeleteRequest, ReviewArchiveRequest,
     BulkAssignRequest, BulkEscalateRequest, BulkApproveRequest, BulkExportRequest,
+    BulkRedlineIdsRequest,
     DocumentVersionItem, CreateDocumentVersionRequest,
 )
 from app.domains.review.service import ReviewService
@@ -129,6 +130,13 @@ async def get_review_dashboard(
         pending_reviews=stats_data.get("pending_reviews", 0),
         completed_reviews=stats_data.get("completed_reviews", 0),
         escalated_count=stats_data.get("escalated_count", 0),
+        total_escalation_events=stats_data.get("total_escalation_events", 0),
+        resolved_escalations=stats_data.get("resolved_escalations", 0),
+        escalation_resolution_rate=stats_data.get("escalation_resolution_rate", 0.0),
+        unassigned_count=stats_data.get("unassigned_count", 0),
+        overdue_count=stats_data.get("overdue_count", 0),
+        completed_7d=stats_data.get("completed_7d", 0),
+        avg_review_age_hours=stats_data.get("avg_review_age_hours", 0.0),
     )
 
     severity = FindingsBySeverity(
@@ -357,7 +365,7 @@ async def hydrate_workspace(
     from app.domains.review.repository import ReviewRepository
     from app.domains.ingestion.repository import IngestionRepository
     from app.domains.ai.repository import AIRepository
-    from app.domains.review.service import _compute_review_status, _enum_value
+    from app.domains.review.utils import enum_value as _enum_value
     from sqlalchemy import text as sa_text, select
     from app.domains.review.models import ContractReview
 
@@ -377,8 +385,11 @@ async def hydrate_workspace(
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
 
+    def _r(key: str, default=None):
+        return review.get(key, default) if isinstance(review, dict) else getattr(review, key, default)
+
     # ── 2. Get status ────────────────────────────────────────────
-    upload = await ingest_repo.get_by_id(str(review.upload_id))
+    upload = await ingest_repo.get_by_id(str(_r("upload_id")))
     ingestion_state = None
     ingestion_error = None
     if upload:
@@ -386,7 +397,7 @@ async def hydrate_workspace(
         ingestion_state = raw_state.value if hasattr(raw_state, 'value') else str(raw_state) if raw_state else None
         ingestion_error = upload.ingestion_error
 
-    ai_run = await ai_repo.get_latest_run_for_upload(str(review.upload_id))
+    ai_run = await ai_repo.get_latest_run_for_upload(str(_r("upload_id")))
     ai_status = None
     ai_error = None
     if ai_run:
@@ -395,31 +406,32 @@ async def hydrate_workspace(
         ai_error = ai_run.error_message
 
     progress, current_step, overall_status, error, error_code, can_retry = _compute_review_status(
-        review_status=_enum_value(review.status),
+        review_status=_enum_value(_r("status")),
         ingestion_state=ingestion_state,
         ai_status=ai_status,
         ingestion_error=ingestion_error,
+        ai_error=ai_error,
     )
 
     status_response = {
         "review_id": review_id,
-        "upload_id": str(review.upload_id),
+        "upload_id": str(_r("upload_id")),
         "status": overall_status,
         "ingestion_state": ingestion_state,
         "ai_status": ai_status,
-        "review_status": _enum_value(review.status),
+        "review_status": _enum_value(_r("status")),
         "progress": progress,
         "current_step": current_step,
         "error": error,
         "error_code": error_code,
         "can_retry": can_retry,
-        "created_at": review.created_at,
-        "updated_at": review.updated_at,
-        "completed_at": getattr(review, 'completed_at', None),
+        "created_at": _r("created_at"),
+        "updated_at": _r("updated_at"),
+        "completed_at": _r("completed_at"),
     }
 
     # ── 3. Get findings (first page) ─────────────────────────────
-    findings_data = await review_repo.get_findings_for_review(review_id, tenant_id)
+    findings_data, _ = await review_repo.get_findings(review_id, tenant_id)
     findings = [
         {
             "finding_id": str(f.finding_id),
@@ -520,7 +532,7 @@ async def hydrate_workspace(
 
     # ── 8. Get reviewer workload ─────────────────────────────────
     reviewer_workload = 0
-    if review.assigned_to:
+    if _r("assigned_to"):
         workload_result = await db.execute(
             sa_text("""
                 SELECT COUNT(*)::int AS active_count
@@ -528,8 +540,8 @@ async def hydrate_workspace(
                 WHERE assigned_to = :assignee
                   AND tenant_id = :tenant_id
                   AND is_deleted = FALSE
-                  AND status NOT IN ('approved', 'rejected', 'closed', 'archived', 'finalized', 'executed')
-            """), {"assignee": review.assigned_to, "tenant_id": tenant_id}
+                  AND status::text NOT IN ('approved', 'rejected', 'closed', 'archived', 'finalized', 'executed')
+            """), {"assignee": _r("assigned_to"), "tenant_id": tenant_id}
         )
         reviewer_workload = workload_result.scalar() or 0
 
@@ -565,14 +577,14 @@ async def hydrate_workspace(
         "findings": findings,
         "total_findings": len(findings),
         "risk_breakdown": risk_breakdown,
-        "risk_score": getattr(review, 'risk_score', None),
+        "risk_score": _r("risk_score"),
         "versions": versions,
         "current_version": current_version,
-        "workflow_stage": getattr(review, 'workflow_stage', None),
-        "escalation_count": getattr(review, 'escalation_count', 0),
-        "sla_status": getattr(review, 'sla_status', 'on_track'),
-        "sla_deadline": getattr(review, 'sla_deadline', None),
-        "assigned_to": getattr(review, 'assigned_to', None),
+        "workflow_stage": _r("workflow_stage"),
+        "escalation_count": _r("escalation_count", 0),
+        "sla_status": _r("sla_status", "on_track"),
+        "sla_deadline": _r("sla_deadline"),
+        "assigned_to": _r("assigned_to"),
         "reviewer_active_count": reviewer_workload,
         "recent_activity": recent_activity,
         "unread_notifications": unread_count,
@@ -1431,7 +1443,7 @@ async def bulk_approve(
 async def bulk_export(
     body: BulkExportRequest,
     service: ReviewService = Depends(get_review_service),
-    _: None = Depends(require_permission(Permissions.AUDIT_EXPORT)),
+    _: None = Depends(require_any_permission(Permissions.AUDIT_EXPORT, Permissions.CONTRACTS_READ)),
 ):
     """Export selected reviews as CSV."""
     from fastapi.responses import StreamingResponse
@@ -1494,6 +1506,89 @@ async def bulk_reject_redlines(
     Useful for quickly dismissing informational or low-risk redlines.
     """
     return await service.bulk_reject_redlines(review_id, severity)
+
+
+@router.post("/{review_id}/redlines/bulk-accept-by-ids")
+async def bulk_accept_redlines_by_ids(
+    review_id: str,
+    body: BulkRedlineIdsRequest,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.WORKFLOWS_WRITE)),
+):
+    """Accept specific redlines by their IDs."""
+    results = []
+    for rid in body.redline_ids:
+        try:
+            result = await service.update_redline(rid, "accepted")
+            if result:
+                results.append(rid)
+        except Exception:
+            continue
+    return {"accepted": results, "count": len(results)}
+
+
+@router.post("/{review_id}/redlines/bulk-reject-by-ids")
+async def bulk_reject_redlines_by_ids(
+    review_id: str,
+    body: BulkRedlineIdsRequest,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.WORKFLOWS_WRITE)),
+):
+    """Reject specific redlines by their IDs."""
+    results = []
+    for rid in body.redline_ids:
+        try:
+            result = await service.update_redline(rid, "rejected")
+            if result:
+                results.append(rid)
+        except Exception:
+            continue
+    return {"rejected": results, "count": len(results)}
+
+
+@router.post("/{review_id}/redlines/{redline_id}/assign")
+async def assign_redline(
+    review_id: str,
+    redline_id: str,
+    body: AssignRequest,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.WORKFLOWS_WRITE)),
+):
+    """Assign a redline to a specific reviewer or team."""
+    result = await service.update_redline(redline_id, status=None, review_notes=f"Assigned to {body.assignee_id} ({body.role or 'reviewer'})")
+    if not result:
+        raise HTTPException(status_code=404, detail="Redline not found")
+    return {**result, "assigned_to": body.assignee_id, "role": body.role or "reviewer"}
+
+
+@router.post("/{review_id}/redlines/{redline_id}/escalate")
+async def escalate_redline(
+    review_id: str,
+    redline_id: str,
+    body: EscalateRequest,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.WORKFLOWS_ESCALATE)),
+):
+    """Escalate a redline for higher-level review."""
+    result = await service.update_redline(redline_id, status=None, review_notes=f"Escalated: {body.reason}")
+    if not result:
+        raise HTTPException(status_code=404, detail="Redline not found")
+    return {**result, "escalated": True, "reason": body.reason}
+
+
+@router.post("/{review_id}/redlines/{redline_id}/counter-proposal")
+async def counter_proposal_redline(
+    review_id: str,
+    redline_id: str,
+    body: RedlineUpdateRequest,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.WORKFLOWS_WRITE)),
+):
+    """Submit a counter-proposal for a redline (modify with negotiation context)."""
+    result = await service.update_redline(redline_id, "modified", body.modified_text, body.review_notes)
+    if not result:
+        raise HTTPException(status_code=404, detail="Redline not found")
+    return {**result, "counter_proposal": True}
 
 
 # ── Document Versions ─────────────────────────────────────────────
@@ -1587,7 +1682,7 @@ async def export_review_audit(
     review_id: str,
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
-    _: None = Depends(require_permission(Permissions.AUDIT_EXPORT)),
+    _: None = Depends(require_any_permission(Permissions.AUDIT_EXPORT, Permissions.CONTRACTS_READ)),
 ):
     """Export a complete review audit package as ZIP.
 
@@ -1601,124 +1696,159 @@ async def export_review_audit(
     - Timeline (JSON)
     - Audit manifest (JSON)
     """
-    import io, json, zipfile
+    import io, json, zipfile, logging
     from datetime import datetime
+
+    logger = logging.getLogger(__name__)
 
     repo = ReviewRepository(db, tenant_id=tenant_id)
 
     # Gather data
-    review = await repo.get_review(review_id, tenant_id)
-    if not review:
-        raise HTTPException(status_code=404, detail="Review not found")
+    try:
+        review = await repo.get_review(review_id, tenant_id)
+        if not review:
+            raise HTTPException(status_code=404, detail="Review not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("export-audit: failed to get review %s: %s", review_id, e)
+        raise HTTPException(status_code=500, detail=f"Failed to load review: {e}")
 
-    history = await repo.get_status_history(review_id, tenant_id)
-    findings, _ = await repo.get_findings(review_id, tenant_id, page=1, page_size=500)
-    redlines = await repo.get_redlines(review_id, tenant_id)
-    comments = await repo.get_comments(review_id, tenant_id)
+    try:
+        history = await repo.get_status_history(review_id, tenant_id)
+    except Exception:
+        history = []
+
+    try:
+        findings, _ = await repo.get_findings(review_id, tenant_id, page=1, page_size=500)
+    except Exception:
+        findings = []
+
+    try:
+        redlines = await repo.get_redlines(review_id, tenant_id)
+    except Exception:
+        redlines = []
+
+    try:
+        comments = await repo.get_comments(review_id, tenant_id)
+    except Exception:
+        comments = []
 
     from app.domains.review.models import ContractDocumentVersion
     from sqlalchemy import select
-    versions_result = await db.execute(
-        select(ContractDocumentVersion).where(
-            ContractDocumentVersion.review_id == review_id,
-            ContractDocumentVersion.tenant_id == tenant_id,
-        ).order_by(ContractDocumentVersion.version_number)
-    )
-    versions = versions_result.scalars().all()
+    try:
+        versions_result = await db.execute(
+            select(ContractDocumentVersion).where(
+                ContractDocumentVersion.review_id == review_id,
+                ContractDocumentVersion.tenant_id == tenant_id,
+            ).order_by(ContractDocumentVersion.version_number)
+        )
+        versions = versions_result.scalars().all()
+    except Exception:
+        versions = []
 
     # Build ZIP
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # JSON exports
-        zf.writestr("review.json", json.dumps({
-            "review_id": str(review.review_id),
-            "status": _enum_value(review.status),
-            "priority": review.priority,
-            "risk_score": _extract_risk(review),
-            "created_at": review.created_at.isoformat() if review.created_at else None,
-            "completed_at": review.completed_at.isoformat() if review.completed_at else None,
-            "assigned_to": review.assigned_to,
-            "workflow_stage": review.workflow_stage,
-        }, indent=2, default=str))
+    try:
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            # JSON exports
+            zf.writestr("review.json", json.dumps({
+                "review_id": str(review.review_id),
+                "status": _enum_value(review.status) if hasattr(review, 'status') else str(review.status),
+                "priority": review.priority,
+                "risk_score": _extract_risk(review),
+                "created_at": review.created_at.isoformat() if review.created_at else None,
+                "completed_at": review.completed_at.isoformat() if review.completed_at else None,
+                "assigned_to": review.assigned_to,
+                "workflow_stage": review.workflow_stage,
+            }, indent=2, default=str))
 
-        zf.writestr("findings.json", json.dumps([
-            {
-                "finding_id": str(f.finding_id),
-                "clause_type": f.clause_type,
-                "severity": f.severity,
-                "title": f.title,
-                "resolution": _enum_value(f.resolution),
-            }
-            for f in findings
-        ], indent=2, default=str))
+            zf.writestr("findings.json", json.dumps([
+                {
+                    "finding_id": str(f.finding_id),
+                    "clause_type": f.clause_type,
+                    "severity": f.severity,
+                    "title": f.title,
+                    "resolution": _enum_value(f.resolution) if hasattr(f, 'resolution') else str(f.resolution),
+                }
+                for f in findings
+            ], indent=2, default=str))
 
-        zf.writestr("redlines.json", json.dumps([
-            {
-                "redline_id": str(r.redline_id),
-                "clause_type": r.clause_type,
-                "status": _enum_value(r.status),
-            }
-            for r in redlines
-        ], indent=2, default=str))
+            zf.writestr("redlines.json", json.dumps([
+                {
+                    "redline_id": str(r.redline_id),
+                    "clause_type": r.clause_type,
+                    "status": _enum_value(r.status) if hasattr(r, 'status') else str(r.status),
+                }
+                for r in redlines
+            ], indent=2, default=str))
 
-        zf.writestr("comments.json", json.dumps([
-            {
-                "comment_id": str(c.comment_id),
-                "author_id": c.author_id,
-                "body": c.body[:500],
-                "created_at": c.created_at.isoformat() if c.created_at else None,
-            }
-            for c in comments
-        ], indent=2, default=str))
+            zf.writestr("comments.json", json.dumps([
+                {
+                    "comment_id": str(c.comment_id),
+                    "author_id": c.author_id,
+                    "body": c.body[:500] if c.body else "",
+                    "created_at": c.created_at.isoformat() if c.created_at else None,
+                }
+                for c in comments
+            ], indent=2, default=str))
 
-        zf.writestr("timeline.json", json.dumps([
-            {
-                "from_status": h.from_status,
-                "to_status": h.to_status,
-                "changed_by": h.changed_by,
-                "reason": h.reason,
-                "created_at": h.created_at.isoformat() if h.created_at else None,
-            }
-            for h in history
-        ], indent=2, default=str))
+            zf.writestr("timeline.json", json.dumps([
+                {
+                    "from_status": h.from_status,
+                    "to_status": h.to_status,
+                    "changed_by": h.changed_by,
+                    "reason": h.reason,
+                    "created_at": h.created_at.isoformat() if h.created_at else None,
+                }
+                for h in history
+            ], indent=2, default=str))
 
-        zf.writestr("versions.json", json.dumps([
-            {
-                "version_number": v.version_number,
-                "label": v.label,
-                "status": v.status,
-                "change_summary": v.change_summary,
-                "storage_key": v.storage_key,
-                "created_at": v.created_at.isoformat() if v.created_at else None,
-            }
-            for v in versions
-        ], indent=2, default=str))
+            zf.writestr("versions.json", json.dumps([
+                {
+                    "version_number": v.version_number,
+                    "label": v.label,
+                    "status": v.status,
+                    "change_summary": v.change_summary,
+                    "storage_key": v.storage_key,
+                    "created_at": v.created_at.isoformat() if v.created_at else None,
+                }
+                for v in versions
+            ], indent=2, default=str))
 
-        zf.writestr("manifest.json", json.dumps({
-            "exported_at": datetime.utcnow().isoformat(),
-            "review_id": review_id,
-            "tenant_id": tenant_id,
-            "total_findings": len(findings),
-            "total_redlines": len(redlines),
-            "total_comments": len(comments),
-            "total_versions": len(versions),
-            "total_timeline_events": len(history),
-        }, indent=2))
+            zf.writestr("manifest.json", json.dumps({
+                "exported_at": datetime.utcnow().isoformat(),
+                "review_id": review_id,
+                "tenant_id": tenant_id,
+                "total_findings": len(findings),
+                "total_redlines": len(redlines),
+                "total_comments": len(comments),
+                "total_versions": len(versions),
+                "total_timeline_events": len(history),
+            }, indent=2))
 
-        # Include version documents if storage keys exist
-        from app.integrations.storage.s3 import storage_service
-        from app.config import settings
-        for v in versions:
-            if v.storage_key:
-                try:
-                    doc_data = await storage_service.download_fileobj(
-                        settings.s3_bucket, v.storage_key,
-                    )
-                    fname = v.storage_key.rsplit("/", 1)[-1] or f"v{v.version_number}.docx"
-                    zf.writestr(f"documents/{fname}", doc_data)
-                except Exception:
-                    zf.writestr(f"documents/v{v.version_number}_unavailable.txt",
-                                f"Document v{v.version_number} could not be retrieved from storage.")
+            # Include version documents if storage keys exist (gracefully handle storage failures)
+            try:
+                from app.integrations.storage.s3 import storage_service
+                from app.config import settings
+                for v in versions:
+                    if v.storage_key:
+                        try:
+                            doc_data = await storage_service.download_fileobj(
+                                settings.s3_bucket, v.storage_key,
+                            )
+                            fname = v.storage_key.rsplit("/", 1)[-1] or f"v{v.version_number}.docx"
+                            zf.writestr(f"documents/{fname}", doc_data)
+                        except Exception:
+                            zf.writestr(f"documents/v{v.version_number}_unavailable.txt",
+                                        f"Document v{v.version_number} could not be retrieved from storage.")
+            except ImportError as e:
+                logger.warning("export-audit: storage service not available: %s", e)
+            except Exception as e:
+                logger.warning("export-audit: storage error: %s", e)
+    except Exception as e:
+        logger.error("export-audit: failed to build ZIP for %s: %s", review_id, e)
+        raise HTTPException(status_code=500, detail=f"Failed to build export package: {e}")
 
     buf.seek(0)
     return Response(
@@ -1735,7 +1865,7 @@ async def export_negotiation_package(
     review_id: str,
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
-    _: None = Depends(require_permission(Permissions.AUDIT_EXPORT)),
+    _: None = Depends(require_any_permission(Permissions.AUDIT_EXPORT, Permissions.CONTRACTS_READ)),
 ):
     """Export a complete negotiation package as ZIP.
 
@@ -1870,6 +2000,370 @@ async def export_negotiation_package(
     )
 
 
+@router.get("/{review_id}/export-executive-summary")
+async def export_executive_summary(
+    review_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _: None = Depends(require_any_permission(Permissions.AUDIT_EXPORT, Permissions.CONTRACTS_READ)),
+):
+    """Export an executive summary package as ZIP.
+
+    Contains:
+    - Executive_Summary.json — high-level overview for leadership
+    - Risk_Overview.json — risk scores and severity breakdown
+    - Key_Findings.json — top critical and high findings
+    - Timeline.json — review progress timeline
+    """
+    import io, json, zipfile
+    from datetime import datetime
+
+    repo = ReviewRepository(db, tenant_id=tenant_id)
+    review = await repo.get_review(review_id, tenant_id)
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    findings, _ = await repo.get_findings(review_id, tenant_id, page=1, page_size=500)
+    history = await repo.get_status_history(review_id, tenant_id)
+
+    from collections import Counter
+    severity_counts = Counter(f.severity for f in findings)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # Executive summary
+        zf.writestr("Executive_Summary.json", json.dumps({
+            "review_id": str(review.review_id),
+            "contract_name": getattr(review, "contract_name", ""),
+            "vendor": getattr(review, "vendor", ""),
+            "status": _enum_value(review.status),
+            "priority": review.priority,
+            "risk_score": _extract_risk(review),
+            "workflow_stage": review.workflow_stage,
+            "total_findings": len(findings),
+            "critical_findings": severity_counts.get("critical", 0),
+            "high_findings": severity_counts.get("high", 0),
+            "medium_findings": severity_counts.get("medium", 0),
+            "low_findings": severity_counts.get("low", 0),
+            "created_at": review.created_at.isoformat() if review.created_at else None,
+            "completed_at": review.completed_at.isoformat() if review.completed_at else None,
+            "exported_at": datetime.utcnow().isoformat(),
+        }, indent=2, default=str))
+
+        # Risk overview
+        zf.writestr("Risk_Overview.json", json.dumps({
+            "risk_score": _extract_risk(review),
+            "risk_level": getattr(review, "risk_level", "unknown"),
+            "severity_breakdown": dict(severity_counts),
+            "total_findings": len(findings),
+        }, indent=2, default=str))
+
+        # Key findings (critical + high only)
+        zf.writestr("Key_Findings.json", json.dumps([
+            {
+                "finding_id": str(f.finding_id),
+                "title": f.title,
+                "severity": f.severity,
+                "clause_type": f.clause_type,
+                "description": (f.description or "")[:300],
+                "resolution": _enum_value(f.resolution),
+                "status": f.status,
+            }
+            for f in findings if f.severity in ("critical", "high")
+        ], indent=2, default=str))
+
+        # Timeline
+        zf.writestr("Timeline.json", json.dumps([
+            {
+                "from_status": h.from_status,
+                "to_status": h.to_status,
+                "changed_by": h.changed_by,
+                "reason": h.reason,
+                "created_at": h.created_at.isoformat() if h.created_at else None,
+            }
+            for h in history
+        ], indent=2, default=str))
+
+    buf.seek(0)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="executive_summary_{review_id[:8]}_{datetime.utcnow().strftime("%Y%m%d")}.zip"',
+        },
+    )
+
+
 def _extract_risk(review) -> float | None:
     metadata = getattr(review, "document_metadata", None) or {}
     return metadata.get("risk_score") if isinstance(metadata, dict) else None
+
+
+# ── Policy Violations ─────────────────────────────────────────────
+
+@router.get("/{review_id}/policy-violations")
+async def list_policy_violations(
+    review_id: str,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """List policy violations for a review."""
+    try:
+        return await service.get_policy_violations(review_id)
+    except Exception:
+        return {"violations": []}
+
+
+# ── Missing Clauses ───────────────────────────────────────────────
+
+@router.get("/{review_id}/missing-clauses")
+async def list_missing_clauses(
+    review_id: str,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """List missing mandatory clauses for a review."""
+    try:
+        return await service.get_missing_clauses(review_id)
+    except Exception:
+        return {"missing_clauses": []}
+
+
+# ── Recommendations ───────────────────────────────────────────────
+
+@router.get("/{review_id}/recommendations")
+async def list_recommendations(
+    review_id: str,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """List AI recommendations for a review."""
+    try:
+        return await service.get_recommendations(review_id)
+    except Exception:
+        return {"recommendations": []}
+
+
+# ── Workflow ──────────────────────────────────────────────────────
+
+@router.get("/{review_id}/workflow")
+async def get_workflow(
+    review_id: str,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Get workflow state for a review."""
+    try:
+        return await service.get_workflow(review_id)
+    except Exception:
+        return {
+            "current_stage": "ai_review",
+            "available_actions": [],
+            "stages": [],
+            "sla_remaining_hours": 0,
+            "escalation_level": 0,
+            "reviewers": [],
+            "queue_position": 0,
+            "queue_total": 0,
+            "workload_score": 0,
+        }
+
+
+# ── Activity ──────────────────────────────────────────────────────
+
+@router.get("/{review_id}/activity")
+async def list_activity(
+    review_id: str,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """List activity events for a review."""
+    try:
+        return await service.get_activity(review_id)
+    except Exception:
+        return {"events": []}
+
+
+# ── Document ──────────────────────────────────────────────────────
+
+@router.get("/{review_id}/document")
+async def get_document(
+    review_id: str,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Get document content/sections for a review."""
+    try:
+        return await service.get_document(review_id)
+    except Exception:
+        return {"sections": [], "total_pages": 0}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Reviewer Ops — Sprint 12
+# ═══════════════════════════════════════════════════════════════════
+
+@router.get("/my-work", summary="My Work — reviews assigned to current user")
+async def get_my_work(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Get all active reviews assigned to the current user.
+
+    Returns reviews filtered by assigned_to = current_user AND is_deleted = FALSE.
+    This is the real data source for the Reviewer Ops 'My Work' widget.
+    """
+    repo = ReviewRepository(db, tenant_id=tenant_id)
+    reviews = await repo.get_my_work(tenant_id, user.id)
+    from app.domains.review.service import ReviewService
+
+    items = []
+    for r in reviews:
+        metadata = getattr(r, "document_metadata", None) or {}
+        risk_score = metadata.get("risk_score") if isinstance(metadata, dict) else None
+        sla_deadline = r.sla_deadline.isoformat() if r.sla_deadline else None
+        items.append({
+            "review_id": str(r.review_id),
+            "contract_name": getattr(r, "_document_filename", None),
+            "status": r.status.value if hasattr(r.status, "value") else str(r.status),
+            "risk_score": risk_score,
+            "sla_deadline": sla_deadline,
+            "assigned_to": r.assigned_to,
+            "created_at": r.created_at.isoformat(),
+        })
+    return items
+
+
+@router.get("/queue", summary="Queue — operational review workbench")
+async def get_queue(
+    status: Optional[str] = Query(None, description="Filter by review status"),
+    assigned_to: Optional[str] = Query(None, description="Filter by assignee"),
+    risk_min: Optional[float] = Query(None, ge=0, le=10, description="Minimum risk score"),
+    risk_max: Optional[float] = Query(None, ge=0, le=10, description="Maximum risk score"),
+    age_min_hours: Optional[float] = Query(None, ge=0, description="Minimum age in hours"),
+    age_max_hours: Optional[float] = Query(None, ge=0, description="Maximum age in hours"),
+    escalated_only: bool = Query(False, description="Show only escalated reviews"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    sort_by: str = Query("created_at", description="Sort column"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort direction"),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Get the operational review queue with full filtering.
+
+    Supports filters by:
+    - status, reviewer (assigned_to), risk score range, age range, escalation flag
+    - Pagination and sorting
+
+    This is the real data source for the Reviewer Ops 'Queue' widget.
+    """
+    repo = ReviewRepository(db, tenant_id=tenant_id)
+    reviews, total = await repo.get_queue(
+        tenant_id=tenant_id,
+        status=status,
+        assigned_to=assigned_to,
+        risk_min=risk_min,
+        risk_max=risk_max,
+        age_min_hours=age_min_hours,
+        age_max_hours=age_max_hours,
+        escalated_only=escalated_only,
+        page=page,
+        page_size=page_size,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
+    from app.domains.review.service import ReviewService
+
+    svc = ReviewService.__new__(ReviewService)
+    items = [svc._review_to_detail(r) for r in reviews]
+    return PaginatedResponse(
+        data=items,
+        pagination=PaginationMeta(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=max(1, (total + page_size - 1) // page_size),
+        ),
+    )
+
+
+@router.get("/recommendations", summary="Recommendations — AI findings with actionable recommendations")
+async def get_recommendations(
+    severity: Optional[str] = Query(None, description="Filter by severity"),
+    clause_type: Optional[str] = Query(None, description="Filter by clause type"),
+    min_confidence: Optional[float] = Query(None, ge=0, le=1, description="Minimum confidence threshold"),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Get actionable AI recommendations from review findings.
+
+    Only returns findings that contain actual recommendation, confidence,
+    and severity data — no demo/synthetic recommendations.
+
+    Source: review_findings table, joined with contract_reviews for status/is_deleted filtering.
+    """
+    from sqlalchemy import text as sa_text
+
+    conditions = [
+        "r.tenant_id = :tenant_id",
+        "r.is_deleted = FALSE",
+        "f.recommendation IS NOT NULL",
+        "f.recommendation != ''",
+        "f.confidence IS NOT NULL",
+        "f.severity IS NOT NULL",
+    ]
+    params = {"tenant_id": tenant_id, "limit": limit}
+
+    if severity:
+        conditions.append("f.severity = :severity")
+        params["severity"] = severity
+    if clause_type:
+        conditions.append("f.clause_type = :clause_type")
+        params["clause_type"] = clause_type
+    if min_confidence is not None:
+        conditions.append("f.confidence >= :min_confidence")
+        params["min_confidence"] = min_confidence
+
+    where_clause = " AND ".join(conditions)
+
+    sql = sa_text(f"""
+        SELECT
+            f.finding_id::text,
+            f.review_id::text,
+            f.clause_type,
+            f.severity,
+            f.title,
+            f.description,
+            f.recommendation,
+            f.confidence::float,
+            f.risk_score::float,
+            f.created_at
+        FROM review_findings f
+        JOIN contract_reviews r ON r.review_id = f.review_id AND r.tenant_id = f.tenant_id
+        WHERE {where_clause}
+        ORDER BY f.confidence DESC, f.created_at DESC
+        LIMIT :limit
+    """)
+    result = await db.execute(sql, params)
+    rows = result.fetchall()
+    return [
+        {
+            "finding_id": str(row.finding_id),
+            "review_id": str(row.review_id),
+            "clause_type": row.clause_type,
+            "severity": row.severity,
+            "title": row.title,
+            "description": row.description,
+            "recommendation": row.recommendation,
+            "confidence": row.confidence,
+            "risk_score": row.risk_score,
+            "created_at": row.created_at.isoformat() if hasattr(row.created_at, "isoformat") else str(row.created_at),
+        }
+        for row in rows
+    ]

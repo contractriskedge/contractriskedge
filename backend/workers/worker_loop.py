@@ -224,6 +224,18 @@ class WorkerLoop:
 
     # ── Internal helpers ──────────────────────────────────────────
 
+    async def _shutdown_engine(self) -> None:
+        """Dispose the shared engine without shutting down the loop.
+
+        Used after fork to discard the parent process's connection pool.
+        """
+        if self._factory is not None:
+            try:
+                await self._factory.close()
+            except Exception:
+                logger.exception("Error disposing engine after fork")
+            self._factory = None
+
     def _run_loop_forever(self) -> None:
         """Run the event loop forever (daemon thread target)."""
         loop = self._loop
@@ -305,9 +317,42 @@ class _SessionScope:
 
 worker_loop = WorkerLoop()
 
-# Register Celery worker shutdown handler
+# Register Celery worker lifecycle handlers
 try:
-    from celery.signals import worker_shutting_down
+    from celery.signals import worker_process_init, worker_shutting_down
+
+    @worker_process_init.connect
+    def _on_worker_process_init(**kwargs) -> None:  # type: ignore[misc]
+        """Dispose the inherited async engine after fork.
+
+        When Celery forks worker processes (ForkPoolWorker), the async
+        engine's connection pool from the parent process is inherited.
+        Child processes must create their own fresh pool to avoid
+        ``non-checked-in connection`` warnings from asyncpg.
+
+        This handler runs in each child process after fork, before any
+        tasks are executed. It resets the WorkerLoop state so the next
+        call to ``start()`` creates a new engine on the child's event loop.
+        """
+        logger.info(
+            "Celery worker process initialized (PID=%s) — resetting WorkerLoop engine",
+            os.getpid(),
+        )
+        # Reset the factory so a new engine is created in this child process
+        worker_loop._factory = None
+        worker_loop._started = False
+        # Dispose the inherited engine if it exists
+        if worker_loop._loop is not None and not worker_loop._loop.is_closed():
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    worker_loop._shutdown_engine(),
+                    worker_loop._loop,
+                )
+                future.result(timeout=10)
+            except Exception:
+                logger.debug("Inherited engine already disposed or loop not ready")
+        worker_loop._loop = None
+        worker_loop._loop_thread = None
 
     @worker_shutting_down.connect
     def _on_worker_shutdown(**kwargs) -> None:  # type: ignore[misc]

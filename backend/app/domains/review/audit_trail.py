@@ -105,6 +105,51 @@ class AuditTrailService:
                 event_type, entity_id, exc, exc_info=True,
             )
 
+    async def record_ai_suggestion(
+        self,
+        review_id: str,
+        actor_id: str,
+        suggestion_ids: list[str],
+        prompt: str,
+        correlation_id: str,
+    ) -> None:
+        """Record an AI Copilot suggestion event with traceability metadata."""
+        await self.record(
+            event_type="ai.copilot.suggest",
+            entity_type="review",
+            entity_id=review_id,
+            actor_id=actor_id,
+            action="suggest",
+            before_state={"prompt": prompt},
+            after_state={"suggestion_ids": suggestion_ids},
+            description="AI Copilot suggestions generated for review.",
+            correlation_id=correlation_id,
+            metadata={"source": "review_copilot"},
+        )
+
+    async def record_ai_feedback(
+        self,
+        review_id: str,
+        actor_id: str,
+        suggestion_id: str,
+        helpful: bool,
+        feedback: Optional[str],
+        correlation_id: str,
+    ) -> None:
+        """Record reviewer feedback on an AI Copilot suggestion."""
+        await self.record(
+            event_type="ai.copilot.feedback",
+            entity_type="review",
+            entity_id=review_id,
+            actor_id=actor_id,
+            action="feedback",
+            before_state={"suggestion_id": suggestion_id, "helpful": helpful},
+            after_state={"feedback": feedback, "helpful": helpful},
+            description="Reviewer submitted feedback for AI Copilot suggestion.",
+            correlation_id=correlation_id,
+            metadata={"suggestion_id": suggestion_id},
+        )
+
     async def record_transition(
         self,
         review_id: str,

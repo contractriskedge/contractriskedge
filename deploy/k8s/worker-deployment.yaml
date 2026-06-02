@@ -1,0 +1,161 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: contractrisk-worker
+  namespace: contractrisk
+  labels:
+    app: contractrisk
+    tier: worker
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: contractrisk
+      tier: worker
+  template:
+    metadata:
+      labels:
+        app: contractrisk
+        tier: worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+    spec:
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: worker
+          image: contractrisk-worker:latest
+          imagePullPolicy: Always
+          command:
+            - celery
+            - -A
+            - app.workers.celery_app
+            - worker
+            - --loglevel=info
+            - --concurrency=4
+            - -Q
+            - ingestion,ai,notifications,embeddings,default
+          env:
+            - name: ENVIRONMENT
+              value: "production"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: contractrisk-secrets
+                  key: database_url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: contractrisk-secrets
+                  key: redis_url
+            - name: CELERY_BROKER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: contractrisk-secrets
+                  key: celery_broker_url
+            - name: CELERY_RESULT_BACKEND
+              valueFrom:
+                secretKeyRef:
+                  name: contractrisk-secrets
+                  key: celery_result_backend
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: contractrisk-secrets
+                  key: openai_api_key
+            - name: OTEL_ENABLED
+              value: "true"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector:4318"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: S3_ENDPOINT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: contractrisk-secrets
+                  key: s3_endpoint_url
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: contractrisk-secrets
+                  key: s3_access_key_id
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: contractrisk-secrets
+                  key: s3_secret_access_key
+            - name: S3_BUCKET_NAME
+              value: "contractrisk-documents"
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "1Gi"
+            limits:
+              cpu: "4000m"
+              memory: "4Gi"
+          livenessProbe:
+            exec:
+              command:
+                - celery
+                - -A
+                - app.workers.celery_app
+                - inspect
+                - ping
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - celery
+                - -A
+                - app.workers.celery_app
+                - status
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: contractrisk-worker
+  namespace: contractrisk
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: contractrisk-worker
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: contractrisk-worker
+  namespace: contractrisk
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: contractrisk
+      tier: worker

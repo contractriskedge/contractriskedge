@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { FileText, AlertTriangle, XCircle, Lock, Shield, CheckCircle, DollarSign, Lightbulb, Cloud, Activity, Scale, Star, BookOpen, Search, Heart } from "lucide-react";
+import { FileText, AlertTriangle, XCircle, Lock, Shield, CheckCircle, DollarSign, Lightbulb, Cloud, Activity, Scale, Star, BookOpen, Search, Heart, Ban } from "lucide-react";
 import type { ClauseCategory } from "./types";
 
 const iconMap: Record<string, React.ReactNode> = {
@@ -10,6 +10,7 @@ const iconMap: Record<string, React.ReactNode> = {
   CheckCircle: <CheckCircle className="w-3.5 h-3.5" />, DollarSign: <DollarSign className="w-3.5 h-3.5" />,
   Lightbulb: <Lightbulb className="w-3.5 h-3.5" />, Cloud: <Cloud className="w-3.5 h-3.5" />,
   Activity: <Activity className="w-3.5 h-3.5" />, Scale: <Scale className="w-3.5 h-3.5" />,
+  Ban: <Ban className="w-3.5 h-3.5" />, FileText: <FileText className="w-3.5 h-3.5" />,
 };
 
 interface ClauseSidebarProps {

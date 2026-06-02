@@ -98,3 +98,91 @@ export type {
   UploadSummary,
   RetryResponse,
 } from "./uploads";
+
+// ── Phase 2: Real API services (replacing mockData) ──────────────
+export {
+  fetchContracts,
+  fetchContractKpis,
+  fetchContractById,
+  fetchSavedViews,
+} from "./contracts";
+export type {
+  ContractsListResponse,
+  ContractsKpiResponse,
+} from "./contracts";
+
+export {
+  fetchProcurementDashboard,
+  fetchSuppliers,
+  fetchSupplierById,
+} from "./procurement";
+export type {
+  ProcurementDashboardData,
+  ProcurementKpi,
+  SupplierRecord,
+} from "./procurement";
+
+export {
+  fetchComplianceDashboard,
+  fetchComplianceFindings,
+} from "./compliance";
+export type {
+  ComplianceDashboardData,
+  ComplianceKpi,
+  ComplianceFinding,
+} from "./compliance";
+
+export {
+  fetchWorkflowDashboard,
+  fetchWorkflows,
+} from "./workflows";
+export type {
+  WorkflowDashboardData,
+  WorkflowKpi,
+  WorkflowRecord,
+} from "./workflows";
+
+export {
+  fetchBenchmarkDashboard,
+  fetchIndustryBenchmarks,
+} from "./benchmarks";
+export type {
+  BenchmarkDashboardData,
+  BenchmarkKpi,
+  ClauseBenchmark,
+  IndustryCorpus,
+} from "./benchmarks";
+
+export {
+  fetchAdminDashboard,
+  fetchAdminUsers,
+  fetchAuditLogs,
+} from "./admin";
+export type {
+  AdminDashboardData,
+  AdminKpi,
+  AdminUser,
+  AdminAuditEvent,
+} from "./admin";
+
+export {
+  fetchPendingExceptions,
+  fetchPendingApprovals,
+  fetchHumanOversightDashboard,
+} from "./humanOversight";
+export type {
+  ApprovalSummary,
+  PolicyExceptionRequest,
+  HumanOversightDashboard,
+} from "./humanOversight";
+
+export {
+  fetchAIQualityDashboard,
+  fetchPrompts,
+  aiGovernanceKeys,
+} from "./aiGovernance";
+export type {
+  AIQualityDashboard,
+  PromptSummary,
+  ModelUsageSummary,
+} from "./aiGovernance";

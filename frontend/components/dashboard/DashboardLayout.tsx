@@ -19,7 +19,7 @@ import { CfoView } from "./CfoView";
 import { LegalView } from "./LegalView";
 import { ProcurementView } from "./ProcurementView";
 import { ExecutiveDashboard } from "./ExecutiveDashboard";
-import { ContractsPage } from "./ContractsPage";
+import { ContractsPage } from "./contracts/ContractsPage";
 import { BenchmarkPage } from "./BenchmarkPage";
 import { SettingsPage } from "./SettingsPage";
 import { RelationshipGraph } from "./RelationshipGraph";

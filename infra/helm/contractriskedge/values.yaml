@@ -1,0 +1,191 @@
+# ContractRiskEdge Helm Chart — Global Values
+# =============================================================================
+# Architecture: Modular Monolith, Multi-Tenant SaaS, AI-Native
+# =============================================================================
+
+# ── Global Settings ──────────────────────────────────────────────────────────
+global:
+  environment: production
+  tenantMode: shared  # shared | dedicated
+  imageRegistry: ghcr.io/contractriskedge
+
+# ── Image Configuration ──────────────────────────────────────────────────────
+image:
+  repository: contractriskedge
+  tag: latest
+  pullPolicy: Always
+  api:
+    repository: contractriskedge/api
+    tag: latest
+  worker:
+    repository: contractriskedge/worker
+    tag: latest
+
+# ── API Service ──────────────────────────────────────────────────────────────
+api:
+  replicas: 3
+  minReplicas: 3
+  maxReplicas: 20
+  cpuRequest: 500m
+  cpuLimit: 2000m
+  memoryRequest: 512Mi
+  memoryLimit: 2Gi
+  port: 8000
+  metricsPort: 8001
+
+  autoscaling:
+    enabled: true
+    targetCPUUtilization: 70
+    targetMemoryUtilization: 80
+    scaleDownStabilization: 300
+    scaleUpStabilization: 60
+
+  probes:
+    liveness:
+      path: /health
+      initialDelay: 30
+      period: 15
+    readiness:
+      path: /ready
+      initialDelay: 10
+      period: 10
+    startup:
+      path: /health
+      initialDelay: 5
+      period: 5
+      failureThreshold: 30
+
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          topologyKey: kubernetes.io/hostname
+
+# ── Worker Configuration ─────────────────────────────────────────────────────
+worker:
+  replicas: 5
+  minReplicas: 2
+  maxReplicas: 20
+  cpuRequest: 1
+  cpuLimit: 4
+  memoryRequest: 1Gi
+  memoryLimit: 4Gi
+  concurrency: 4
+
+  autoscaling:
+    enabled: true
+    targetCPUUtilization: 75
+    targetMemoryUtilization: 80
+
+# ── Celery Beat ──────────────────────────────────────────────────────────────
+celeryBeat:
+  enabled: true
+  cpuRequest: 200m
+  cpuLimit: 500m
+  memoryRequest: 256Mi
+  memoryLimit: 512Mi
+
+# ── Database ──────────────────────────────────────────────────────────────────
+postgresql:
+  enabled: true
+  architecture: replication
+  auth:
+    database: contractriskedge
+    username: contractriskedge
+  primary:
+    resources:
+      requests:
+        cpu: 2
+        memory: 4Gi
+      limits:
+        cpu: 4
+        memory: 8Gi
+    persistence:
+      size: 100Gi
+  readReplicas:
+    count: 2
+    resources:
+      requests:
+        cpu: 1
+        memory: 2Gi
+
+# ── Redis ─────────────────────────────────────────────────────────────────────
+redis:
+  enabled: true
+  architecture: replication
+  auth:
+    enabled: true
+  master:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+  replica:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+
+# ── pgvector ──────────────────────────────────────────────────────────────────
+pgvector:
+  enabled: true
+  instances: 2
+  resources:
+    requests:
+      cpu: 1
+      memory: 2Gi
+  storage:
+    size: 50Gi
+
+# ── Ingress ───────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  host: api.contractriskedge.com
+  tls:
+    enabled: true
+    clusterIssuer: letsencrypt-prod
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 100m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+
+# ── Observability ─────────────────────────────────────────────────────────────
+observability:
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 15s
+  tracing:
+    enabled: false
+    samplingRate: 0.1
+
+# ── AI Configuration ─────────────────────────────────────────────────────────
+ai:
+  defaultModel: gpt-4o
+  maxTokens: 128000
+  embeddingModel: text-embedding-3-large
+  embeddingDimensions: 1536
+
+# ── Tenant Isolation ─────────────────────────────────────────────────────────
+tenant:
+  tier: professional  # developer | starter | professional | enterprise | platform
+  isolationLevel: dedicated_collections  # shared | dedicated_collections | dedicated_infra
+
+# ── Canary Deployment ────────────────────────────────────────────────────────
+canary:
+  enabled: false
+  weight: 10  # Percentage of traffic to route to canary
+  modelOverrides:
+    defaultModel: gpt-4o-mini  # Cheaper model for canary testing
+
+# ── Resource Quotas ──────────────────────────────────────────────────────────
+resources:
+  namespace:
+    requests:
+      cpu: "20"
+      memory: "40Gi"
+    limits:
+      cpu: "40"
+      memory: "80Gi"

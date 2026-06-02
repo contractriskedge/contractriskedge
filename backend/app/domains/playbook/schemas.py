@@ -240,7 +240,7 @@ class RuleEvaluationResult(BaseModel):
     rule_name: str
     rule_type: str
     effect: str
-    matched: bool
+    violation_triggered: bool = Field(description="True when the rule's conditions triggered a violation")
     priority: int
     details: Optional[str] = None
     deviation_severity: Optional[str] = None

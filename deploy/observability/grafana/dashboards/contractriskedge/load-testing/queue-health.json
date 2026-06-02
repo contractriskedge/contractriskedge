@@ -1,0 +1,104 @@
+{
+  "title": "ContractRiskEdge — Queue Health",
+  "uid": "cre-queue-health",
+  "version": 1,
+  "schemaVersion": 39,
+  "tags": ["contractriskedge", "queues", "workers"],
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "title": "Queue Depth by Queue",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "queue_depth{environment=~\"$env\"}",
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": { "steps": [{ "color": "green" }, { "color": "orange", "value": 100 }, { "color": "red", "value": 500 }] }
+        }
+      }
+    },
+    {
+      "title": "Active Workers by Queue",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "active_workers{environment=~\"$env\"}",
+          "legendFormat": "{{queue}}"
+        }
+      ]
+    },
+    {
+      "title": "Task Failure Rate by Queue",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum by(queue) (rate(queue_task_total{environment=~\"$env\", status=\"failed\"}[5m])) / sum by(queue) (rate(queue_task_total{environment=~\"$env\"}[5m]))",
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": { "steps": [{ "color": "green" }, { "color": "orange", "value": 0.05 }, { "color": "red", "value": 0.10 }] }
+        }
+      }
+    },
+    {
+      "title": "Task Processing Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum by(queue) (rate(queue_task_total{environment=~\"$env\"}[5m]))",
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      }
+    },
+    {
+      "title": "Worker Starvation Indicator",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "count(queue_depth{environment=~\"$env\"} > 0 and on(queue) active_workers == 0)",
+          "legendFormat": "Starved Queues"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "green" }, { "color": "red", "value": 1 }] }
+        }
+      }
+    },
+    {
+      "title": "Queue Backlog Age (Oldest Task)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 6, "y": 16 },
+      "targets": [
+        {
+          "expr": "queue_oldest_task_age_seconds{environment=~\"$env\"}",
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    }
+  ]
+}

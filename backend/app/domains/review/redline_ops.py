@@ -416,7 +416,13 @@ def prepare_redline_display(
     anchor_text: str = "",
     reviewer_modified_text: Optional[str] = None,
 ) -> dict:
-    """Normalize redline fields for API/UI (insert vs replace, word diff)."""
+    """Normalize redline fields for API/UI (insert vs replace, word diff).
+
+    IMPORTANT: Even when the operation is classified as INSERT (e.g. because
+    the original text looks like chunk context), we preserve the original text
+    in ``display_original`` so the reviewer can see what the baseline says.
+    Previously this was blanked for INSERT, which made the Original panel empty.
+    """
     proposed = (reviewer_modified_text or proposed_text or "").strip()
     stored_orig = (original_text or "").strip()
     anchor = (anchor_text or "").strip()
@@ -436,13 +442,15 @@ def prepare_redline_display(
             if not anchor:
                 anchor = infer_anchor_from_context(stored_orig, proposed)
             context_excerpt = build_insert_context_snippet(stored_orig, anchor)
-        display_original = ""
+        # Preserve original text for reviewer reference even for INSERT ops.
+        # Previously this was set to "" which made the Original panel empty.
+        display_original = stored_orig
     else:
         display_original = stored_orig
 
     word_diff = build_word_diff(
         operation,
-        stored_orig if operation != RedlineOperation.INSERT else "",
+        stored_orig,
         proposed,
     )
 

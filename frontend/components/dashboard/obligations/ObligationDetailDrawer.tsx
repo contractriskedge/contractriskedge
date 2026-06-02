@@ -19,9 +19,10 @@ function TabBtn({ label, icon, active, onClick }: { label: string; icon: React.R
 interface DrawerProps {
   obligation: ObligationRecord | null;
   onClose: () => void;
+  onToggleFavorite?: (id: string) => void;
 }
 
-export function ObligationDetailDrawer({ obligation, onClose }: DrawerProps) {
+export function ObligationDetailDrawer({ obligation, onClose, onToggleFavorite }: DrawerProps) {
   const [tab, setTab] = useState<TabId>("overview");
 
   return (

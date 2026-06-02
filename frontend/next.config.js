@@ -15,9 +15,10 @@ const nextConfig = {
   },
   async rewrites() {
     return [
+      // Auth routes are handled by @auth0/nextjs-auth0 — don't proxy to backend
       {
-        source: '/api/:path*',
-        destination: 'http://localhost:8000/api/:path*',
+        source: '/api/v1/:path*',
+        destination: 'http://localhost:8000/api/v1/:path*',
       },
     ];
   },

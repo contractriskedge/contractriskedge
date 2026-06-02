@@ -115,6 +115,200 @@ async def list_playbooks(
 )
 
 
+# ── Fixed-path routes (must precede /{playbook_id} to avoid shadowing) ──
+
+
+@router.get("/fallback", response_model=FallbackRecommendationResponse
+)
+async def get_fallback_recommendations(
+    clause_category: Optional[str] = Query(None, description="Filter by clause category"),
+    jurisdiction: Optional[str] = Query(None, description="Filter by jurisdiction"),
+    limit: int = Query(5, ge=1, le=20),
+    service: PlaybookService = Depends(get_playbook_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Get fallback clause recommendations.
+
+    Returns recommended fallback clauses based on category and jurisdiction.
+    Used by the policy engine when clause standards are missing.
+    """
+    return await service.get_fallback_recommendations(
+        clause_category=clause_category,
+        jurisdiction=jurisdiction,
+        limit=limit,
+    )
+
+
+@router.post("/evaluate", response_model=PolicyEvaluationDetail
+)
+async def evaluate_contract(
+    playbook_id: str = Query(..., description="Playbook ID to evaluate against"),
+    upload_id: str = Query(..., description="Upload/contract ID to evaluate"),
+    simulation_mode: bool = Query(False, description="Dry-run mode (no persistence)"),
+    service: PlaybookService = Depends(get_playbook_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Evaluate a contract upload against a playbook's policy rules.
+
+    Runs the full PolicyEngine pipeline:
+    1. Rule evaluation
+    2. Deviation detection
+    3. Approval threshold checks
+    4. Clause recommendations
+    5. Risk scoring
+
+    Returns evaluation results with triggered rules, deviations, and recommendations.
+    """
+    return await service.evaluate_contract(
+        playbook_id=playbook_id,
+        upload_id=upload_id,
+        simulation_mode=simulation_mode,
+    )
+
+
+@router.get("/evaluations", response_model=PaginatedResponse[PolicyEvaluationSummary]
+)
+async def list_evaluations(
+    status: Optional[str] = Query(None),
+    upload_id: Optional[str] = Query(None),
+    risk_level: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    sort_by: str = Query("created_at"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    service: PlaybookService = Depends(get_playbook_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """List policy evaluations with filtering."""
+    filters = EvaluationFilterParams(
+        status=status, upload_id=upload_id, risk_level=risk_level,
+        page=page, page_size=page_size, sort_by=sort_by, sort_order=sort_order
+)
+    items, total = await service.list_evaluations(filters
+)
+    return PaginatedResponse(
+        data=items,
+        pagination=PaginationMeta(page=page, page_size=page_size, total=total,
+                                   total_pages=max(1, (total + page_size - 1) // page_size))
+)
+
+
+@router.get("/evaluations/{evaluation_id}", response_model=PolicyEvaluationDetail
+)
+async def get_evaluation(
+    evaluation_id: str,
+    service: PlaybookService = Depends(get_playbook_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Get policy evaluation details."""
+    result = await service.get_evaluation(evaluation_id
+)
+    if not result:
+        raise NotFoundError(f"Evaluation {evaluation_id} not found"
+)
+    return result
+
+
+@router.get("/evaluations/upload/{upload_id}", response_model=PolicyEvaluationDetail
+)
+async def get_evaluation_by_upload(
+    upload_id: str,
+    service: PlaybookService = Depends(get_playbook_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Get the latest policy evaluation for an upload."""
+    result = await service.get_evaluation_by_upload(upload_id
+)
+    if not result:
+        raise NotFoundError(f"No evaluation found for upload {upload_id}"
+)
+    return result
+
+
+@router.post("/overrides", response_model=OverrideItem, status_code=201
+)
+async def request_override(
+    data: OverrideRequest,
+    service: PlaybookService = Depends(get_playbook_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Request a policy override for a specific evaluation result.
+
+    Overrides allow controlled exceptions to policy rules when
+    business justification exists.
+    """
+    return await service.request_override(data
+)
+
+
+@router.get("/overrides", response_model=PaginatedResponse[OverrideItem]
+)
+async def list_overrides(
+    status: Optional[str] = Query(None),
+    override_type: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    sort_by: str = Query("created_at"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    service: PlaybookService = Depends(get_playbook_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """List policy override requests with filtering."""
+    filters = OverrideFilterParams(
+        status=status, override_type=override_type,
+        page=page, page_size=page_size, sort_by=sort_by, sort_order=sort_order
+)
+    items, total = await service.list_overrides(filters
+)
+    return PaginatedResponse(
+        data=items,
+        pagination=PaginationMeta(page=page, page_size=page_size, total=total,
+                                   total_pages=max(1, (total + page_size - 1) // page_size))
+)
+
+
+@router.get("/audit", response_model=PaginatedResponse[GovernanceAuditEventItem]
+)
+async def list_audit_events(
+    event_type: Optional[str] = Query(None),
+    entity_type: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    sort_by: str = Query("created_at"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    service: PlaybookService = Depends(get_playbook_service),
+    _: None = Depends(require_permission(Permissions.AUDIT_READ)),
+):
+    """List governance audit events with filtering."""
+    filters = AuditFilterParams(
+        event_type=event_type, entity_type=entity_type,
+        page=page, page_size=page_size, sort_by=sort_by, sort_order=sort_order
+)
+    items, total = await service.list_audit_events(filters
+)
+    return PaginatedResponse(
+        data=items,
+        pagination=PaginationMeta(page=page, page_size=page_size, total=total,
+                                   total_pages=max(1, (total + page_size - 1) // page_size))
+)
+
+
+@router.post("/ai-context", response_model=PolicyContextResult
+)
+async def build_ai_context(
+    data: PolicyContextInject,
+    service: AIPolicyInjectionService = Depends(get_policy_injection_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Build structured policy context for AI prompt injection.
+
+    Aggregates relevant policy rules, clause standards, and approval
+    thresholds for a given contract context into a single prompt-ready payload.
+    """
+    return await service.build_context(data
+)
+
+
 @router.get("/{playbook_id}", response_model=PlaybookDetail
 )
 async def get_playbook(
@@ -343,60 +537,6 @@ async def deactivate_clause(
     return result
 
 
-# ── Fallback Recommendations ────────────────────────────────────────
-
-
-@router.get("/fallback", response_model=FallbackRecommendationResponse
-)
-async def get_fallback_recommendations(
-    clause_type: str = Query(..., description="Clause type to find fallback language for (e.g. indemnification, limitation_of_liability)"),
-    playbook_id: Optional[str] = Query(None, description="Optional playbook ID to scope the search"),
-    db: AsyncSession = Depends(get_db),
-    tenant_id: str = Depends(get_tenant_id)
-,
-    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
-):
-    """Get approved/preferred/fallback clause language for a given clause type.
-
-    Used by the AI redline generator and the frontend fallback picker to
-    inject company-approved language into contract review workflows.
-    """
-    from app.domains.playbook.context_provider import PlaybookContextProvider
-    provider = PlaybookContextProvider(db, tenant_id
-)
-    ctx = await provider.get_context(clause_category=clause_type, playbook_id=playbook_id
-)
-
-    def _to_item(std
-) -> FallbackRecommendation:
-        return FallbackRecommendation(
-            clause_id=str(std.clause_id),
-            playbook_id=str(std.playbook_id),
-            category=std.category.value if hasattr(std.category, "value") else str(std.category),
-            clause_type=std.clause_type.value if hasattr(std.clause_type, "value") else str(std.clause_type),
-            title=std.title,
-            body=std.body,
-            summary=std.summary,
-            risk_level=std.risk_level,
-            tags=list(std.tags) if std.tags else [],
-            is_active=std.is_active
-)
-
-    recommendations = []
-    for std_list in [ctx.approved, ctx.preferred, ctx.fallbacks]:
-        for std in std_list:
-            recommendations.append(_to_item(std)
-)
-
-    return FallbackRecommendationResponse(
-        clause_category=clause_type,
-        recommendations=recommendations,
-        has_approved=bool(ctx.approved),
-        has_preferred=bool(ctx.preferred),
-        has_fallback=bool(ctx.fallbacks)
-)
-
-
 # ── Policy Rules ────────────────────────────────────────────────────
 
 
@@ -542,117 +682,7 @@ async def update_threshold(
     return result
 
 
-# ── Policy Evaluation ───────────────────────────────────────────────
-
-
-@router.post("/evaluate", response_model=PolicyEvaluationDetail
-)
-async def evaluate_contract(
-    upload_id: str = Query(...),
-    playbook_id: str = Query(...),
-    review_id: Optional[str] = Query(None),
-    contract_value: Optional[float] = Query(None),
-    jurisdiction: Optional[str] = Query(None),
-    industry: Optional[str] = Query(None),
-    risk_score: Optional[float] = Query(None),
-    correlation_id: Optional[str] = Query(None),
-    service: PlaybookService = Depends(get_playbook_service)
-,
-    _: None = Depends(require_any_permission(Permissions.CONTRACTS_WRITE, Permissions.AI_ANALYZE)),
-):
-    """Evaluate a contract against a playbook's policy rules."""
-    result = await service.evaluate_contract(
-        upload_id=upload_id, playbook_id=playbook_id,
-        review_id=review_id, contract_value=contract_value,
-        jurisdiction=jurisdiction, industry=industry,
-        risk_score=risk_score, correlation_id=correlation_id
-)
-    if not result:
-        raise NotFoundError(f"Playbook {playbook_id} not found"
-)
-    return result
-
-
-@router.get("/evaluations", response_model=PaginatedResponse[PolicyEvaluationSummary]
-)
-async def list_evaluations(
-    status: Optional[str] = Query(None),
-    upload_id: Optional[str] = Query(None),
-    risk_level: Optional[str] = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    sort_by: str = Query("created_at"),
-    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
-    service: PlaybookService = Depends(get_playbook_service)
-,
-    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
-):
-    """List policy evaluations with filtering."""
-    filters = EvaluationFilterParams(
-        status=status, upload_id=upload_id, risk_level=risk_level,
-        page=page, page_size=page_size, sort_by=sort_by, sort_order=sort_order
-)
-    items, total = await service.list_evaluations(filters
-)
-    return PaginatedResponse(
-        data=items,
-        pagination=PaginationMeta(page=page, page_size=page_size, total=total,
-                                   total_pages=max(1, (total + page_size - 1) // page_size))
-)
-
-
-@router.get("/evaluations/{evaluation_id}", response_model=PolicyEvaluationDetail
-)
-async def get_evaluation(
-    evaluation_id: str,
-    service: PlaybookService = Depends(get_playbook_service)
-,
-    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
-):
-    """Get policy evaluation details."""
-    result = await service.get_evaluation(evaluation_id
-)
-    if not result:
-        raise NotFoundError(f"Evaluation {evaluation_id} not found"
-)
-    return result
-
-
-@router.get("/evaluations/upload/{upload_id}", response_model=PolicyEvaluationDetail
-)
-async def get_evaluation_by_upload(
-    upload_id: str,
-    service: PlaybookService = Depends(get_playbook_service)
-,
-    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
-):
-    """Get the latest policy evaluation for an upload."""
-    result = await service.get_evaluation_by_upload(upload_id
-)
-    if not result:
-        raise NotFoundError(f"No evaluation found for upload {upload_id}"
-)
-    return result
-
-
-# ── Policy Overrides ────────────────────────────────────────────────
-
-
-@router.post("/overrides", response_model=OverrideItem, status_code=201
-)
-async def request_override(
-    data: OverrideRequest,
-    service: PlaybookService = Depends(get_playbook_service)
-,
-    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
-):
-    """Request a policy override with justification."""
-    result = await service.request_override(data
-)
-    if not result:
-        raise NotFoundError(f"Evaluation {data.evaluation_id} not found"
-)
-    return result
+# ── Override Detail Routes (must follow /overrides list) ────────────
 
 
 @router.post("/overrides/{override_id}/review", response_model=OverrideItem
@@ -677,34 +707,6 @@ async def review_override(
 )
 
 
-@router.get("/overrides", response_model=PaginatedResponse[OverrideItem]
-)
-async def list_overrides(
-    status: Optional[str] = Query(None),
-    override_type: Optional[str] = Query(None),
-    upload_id: Optional[str] = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    sort_by: str = Query("created_at"),
-    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
-    service: PlaybookService = Depends(get_playbook_service)
-,
-    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
-):
-    """List policy overrides with filtering."""
-    filters = OverrideFilterParams(
-        status=status, override_type=override_type, upload_id=upload_id,
-        page=page, page_size=page_size, sort_by=sort_by, sort_order=sort_order
-)
-    items, total = await service.list_overrides(filters
-)
-    return PaginatedResponse(
-        data=items,
-        pagination=PaginationMeta(page=page, page_size=page_size, total=total,
-                                   total_pages=max(1, (total + page_size - 1) // page_size))
-)
-
-
 @router.get("/overrides/{override_id}", response_model=OverrideItem
 )
 async def get_override(
@@ -722,61 +724,6 @@ async def get_override(
     return result
 
 
-# ── Governance Audit ────────────────────────────────────────────────
-
-
-@router.get("/audit", response_model=PaginatedResponse[GovernanceAuditEventItem]
-)
-async def list_audit_events(
-    event_type: Optional[str] = Query(None),
-    entity_type: Optional[str] = Query(None),
-    entity_id: Optional[str] = Query(None),
-    actor_id: Optional[str] = Query(None),
-    date_from: Optional[str] = Query(None),
-    date_to: Optional[str] = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
-    sort_by: str = Query("created_at"),
-    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
-    service: PlaybookService = Depends(get_playbook_service)
-,
-    _: None = Depends(require_permission(Permissions.AUDIT_READ)),
-):
-    """List governance audit events with filtering."""
-    from datetime import datetime
-    filters = AuditFilterParams(
-        event_type=event_type, entity_type=entity_type, entity_id=entity_id,
-        actor_id=actor_id,
-        date_from=datetime.fromisoformat(date_from) if date_from else None,
-        date_to=datetime.fromisoformat(date_to) if date_to else None,
-        page=page, page_size=page_size, sort_by=sort_by, sort_order=sort_order
-)
-    items, total = await service.list_audit_events(filters
-)
-    return PaginatedResponse(
-        data=items,
-        pagination=PaginationMeta(page=page, page_size=page_size, total=total,
-                                   total_pages=max(1, (total + page_size - 1) // page_size))
-)
-
-
-# ── AI Policy Context ───────────────────────────────────────────────
-
-
-@router.post("/ai-context", response_model=PolicyContextResult
-)
-async def build_policy_context(
-    data: PolicyContextInject,
-    service: AIPolicyInjectionService = Depends(get_policy_injection_service)
-,
-    _: None = Depends(require_any_permission(Permissions.CONTRACTS_READ, Permissions.AI_VIEW)),
-):
-    """Build policy context for AI prompt injection."""
-    context = await service.build_policy_context(
-        playbook_id=data.playbook_id, upload_id=data.upload_id,
-        clause_categories=data.clause_categories,
-        include_rules=data.include_rules,
-        include_clauses=data.include_clauses,
-        include_thresholds=data.include_thresholds
-)
-    return context
+# ═══════════════════════════════════════════════════════════════════
+# End of router — all routes defined above
+# ═══════════════════════════════════════════════════════════════════

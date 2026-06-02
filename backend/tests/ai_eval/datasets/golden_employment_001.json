@@ -1,0 +1,59 @@
+{
+  "contract_id": "golden_employment_001",
+  "contract_type": "employment",
+  "description": "Employment agreement with non-compete, IP assignment, and confidentiality",
+  "jurisdiction": "us",
+  "risk_profile": "standard",
+  "tags": ["employment", "hr", "standard"],
+  "expected_risk_score": 0.55,
+  "expected_clause_types": [
+    "intellectual_property",
+    "confidentiality",
+    "non_compete",
+    "termination",
+    "governing_law",
+    "dispute_resolution"
+  ],
+  "expected_findings": [
+    {
+      "clause_type": "intellectual_property",
+      "severity": "critical",
+      "title": "IP assignment to company",
+      "description_contains": "intellectual property",
+      "min_confidence": 0.8,
+      "required": true
+    },
+    {
+      "clause_type": "non_compete",
+      "severity": "high",
+      "title": "Non-compete restrictions",
+      "description_contains": "non-compete",
+      "min_confidence": 0.8,
+      "required": true
+    },
+    {
+      "clause_type": "confidentiality",
+      "severity": "high",
+      "title": "Confidentiality obligations",
+      "description_contains": "confidential",
+      "min_confidence": 0.8,
+      "required": true
+    },
+    {
+      "clause_type": "termination",
+      "severity": "medium",
+      "title": "Termination provisions",
+      "description_contains": "termination",
+      "min_confidence": 0.7,
+      "required": true
+    },
+    {
+      "clause_type": "dispute_resolution",
+      "severity": "medium",
+      "title": "Arbitration clause",
+      "description_contains": "arbitration",
+      "min_confidence": 0.7,
+      "required": false
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+export { ComplianceCenter } from "./ComplianceCenter";
 export { ComplianceKpiCards } from "./ComplianceKpiCards";
 export { ComplianceToolbar } from "./ComplianceToolbar";
 export { ComplianceLeftSidebar } from "./ComplianceLeftSidebar";

@@ -369,21 +369,21 @@ def create_app() -> FastAPI:
     # ── Clause Intelligence router ──
     from app.domains.clause_intel.router import router as clause_intel_router
     app.include_router(clause_intel_router, prefix="/api/v1")
-    # ── Tenant Configuration router ──
-    from app.domains.tenant_config.router import router as tenant_config_router
-    app.include_router(tenant_config_router, prefix="/api/v1")
-    # ── AI Governance router ──
-    from app.domains.ai_governance.router import router as ai_governance_router
-    app.include_router(ai_governance_router, prefix="/api/v1")
-    # ── Cost & Resource Governance router ──
-    from app.domains.cost_governance.router import router as cost_governance_router
-    app.include_router(cost_governance_router, prefix="/api/v1")
+    # ── Obligation Management router ──
+    from app.domains.obligations.router import router as obligation_router
+    app.include_router(obligation_router, prefix="/api/v1")
+    # ── Contracts router (wraps review service) ──
+    from app.domains.contracts.router import router as contracts_router
+    app.include_router(contracts_router, prefix="/api/v1")
+    # ── Compliance router ──
+    from app.domains.compliance.router import router as compliance_router
+    app.include_router(compliance_router, prefix="/api/v1")
     # ── Human Oversight router ──
     from app.domains.human_oversight.router import router as human_oversight_router
     app.include_router(human_oversight_router, prefix="/api/v1")
-    # ── Enterprise Workflow Packs router ──
-    from app.domains.workflow_packs.router import router as workflow_packs_router
-    app.include_router(workflow_packs_router, prefix="/api/v1")
+    # ── AI Governance router (prompt registry, evaluation, quality dashboard) ──
+    from app.domains.ai_governance.router import router as ai_governance_router
+    app.include_router(ai_governance_router, prefix="/api/v1")
 
     # ── Prometheus metrics endpoint (no prefix, no auth) ──
     from app.kernel.telemetry.metrics import metrics_endpoint

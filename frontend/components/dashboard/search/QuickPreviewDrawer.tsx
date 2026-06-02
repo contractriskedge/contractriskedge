@@ -8,7 +8,22 @@ import {
   ChevronRight, User, Calendar,
 } from "lucide-react";
 import type { SearchResult, QuickPreviewData, RiskLevel } from "./types";
-import { mockQuickPreviewData } from "./mockData";
+
+const mockQuickPreviewData: QuickPreviewData = {
+  documentId: "",
+  title: "",
+  vendor: "",
+  contractType: "",
+  riskScore: 0,
+  summary: "No preview available",
+  clauses: [],
+  keyFindings: [],
+  parties: [],
+  effectiveDate: "",
+  expirationDate: "",
+  governingLaw: "",
+  aiConfidence: 0,
+};
 
 // ── Quick Preview Drawer ─────────────────────────────────────────────────
 

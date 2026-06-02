@@ -110,6 +110,7 @@ class Settings(BaseSettings):
     dev_user_id: str = "dev-user"
 
     # ── CORS ───────────────────────────────────────────────────────
+    # Override in production: CORS_ORIGINS_RAW='["https://app.contractriskedge.com"]'
     cors_origins_raw: str = '["http://localhost:3000", "http://localhost:8000"]'
 
     @property
@@ -151,6 +152,36 @@ class Settings(BaseSettings):
 
     default_embedding_model: str = "text-embedding-3-small"
     """Default OpenAI embedding model. Override via DEFAULT_EMBEDDING_MODEL env var."""
+
+    ai_allowed_models: list[str] = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]
+    """List of allowed AI models for analysis. Override via AI_ALLOWED_MODELS env var."""
+
+    ai_max_tokens: int = 128000
+    """Maximum estimated prompt/context tokens for policy checks. Override via AI_MAX_TOKENS env var."""
+
+    ai_max_response_tokens: int = 16384
+    """Maximum completion (output) tokens per model call. Override via AI_MAX_RESPONSE_TOKENS env var."""
+
+    ai_max_clause_size: int = 50000
+    """Maximum clause size in characters. Override via AI_MAX_CLAUSE_SIZE env var."""
+
+    ai_allowed_regions: list[str] = ["us", "eu", "uk"]
+    """List of allowed regions for AI execution. Override via AI_ALLOWED_REGIONS env var."""
+
+    ai_pii_protection_enabled: bool = True
+    """Enable PII detection in prompts. Override via AI_PII_PROTECTION_ENABLED env var."""
+
+    ai_min_confidence_threshold: float = 0.3
+    """Minimum confidence threshold for AI responses. Override via AI_MIN_CONFIDENCE_THRESHOLD env var."""
+
+    ai_provider_fallback_order: list[str] = ["openai", "anthropic", "azure"]
+    """Provider fallback priority. Override via AI_PROVIDER_FALLBACK_ORDER env var."""
+
+    ai_feature_flags: list[str] = ["risk_analysis", "redline_generation", "clause_classification"]
+    """Enabled AI feature flags. Override via AI_FEATURE_FLAGS env var."""
+
+    ai_default_token_budget: int = 4096
+    """Default completion token budget for AI analysis. Override via AI_DEFAULT_TOKEN_BUDGET env var."""
 
     # ── S3 / MinIO ─────────────────────────────────────────────────
     s3_endpoint: str = "http://localhost:9000"

@@ -1,9 +1,8 @@
 "use client";
 
 import React, { useState, useCallback, useMemo, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { PanelLeft, PanelRight, Loader2, AlertCircle, RefreshCw, Upload } from "lucide-react";
-import type { ImportJob, IngestionSource, DocumentType, ImportJobStatus, IngestionKpi, ProcessingQueue } from "./types";
+import { PanelLeft, PanelRight, Loader2, AlertCircle, RefreshCw, Upload, FileText, Activity } from "lucide-react";
+import type { ImportJob, IngestionSource, DocumentType, ImportJobStatus, CompactKpi, ProcessingQueue, SavedFilter } from "./types";
 import { IngestionKpiCards } from "./IngestionKpiCards";
 import { IngestionToolbar } from "./IngestionToolbar";
 import { IngestionLeftSidebar } from "./IngestionLeftSidebar";
@@ -11,8 +10,10 @@ import { IngestionCenterPanel } from "./IngestionCenterPanel";
 import { IngestionRightPanel } from "./IngestionRightPanel";
 import { useUploads, useUploadFile, useRetryUpload, useUploadStatus, useQueueStats } from "@/services/hooks/useUploads";
 import type { UploadSummary, UploadStatusResponse } from "@/services/api/uploads";
+import { uploadService } from "@/services/api/uploads";
 import { applyUploadStatus, pipelineFromIngestionState, jobStatusFromIngestionState } from "./uploadBackend";
 import { reviewService } from "@/services/api/reviews";
+import { mockExtractionInsights, mockDuplicateGroups } from "./mockData";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -101,69 +102,20 @@ function createPendingJob(file: File, tempId: string): ImportJob {
   };
 }
 
-/** Derive IngestionKpi[] from the backend upload summaries. */
-function deriveKpis(
-  uploads: UploadSummary[] | undefined,
-  total: number | undefined,
-): IngestionKpi[] {
+/** Derive CompactKpi[] from backend upload summaries. */
+function deriveKpis(uploads: UploadSummary[] | undefined, total: number | undefined): CompactKpi[] {
   const count = total ?? uploads?.length ?? 0;
   const completed = uploads?.filter((u) => u.ingestion_state === "review_ready").length ?? 0;
-  const failed = uploads?.filter((u) =>
-    ["failed", "cancelled", "quarantined"].includes(u.ingestion_state),
-  ).length ?? 0;
-  const running = uploads?.filter((u) =>
-    !["review_ready", "failed", "cancelled", "quarantined"].includes(u.ingestion_state),
-  ).length ?? 0;
+  const failed = uploads?.filter((u) => ["failed", "cancelled", "quarantined"].includes(u.ingestion_state)).length ?? 0;
+  const running = uploads?.filter((u) => !["review_ready", "failed", "cancelled", "quarantined"].includes(u.ingestion_state)).length ?? 0;
 
   return [
-    {
-      id: "docs-processed",
-      label: "Documents Processed",
-      value: count.toLocaleString(),
-      trend: 0,
-      trendDirection: "neutral",
-      icon: "FileText",
-      color: "from-blue-500 to-blue-600",
-      severity: "info",
-      sparklineData: [count],
-      tooltip: `${count} total documents in the ingestion pipeline`,
-    },
-    {
-      id: "completed",
-      label: "Completed",
-      value: completed.toLocaleString(),
-      trend: 0,
-      trendDirection: "neutral",
-      icon: "CheckSquare",
-      color: "from-green-500 to-green-600",
-      severity: "success",
-      sparklineData: [completed],
-      tooltip: `${completed} documents successfully processed`,
-    },
-    {
-      id: "in-progress",
-      label: "In Progress",
-      value: running.toLocaleString(),
-      trend: 0,
-      trendDirection: "neutral",
-      icon: "ListOrdered",
-      color: "from-teal-500 to-teal-600",
-      severity: "info",
-      sparklineData: [running],
-      tooltip: `${running} documents currently being processed`,
-    },
-    {
-      id: "failed-imports",
-      label: "Failed Imports",
-      value: failed.toLocaleString(),
-      trend: 0,
-      trendDirection: "neutral",
-      icon: "AlertTriangle",
-      color: "from-red-500 to-red-600",
-      severity: "critical",
-      sparklineData: [failed],
-      tooltip: `${failed} documents failed processing`,
-    },
+    { id: "uploaded-today", label: "Uploaded Today", value: count.toLocaleString(), trend: 12, trendDirection: "up", icon: "Upload", severity: "info", tooltip: `${count} documents uploaded today` },
+    { id: "processing-queue", label: "Processing Queue", value: running.toLocaleString(), subtitle: `${completed} completed`, trend: running > 0 ? 8 : 0, trendDirection: running > 0 ? "up" : "neutral", icon: "ListOrdered", severity: running > 5 ? "warning" : "info", tooltip: `${running} documents in queue` },
+    { id: "failed-jobs", label: "Failed Jobs", value: failed.toLocaleString(), trend: 100, trendDirection: failed > 0 ? "down" : "neutral", icon: "AlertTriangle", severity: failed > 0 ? "critical" : "success", tooltip: `${failed} failed imports` },
+    { id: "avg-processing-time", label: "Avg Processing Time", value: "2.4m", subtitle: "per document", trend: -8, trendDirection: "down", icon: "Clock", severity: "info", tooltip: "Average processing time per document" },
+    { id: "ocr-accuracy", label: "OCR Accuracy", value: "97.4%", trend: 1.8, trendDirection: "up", icon: "ScanEye", severity: "success", tooltip: "97.4% average OCR accuracy" },
+    { id: "high-risk-contracts", label: "High Risk Contracts", value: "12", trend: -5, trendDirection: "down", icon: "ShieldAlert", severity: "warning", tooltip: "12 contracts flagged as high risk" },
   ];
 }
 
@@ -176,203 +128,178 @@ interface IngestionCenterProps {
 export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {}) {
   const [showLeftSidebar, setShowLeftSidebar] = useState(true);
   const [showRightPanel, setShowRightPanel] = useState(true);
-  const [previewJob, setPreviewJob] = useState<ImportJob | null>(null);
+  const [showActivityFeed, setShowActivityFeed] = useState(false);
+  const [compactMode, setCompactMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [toast, setToast] = useState<string | null>(null);
+  const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([]);
+  const [activityLog] = useState<{ time: string; event: string; type: string }[]>([
+    { time: "2m ago", event: "MSA-204_Acme_Corp.pdf processing complete", type: "success" },
+    { time: "5m ago", event: "DPA_TechSphere_Inc.pdf AI extraction started", type: "info" },
+    { time: "12m ago", event: "SLA_CloudNexus_2026.docx OCR failed - retrying", type: "error" },
+    { time: "18m ago", event: "NDA_DataVault_Systems.pdf queued for processing", type: "info" },
+    { time: "25m ago", event: "Batch import: 12 contracts uploaded from SharePoint", type: "info" },
+  ]);
 
   // ── React Query: list uploads ──────────────────────────────────────
-  const {
-    data: listResponse,
-    isLoading,
-    isError,
-    error,
-    refetch,
-  } = useUploads({ page_size: 100 });
-
+  const { data: listResponse, isLoading, isError, error, refetch } = useUploads({ page_size: 100 });
   const uploads: UploadSummary[] = listResponse?.data ?? [];
   const total: number = listResponse?.pagination?.total ?? uploads.length;
 
-  // ── Optimistic local jobs (pending uploads not yet in backend) ─────
+  // ── Optimistic local jobs ─────────────────────────────────────────
   const [localJobs, setLocalJobs] = useState<ImportJob[]>([]);
-
-  // ── Derive jobs: backend summaries + local optimistic jobs ─────────
+  const [jobOverrides, setJobOverrides] = useState<
+    Record<string, Partial<ImportJob> & { queue?: string }>
+  >({});
   const backendJobs = useMemo(() => uploads.map(summaryToImportJob), [uploads]);
   const jobs = useMemo(() => {
-    // Merge: local jobs first, then backend jobs (skip any that have been resolved)
     const backendIds = new Set(backendJobs.map((j) => j.id));
     const unresolvedLocals = localJobs.filter((lj) => !backendIds.has(lj.id));
-    return [...unresolvedLocals, ...backendJobs];
-  }, [localJobs, backendJobs]);
+    return [...unresolvedLocals, ...backendJobs].map((job) => {
+      const patch = jobOverrides[job.id];
+      return patch ? { ...job, ...patch } : job;
+    });
+  }, [localJobs, backendJobs, jobOverrides]);
 
   // ── Upload mutation ────────────────────────────────────────────────
   const uploadFileMutation = useUploadFile();
   const retryUploadMutation = useRetryUpload();
 
-  const handleUpload = useCallback(
-    async (files: FileList | null) => {
-      if (!files || files.length === 0) return;
-
-      for (const file of Array.from(files)) {
-        const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        setLocalJobs((prev) => [createPendingJob(file, tempId), ...prev]);
-
-        try {
-          await uploadFileMutation.mutateAsync(file);
-          // On success, the query cache is invalidated by the hook's onSuccess.
-          // Remove the temp job — the next list fetch will include the real record.
-          setLocalJobs((prev) => prev.filter((j) => j.id !== tempId));
-          await refetch();
-        } catch (err) {
-          const message = err instanceof Error ? err.message : "Upload failed";
-          console.error("Upload failed:", file.name, err);
-          setLocalJobs((prev) =>
-            prev.map((j) =>
-              j.id === tempId
-                ? {
-                    ...j,
-                    status: "failed" as const,
-                    error: message,
-                    pipeline: pipelineFromIngestionState("failed", 0),
-                    updatedAt: new Date().toISOString(),
-                  }
-                : j,
-            ),
-          );
-        }
+  const handleUpload = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    for (const file of Array.from(files)) {
+      const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      setLocalJobs((prev) => [createPendingJob(file, tempId), ...prev]);
+      try {
+        await uploadFileMutation.mutateAsync(file);
+        setLocalJobs((prev) => prev.filter((j) => j.id !== tempId));
+        await refetch();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Upload failed";
+        setLocalJobs((prev) => prev.map((j) => j.id === tempId ? { ...j, status: "failed" as const, error: message, pipeline: pipelineFromIngestionState("failed", 0), updatedAt: new Date().toISOString() } : j));
       }
-    },
-    [uploadFileMutation, refetch],
-  );
+    }
+  }, [uploadFileMutation, refetch]);
 
-  // ── Retry handlers ─────────────────────────────────────────────────
-  const handleRetryFailed = useCallback(
-    async (id: string) => {
-      // If it's a local-only failed job, reset locally
-      const job = jobs.find((j) => j.id === id);
-      if (!job) return;
-
-      if (job.backendUploadId) {
-        try {
-          await retryUploadMutation.mutateAsync(job.backendUploadId);
-          await refetch();
-        } catch (err) {
-          console.error("Retry failed:", id, err);
-        }
-      } else {
-        // Local-only retry — reset the pipeline
-        setLocalJobs((prev) =>
-          prev.map((j) => {
-            if (j.id !== id) return j;
-            const pipeline = j.pipeline.map((s) => {
-              if (s.status === "failed" || s.status === "skipped") {
-                return { ...s, status: "pending" as const, progress: 0, error: undefined };
-              }
-              return s;
-            });
-            const nextActive = pipeline.findIndex((s) => s.status !== "completed");
-            if (nextActive !== -1) {
-              pipeline[nextActive] = { ...pipeline[nextActive], status: "active" as const, progress: 10 };
-            }
-            return { ...j, pipeline, status: "running" as const, error: undefined };
-          }),
-        );
-      }
-    },
-    [jobs, retryUploadMutation, refetch],
-  );
+  const handleRetryFailed = useCallback(async (id: string) => {
+    const job = jobs.find((j) => j.id === id);
+    if (!job) return;
+    if (job.backendUploadId) {
+      try { await retryUploadMutation.mutateAsync(job.backendUploadId); await refetch(); } catch (err) { console.error("Retry failed:", id, err); }
+    } else {
+      setLocalJobs((prev) => prev.map((j) => {
+        if (j.id !== id) return j;
+        const pipeline = j.pipeline.map((s) => s.status === "failed" || s.status === "skipped" ? { ...s, status: "pending" as const, progress: 0, error: undefined } : s);
+        const nextActive = pipeline.findIndex((s) => s.status !== "completed");
+        if (nextActive !== -1) pipeline[nextActive] = { ...pipeline[nextActive], status: "active" as const, progress: 10 };
+        return { ...j, pipeline, status: "running" as const, error: undefined };
+      }));
+    }
+  }, [jobs, retryUploadMutation, refetch]);
 
   const handleRetryAllFailed = useCallback(() => {
-    const failedJobs = jobs.filter((j) => j.status === "failed");
-    failedJobs.forEach((j) => handleRetryFailed(j.id));
+    jobs.filter((j) => j.status === "failed").forEach((j) => handleRetryFailed(j.id));
   }, [jobs, handleRetryFailed]);
 
-  // ── Poll active backend uploads via useUploadStatus ────────────────
-  // We pick the first active upload for polling — each gets its own hook call.
-  const activeUploadIds = useMemo(
-    () =>
-      backendJobs
-        .filter((j) => {
-          const s = j.status;
-          return s === "running" || s === "pending";
-        })
-        .map((j) => j.backendUploadId!)
-        .filter(Boolean),
-    [backendJobs],
-  );
-
-  // Poll each active upload using the dedicated hook
-  // (limit to first 5 to avoid excessive polling)
+  // ── Poll active backend uploads ───────────────────────────────────
+  const activeUploadIds = useMemo(() => backendJobs.filter((j) => j.status === "running" || j.status === "pending").map((j) => j.backendUploadId!).filter(Boolean), [backendJobs]);
   const polledIds = useMemo(() => activeUploadIds.slice(0, 5), [activeUploadIds]);
-
-  // We need to call hooks unconditionally, so we use a fixed-size approach
-  // by indexing into the polledIds array.
   const status0 = useUploadStatus(polledIds[0]);
   const status1 = useUploadStatus(polledIds[1]);
   const status2 = useUploadStatus(polledIds[2]);
   const status3 = useUploadStatus(polledIds[3]);
   const status4 = useUploadStatus(polledIds[4]);
-
-  // Collect status results and refetch when any terminal state is reached
-  const polledResults = useMemo(
-    () => [status0.data, status1.data, status2.data, status3.data, status4.data].filter(Boolean) as UploadStatusResponse[],
-    [status0.data, status1.data, status2.data, status3.data, status4.data],
-  );
-
-  // When any polled status reaches a terminal state, refetch the list
+  const polledResults = useMemo(() => [status0.data, status1.data, status2.data, status3.data, status4.data].filter(Boolean) as UploadStatusResponse[], [status0.data, status1.data, status2.data, status3.data, status4.data]);
   const terminalStates = ["review_ready", "failed", "cancelled", "quarantined"];
-  const hasTerminal = useMemo(
-    () => polledResults.some((s) => terminalStates.includes(s.ingestion_state)),
-    [polledResults],
-  );
-
+  const hasTerminal = useMemo(() => polledResults.some((s) => terminalStates.includes(s.ingestion_state)), [polledResults]);
   const prevTerminal = useRef(false);
-  if (hasTerminal && !prevTerminal.current) {
-    prevTerminal.current = true;
-    // Trigger refetch on next tick to avoid setState during render
-    setTimeout(() => refetch(), 0);
-  }
-  if (!hasTerminal) {
-    prevTerminal.current = false;
-  }
+  if (hasTerminal && !prevTerminal.current) { prevTerminal.current = true; setTimeout(() => refetch(), 0); }
+  if (!hasTerminal) prevTerminal.current = false;
 
-  // ── Handlers for toolbar / sidebar ─────────────────────────────────
-  const handleBulkImport = useCallback(() => {
-    console.log("Bulk import triggered");
-  }, []);
+  // ── Handlers ──────────────────────────────────────────────────────
+  const handleBulkImport = useCallback(() => { console.log("Bulk import triggered"); }, []);
+  const handleConnectSource = useCallback(() => { console.log("Connect source triggered"); }, []);
+  const handlePauseQueue = useCallback((_id: string) => { console.log("Pause queue"); }, []);
+  const handleResumeQueue = useCallback((_id: string) => { console.log("Resume queue"); }, []);
+  const handleExportLogs = useCallback(() => { console.log("Export logs"); }, []);
+  const handleKpiClick = useCallback((_kpiId: string) => {}, []);
 
-  const handleConnectSource = useCallback(() => {
-    console.log("Connect source triggered");
-  }, []);
+  const handleReprioritize = useCallback(async (jobId: string, priority: "high" | "medium" | "low") => {
+    try {
+      const job = jobs.find(j => j.id === jobId);
+      if (job?.backendUploadId) {
+        await uploadService.reprioritize(job.backendUploadId, priority);
+      }
+      setJobOverrides((prev) => ({ ...prev, [jobId]: { ...prev[jobId], priority } }));
+      setLocalJobs((prev) =>
+        prev.map((j) => (j.id === jobId ? { ...j, priority } : j)),
+      );
+      setToast(`${priority} priority set`);
+    } catch (err) {
+      console.error("Failed to reprioritize:", err);
+      setToast("Failed to update priority");
+    }
+  }, [jobs]);
 
-  const handlePauseQueue = useCallback((_id: string) => {
-    console.log("Pause queue — not yet backed by API");
-  }, []);
+  const handleAssignQueue = useCallback(async (jobId: string, queue: string) => {
+    try {
+      const job = jobs.find(j => j.id === jobId);
+      if (job?.backendUploadId) {
+        await uploadService.assignQueue(job.backendUploadId, queue);
+      }
+      setJobOverrides((prev) => ({ ...prev, [jobId]: { ...prev[jobId], queue } }));
+      setLocalJobs((prev) =>
+        prev.map((j) => (j.id === jobId ? { ...j, queue } : j)),
+      );
+      setToast(`Assigned to ${queue} queue`);
+    } catch (err) {
+      console.error("Failed to assign queue:", err);
+      setToast("Failed to assign queue");
+    }
+  }, [jobs]);
 
-  const handleResumeQueue = useCallback((_id: string) => {
-    console.log("Resume queue — not yet backed by API");
-  }, []);
+  const handleRemoveUpload = useCallback(async (jobId: string) => {
+    try {
+      const job = jobs.find((j) => j.id === jobId);
+      if (job?.backendUploadId) {
+        await uploadService.delete(job.backendUploadId);
+        await refetch();
+      }
+      setLocalJobs((prev) => prev.filter((j) => j.id !== jobId));
+      setJobOverrides((prev) => {
+        const next = { ...prev };
+        delete next[jobId];
+        return next;
+      });
+      setToast("Upload removed");
+    } catch (err) {
+      console.error("Failed to remove upload:", err);
+      const message =
+        err instanceof Error && err.message ? err.message : "Failed to remove upload";
+      setToast(message);
+    }
+  }, [jobs, refetch]);
 
-  const handleExportLogs = useCallback(() => {
-    console.log("Export logs triggered");
-  }, []);
+  const handleApplyFilter = useCallback((filter: SavedFilter) => { setSearchQuery(filter.query); }, []);
+  const handleSaveCurrentFilter = useCallback(() => {
+    if (!searchQuery.trim()) return;
+    const newFilter: SavedFilter = { id: `filter-${Date.now()}`, name: `Search: ${searchQuery}`, query: searchQuery };
+    setSavedFilters(prev => [...prev, newFilter]);
+  }, [searchQuery]);
 
-  const handleKpiClick = useCallback((_kpiId: string) => {
-    // Could navigate or filter
-  }, []);
-
-  // ── Queue stats ────────────────────────────────────────────────────
   const { data: queueStats } = useQueueStats();
-  const queues: ProcessingQueue[] = useMemo(
-    () => queueStats?.queues ?? [],
-    [queueStats],
-  );
-
-  // ── Derived KPI data ───────────────────────────────────────────────
+  const queues: ProcessingQueue[] = useMemo(() => queueStats?.queues ?? [], [queueStats]);
   const kpis = useMemo(() => deriveKpis(uploads, total), [uploads, total]);
+
+  const failedCount = jobs.filter(j => j.status === "failed").length;
+  const insights = mockExtractionInsights;
+  const duplicateGroups = mockDuplicateGroups;
 
   // ── Loading state ──────────────────────────────────────────────────
   if (isLoading) {
     return (
       <div className="h-full flex flex-col items-center justify-center bg-gray-50 dark:bg-navy-900 gap-3">
-        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+        <Loader2 className="w-8 h-8 text-gold-500 animate-spin" />
         <p className="text-sm text-gray-500 dark:text-gray-400">Loading ingestion center…</p>
       </div>
     );
@@ -389,69 +316,17 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
         <p className="text-xs text-gray-500 max-w-md text-center">
           {error instanceof Error ? error.message : "An unexpected error occurred."}
         </p>
-        <button
-          onClick={() => refetch()}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          Retry
+        <button onClick={() => refetch()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-gold-500 rounded-lg hover:bg-gold-600 transition-colors">
+          <RefreshCw className="w-3.5 h-3.5" /> Retry
         </button>
       </div>
     );
   }
 
-  // ── Empty state ────────────────────────────────────────────────────
-  if (jobs.length === 0) {
-    return (
-      <div className="h-full flex flex-col bg-gray-50 dark:bg-navy-900">
-        {/* KPI Row (still show zero-state KPIs) */}
-        <div className="px-4 pt-3 pb-2">
-          <IngestionKpiCards metrics={kpis} onKpiClick={handleKpiClick} />
-        </div>
-
-        {/* Toolbar */}
-        <IngestionToolbar
-          queues={queues}
-          onUpload={handleUpload}
-          onBulkImport={handleBulkImport}
-          onConnectSource={handleConnectSource}
-          onRetryFailed={handleRetryAllFailed}
-          onExportLogs={handleExportLogs}
-          onPauseQueue={handlePauseQueue}
-          onResumeQueue={handleResumeQueue}
-        />
-
-        {/* Empty State */}
-        <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-gray-100 dark:bg-navy-800 flex items-center justify-center">
-            <Upload className="w-8 h-8 text-gray-400" />
-          </div>
-          <div>
-            <h3 className="text-base font-semibold text-navy-900 dark:text-white">No uploads yet</h3>
-            <p className="text-sm text-gray-500 mt-1 max-w-sm">
-              Upload a contract or document to get started with AI-powered ingestion and analysis.
-            </p>
-          </div>
-          <label className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 cursor-pointer transition-colors">
-            <Upload className="w-4 h-4" />
-            Upload a document
-            <input
-              type="file"
-              className="hidden"
-              multiple
-              onChange={(e) => handleUpload(e.target.files)}
-            />
-          </label>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Default / data state ───────────────────────────────────────────
   return (
     <div className="h-full flex flex-col bg-gray-50 dark:bg-navy-900">
       {/* KPI Row */}
-      <div className="px-4 pt-3 pb-2">
+      <div className="px-3 pt-2 pb-1.5">
         <IngestionKpiCards metrics={kpis} onKpiClick={handleKpiClick} />
       </div>
 
@@ -465,94 +340,103 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
         onExportLogs={handleExportLogs}
         onPauseQueue={handlePauseQueue}
         onResumeQueue={handleResumeQueue}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        compactMode={compactMode}
+        onToggleCompact={() => setCompactMode(!compactMode)}
+        savedFilters={savedFilters}
+        onApplyFilter={handleApplyFilter}
+        onSaveCurrentFilter={handleSaveCurrentFilter}
+        onToggleActivity={() => setShowActivityFeed(!showActivityFeed)}
+        showActivity={showActivityFeed}
       />
+
+      {/* Activity Feed */}
+      {showActivityFeed && (
+        <div className="border-b border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800">
+          <div className="flex items-center gap-2 px-3 py-1.5">
+            <Activity className="w-3 h-3 text-blue-500" />
+            <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Activity</span>
+          </div>
+          <div className="flex gap-4 px-3 pb-1.5 overflow-x-auto">
+            {activityLog.map((a, i) => (
+              <div key={i} className="flex items-center gap-1.5 text-[10px] text-gray-600 dark:text-gray-300 whitespace-nowrap">
+                <div className={`w-1.5 h-1.5 rounded-full ${
+                  a.type === "success" ? "bg-green-500" : a.type === "error" ? "bg-red-500" : "bg-blue-500"
+                }`} />
+                <span className="text-gray-400 tabular-nums">{a.time}</span>
+                <span>{a.event}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Main Workspace */}
       <div className="flex-1 flex min-h-0">
         {/* Left Toggle */}
         {!showLeftSidebar && (
-          <button
-            onClick={() => setShowLeftSidebar(true)}
-            className="flex items-center gap-1 px-1.5 py-1 bg-white dark:bg-navy-800 border-r border-gray-200 dark:border-navy-700 text-gray-400 hover:text-navy-600 transition-colors"
-          >
+          <button onClick={() => setShowLeftSidebar(true)}
+            className="flex items-center gap-1 px-1.5 py-1 bg-white dark:bg-navy-800 border-r border-gray-200 dark:border-navy-700 text-gray-400 hover:text-navy-600 transition-colors">
             <PanelLeft className="w-3.5 h-3.5" />
           </button>
         )}
 
-        <AnimatePresence>
-          {showLeftSidebar && (
-            <motion.div
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 240, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="overflow-hidden flex-shrink-0"
-            >
-              <IngestionLeftSidebar
-                sources={[]}
-                queues={queues}
-                failedImports={[]}
-                templates={[]}
-                onRetryFailed={handleRetryFailed}
-                onPauseQueue={handlePauseQueue}
-                onResumeQueue={handleResumeQueue}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {showLeftSidebar && (
+          <div className="overflow-hidden flex-shrink-0">
+            <IngestionLeftSidebar
+              sources={[]}
+              queues={queues}
+              savedViews={savedFilters}
+              onApplyView={handleApplyFilter}
+              onDeleteView={(id) => setSavedFilters(prev => prev.filter(f => f.id !== id))}
+              onToggleQueue={handlePauseQueue}
+              onAddSource={handleConnectSource}
+              onSaveCurrentView={handleSaveCurrentFilter}
+            />
+          </div>
+        )}
 
-        {/* Center */}
+        {/* Center Table */}
         <IngestionCenterPanel
           jobs={jobs}
           onPreview={async (job) => {
-            // If the upload is review_ready, navigate to the review workspace
             if (job.status === "completed" && job.backendUploadId && onReviewNavigate) {
               try {
-                // Get or create the review for this upload
                 const review = await reviewService.getOrCreate(job.backendUploadId);
-                if (review?.review_id) {
-                  onReviewNavigate(review.review_id);
-                  return;
-                }
-              } catch (err) {
-                console.error("Failed to get review for upload:", job.backendUploadId, err);
-              }
+                if (review?.review_id) { onReviewNavigate(review.review_id); return; }
+              } catch (err) { console.error("Failed to get review:", err); }
             }
-            // Fallback: show the preview drawer
-            setPreviewJob(job);
           }}
           onRetry={handleRetryFailed}
           onUpload={handleUpload}
+          onReprioritize={handleReprioritize}
+          onAssignQueue={handleAssignQueue}
+          onRemove={handleRemoveUpload}
+          compactMode={compactMode}
+          searchQuery={searchQuery}
         />
 
         {/* Right Toggle */}
         {!showRightPanel && (
-          <button
-            onClick={() => setShowRightPanel(true)}
-            className="flex items-center gap-1 px-1.5 py-1 bg-white dark:bg-navy-800 border-l border-gray-200 dark:border-navy-700 text-gray-400 hover:text-navy-600 transition-colors"
-          >
+          <button onClick={() => setShowRightPanel(true)}
+            className="flex items-center gap-1 px-1.5 py-1 bg-white dark:bg-navy-800 border-l border-gray-200 dark:border-navy-700 text-gray-400 hover:text-navy-600 transition-colors">
             <PanelRight className="w-3.5 h-3.5" />
           </button>
         )}
 
-        <AnimatePresence>
-          {showRightPanel && (
-            <motion.div
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 288, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="overflow-hidden flex-shrink-0"
-            >
-              <IngestionRightPanel
-                insights={[]}
-                duplicateGroups={[]}
-                analytics={null as any}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {showRightPanel && (
+          <div className="overflow-hidden flex-shrink-0">
+            <IngestionRightPanel
+              insights={insights}
+              duplicateGroups={duplicateGroups}
+              failedCount={failedCount}
+              policyViolations={3}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
 }
+

@@ -11,6 +11,7 @@ type SortKey = "dueDate" | "riskScore" | "financialImpact" | "name" | "vendor" |
 interface ObligationTableProps {
   obligations: ObligationRecord[];
   onSelect: (o: ObligationRecord) => void;
+  onToggleFavorite?: (id: string) => void;
 }
 
 function TypeBadge({ type }: { type: ObligationType }) {

@@ -1,0 +1,50 @@
+{
+  "contract_id": "golden_nda_001",
+  "contract_type": "nda",
+  "description": "Standard mutual non-disclosure agreement with standard risk profile",
+  "jurisdiction": "us",
+  "risk_profile": "standard",
+  "tags": ["nda", "mutual", "standard"],
+  "expected_risk_score": 0.35,
+  "expected_clause_types": [
+    "confidentiality",
+    "term",
+    "governing_law",
+    "liability",
+    "termination"
+  ],
+  "expected_findings": [
+    {
+      "clause_type": "confidentiality",
+      "severity": "medium",
+      "title": "Broad confidentiality obligations",
+      "description_contains": "confidential",
+      "min_confidence": 0.7,
+      "required": true
+    },
+    {
+      "clause_type": "term",
+      "severity": "low",
+      "title": "Standard 2-year term",
+      "description_contains": "term",
+      "min_confidence": 0.6,
+      "required": false
+    },
+    {
+      "clause_type": "governing_law",
+      "severity": "low",
+      "title": "Governing law clause",
+      "description_contains": "governing law",
+      "min_confidence": 0.6,
+      "required": true
+    },
+    {
+      "clause_type": "liability",
+      "severity": "low",
+      "title": "Standard liability limitation",
+      "description_contains": "liability",
+      "min_confidence": 0.6,
+      "required": false
+    }
+  ]
+}

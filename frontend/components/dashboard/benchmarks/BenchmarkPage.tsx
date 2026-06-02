@@ -2,16 +2,15 @@
 
 import React, { useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { BarChart3, Download, RefreshCw, Search, Database, Loader2 } from "lucide-react";
+import { BarChart3, Download, RefreshCw, Search, Database, Loader2, AlertCircle } from "lucide-react";
 import { BenchmarkKpiCards } from "./BenchmarkKpiCards";
 import { ClauseBenchmarkChart, DeviationHeatmap, IndustryComparisonChart, VendorAggressivenessChart, ComplianceBenchmarkChart, ClauseFrequencyChart } from "./BenchmarkCharts";
 import { BenchmarkAiInsights } from "./AiInsights";
 import { NegotiationIntelPanel, VendorBenchmarkTable } from "./NegotiationIntel";
 import { BenchmarkDetailDrawer } from "./BenchmarkDetailDrawer";
 import { BenchmarkFilterBar } from "./BenchmarkFilterBar";
-import { benchmarkKpis, clauseBenchmarks, industryComparisons, marketInsights, vendorBenchmarks, negotiationIntel, complianceBenchmarks, clauseLibrary } from "./mockData";
+import { useBenchmarkDashboard } from "@/services/hooks/useBenchmarks";
 import type { ClauseBenchmark, BenchmarkFilterState } from "./types";
-import { useBenchmarkData } from "./useBenchmarkData";
 
 const defaultFilters: BenchmarkFilterState = {
   industry: "", geography: "", contractType: "", clauseCategory: "", vendorType: "", companySize: "", regulation: "", dateRange: "",
@@ -20,12 +19,49 @@ const defaultFilters: BenchmarkFilterState = {
 export function BenchmarkPage() {
   const [filters, setFilters] = useState<BenchmarkFilterState>({ ...defaultFilters });
   const [selectedBenchmark, setSelectedBenchmark] = useState<ClauseBenchmark | null>(null);
-  const { loading, error, kpis, corpora, seeded, refresh, seedData } = useBenchmarkData();
+  const { data: dashboardData, isLoading, error, refetch } = useBenchmarkDashboard();
+
+  const benchmarkKpis = dashboardData?.kpis ?? [];
+  const clauseBenchmarks = dashboardData?.clause_benchmarks ?? [];
+  const industryComparisons = dashboardData?.industry_corpora ?? [];
+  const marketInsights = [];
+  const vendorBenchmarks = [];
+  const negotiationIntel = [];
+  const complianceBenchmarks = [];
+  const clauseLibrary = [];
 
   const handleFilterChange = useCallback((key: keyof BenchmarkFilterState, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
   }, []);
   const resetFilters = useCallback(() => setFilters({ ...defaultFilters }), []);
+
+  // Loading state
+  if (isLoading && clauseBenchmarks.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 text-gold-400 animate-spin mx-auto mb-3" />
+          <p className="text-sm text-gray-500">Loading benchmark data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error && clauseBenchmarks.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center max-w-md">
+          <AlertCircle className="w-10 h-10 text-red-400 mx-auto mb-3" />
+          <p className="text-sm font-medium text-gray-900 mb-1">Failed to load benchmark data</p>
+          <p className="text-xs text-gray-500 mb-4">{(error as Error)?.message || "An unexpected error occurred"}</p>
+          <button onClick={() => refetch()} className="inline-flex items-center gap-1.5 text-xs font-medium text-gold-600 hover:text-gold-700">
+            <RefreshCw className="w-3.5 h-3.5" /> Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 pb-24">

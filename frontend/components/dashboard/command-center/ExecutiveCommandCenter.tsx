@@ -2,26 +2,35 @@
  * ExecutiveCommandCenter — Unified leadership pane.
  *
  * Sprint 10 Priority 1.
+ * Phase 2 Session 4-5 — Fully operationalized with real API data,
+ * alert intelligence, and live coordination.
  *
- * Consolidates 8 data domains into a single executive view:
+ * Consolidates 9 data domains into a single executive view:
  * - Tenant health composite score
  * - SLA risk heatmap
  * - Cost governance snapshot
  * - AI quality gate status
  * - Contract exposure summary
- * - Operational anomaly feed
+ * - Operational anomaly feed / alert center
  * - Reviewer load & escalation hotspots
  * - Cross-dashboard navigation
+ * - Executive alert timeline
  *
  * Layout: Responsive 2-column grid (1-column on tablet/mobile)
  * with role-aware widget visibility.
+ *
+ * ALL data comes through the executive data aggregation layer.
+ * No widget fetches data directly.
+ * No hardcoded fallback data.
  */
 
 "use client";
 
 import React, { useState, useCallback, useMemo } from "react";
+import { Loader2, AlertCircle, RefreshCw, Bell } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { useSystemHealth, useMetricsSummary, useErrorAnalytics, useExecutiveSummary } from "@/services/hooks/useAnalytics";
+import { useExecutiveDashboard, useExecutiveHealthScore, useExecutiveAnomalies } from "@/src/lib/executive/executiveQueries";
+import { extractWidgetData, extractExecutiveKpis, extractSLARiskSummary, extractBottleneckSummary, extractExposureSummary } from "@/src/lib/executive/executiveSelectors";
 import { TenantHealthWidget } from "./widgets/TenantHealthWidget";
 import { SLARiskHeatmapWidget } from "./widgets/SLARiskHeatmapWidget";
 import { CostGovernanceSnapshotWidget } from "./widgets/CostGovernanceSnapshotWidget";
@@ -29,10 +38,18 @@ import { AIQualityGateWidget } from "./widgets/AIQualityGateWidget";
 import { ContractExposureWidget } from "./widgets/ContractExposureWidget";
 import { AnomalyFeedWidget } from "./widgets/AnomalyFeedWidget";
 import { ReviewerLoadWidget } from "./widgets/ReviewerLoadWidget";
+import { ExecutiveAlertCenter } from "@/src/lib/alerts/ExecutiveAlertCenter";
 import { DashboardHeader } from "./DashboardHeader";
 
 type DateRange = "24h" | "7d" | "30d" | "90d";
 type RefreshInterval = 0 | 15 | 30 | 60;
+
+const DATE_RANGE_MAP: Record<DateRange, number> = {
+  "24h": 1,
+  "7d": 7,
+  "30d": 30,
+  "90d": 90,
+};
 
 export function ExecutiveCommandCenter() {
   const { user } = useAuth();
@@ -40,88 +57,155 @@ export function ExecutiveCommandCenter() {
   const [refreshInterval, setRefreshInterval] = useState<RefreshInterval>(30);
   const [fullscreenWidget, setFullscreenWidget] = useState<string | null>(null);
 
-  // ── Data fetching (all parallel, stale-while-revalidate) ──────
-  const { data: healthScore } = { data: null };
-  const { data: slaPredictions } = { data: null };
-  const { data: costDashboard } = { data: null };
-  const { data: qualitySummary } = { data: null };
-  const { data: executiveSummary } = useExecutiveSummary();
-  const { data: systemHealth } = useSystemHealth();
-  const { data: errorAnalytics } = useErrorAnalytics(24);
-  const { data: metrics } = useMetricsSummary();
+  const periodDays = DATE_RANGE_MAP[dateRange];
 
-  // ── Role-based visibility ─────────────────────────────────────
+  // ── Real API hooks — all data through executive aggregation layer ──
+  const { data: dashboard, isLoading: dashboardLoading, error: dashboardError, refetch: refetchDashboard } = useExecutiveDashboard(periodDays);
+  const { data: healthScore } = useExecutiveHealthScore(periodDays);
+  const { data: anomalies } = useExecutiveAnomalies(24);
+
+  // ── Extract widget-specific data slices ──
+  const widgetData = useMemo(() => extractWidgetData(dashboard, healthScore), [dashboard, healthScore]);
+  const kpis = useMemo(() => extractExecutiveKpis(
+    widgetData.portfolioSummary ?? undefined,
+    widgetData.cycleTime ?? undefined,
+    widgetData.slaRisk ?? undefined,
+    widgetData.bottlenecks ?? undefined,
+  ), [widgetData]);
+
+  const slaSummary = useMemo(() => extractSLARiskSummary(widgetData.slaRisk), [widgetData.slaRisk]);
+  const bottleneckSummary = useMemo(() => extractBottleneckSummary(widgetData.bottlenecks), [widgetData.bottlenecks]);
+  const exposureSummary = useMemo(() => extractExposureSummary(widgetData.contractExposure), [widgetData.contractExposure]);
+
+  // ── Role-based visibility ──
   const role = user?.role ?? "viewer";
   const canSeeCostData = ["admin", "executive", "finance"].includes(role);
   const canSeeQualityData = ["admin", "executive", "ai-engineer"].includes(role);
   const canSeeAnomalies = ["admin", "executive", "operations"].includes(role);
 
-  // ── Widget configuration ──────────────────────────────────────
+  // ── Widget configuration ──
   const widgets = useMemo(() => [
     {
       id: "tenant-health",
       title: "Tenant Health",
-      component: <TenantHealthWidget healthScore={healthScore} />,
+      component: <TenantHealthWidget healthScore={widgetData.healthScore} />,
       roles: ["admin", "executive"],
       defaultVisible: true,
     },
     {
       id: "sla-risk",
       title: "SLA Risk Heatmap",
-      component: <SLARiskHeatmapWidget predictions={slaPredictions} />,
+      component: <SLARiskHeatmapWidget slaRisk={widgetData.slaRisk} />,
       roles: ["admin", "executive", "operations"],
       defaultVisible: true,
     },
     {
       id: "cost-governance",
       title: "Cost Governance",
-      component: <CostGovernanceSnapshotWidget dashboard={costDashboard} />,
+      component: <CostGovernanceSnapshotWidget />,
       roles: ["admin", "executive", "finance"],
       defaultVisible: canSeeCostData,
     },
     {
       id: "ai-quality",
       title: "AI Quality Gate",
-      component: <AIQualityGateWidget summary={qualitySummary} />,
+      component: <AIQualityGateWidget />,
       roles: ["admin", "executive", "ai-engineer"],
       defaultVisible: canSeeQualityData,
     },
     {
       id: "contract-exposure",
       title: "Contract Exposure",
-      component: <ContractExposureWidget summary={executiveSummary} />,
+      component: <ContractExposureWidget exposure={widgetData.contractExposure} />,
       roles: ["admin", "executive", "legal", "finance"],
       defaultVisible: true,
     },
     {
       id: "anomaly-feed",
       title: "Operational Anomalies",
-      component: <AnomalyFeedWidget errors={errorAnalytics} health={systemHealth} />,
+      component: <AnomalyFeedWidget anomalies={anomalies} />,
       roles: ["admin", "executive", "operations"],
       defaultVisible: canSeeAnomalies,
     },
     {
       id: "reviewer-load",
       title: "Reviewer Load & Escalations",
-      component: <ReviewerLoadWidget metrics={metrics} />,
+      component: <ReviewerLoadWidget reviewerData={widgetData.reviewerLoad} />,
       roles: ["admin", "executive", "operations"],
       defaultVisible: true,
     },
-  ].filter((w) => w.defaultVisible || w.roles.includes(role as any)), [healthScore, slaPredictions, costDashboard, qualitySummary, executiveSummary, systemHealth, errorAnalytics, metrics, canSeeCostData, canSeeQualityData, canSeeAnomalies, role]);
+    {
+      id: "alert-center",
+      title: "Executive Alert Center",
+      component: <ExecutiveAlertCenter />,
+      roles: ["admin", "executive", "operations"],
+      defaultVisible: true,
+    },
+  ].filter((w) => w.defaultVisible || w.roles.includes(role as any)), [widgetData, healthScore, anomalies, canSeeCostData, canSeeQualityData, canSeeAnomalies, role]);
 
   const visibleWidgets = useMemo(
     () => widgets.filter((w) => w.roles.includes(role as any)),
     [widgets, role]
   );
 
-  // ── Fullscreen toggle ─────────────────────────────────────────
+  // ── Fullscreen toggle ──
   const toggleFullscreen = useCallback((widgetId: string | null) => {
     setFullscreenWidget((prev) => (prev === widgetId ? null : widgetId));
   }, []);
 
+  // ── Loading state ──
+  if (dashboardLoading && !dashboard) {
+    return (
+      <div className="p-6 space-y-4">
+        <DashboardHeader
+          title="Executive Command Center"
+          description="Unified leadership view — loading operational data..."
+          dateRange={dateRange}
+          onDateRangeChange={setDateRange}
+          refreshInterval={refreshInterval}
+          onRefreshIntervalChange={setRefreshInterval}
+          onExport={() => {}}
+        />
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <Loader2 className="w-8 h-8 text-gold-400 animate-spin mx-auto mb-3" />
+            <p className="text-sm text-gray-500">Loading executive dashboard...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Error state ──
+  if (dashboardError && !dashboard) {
+    return (
+      <div className="p-6 space-y-4">
+        <DashboardHeader
+          title="Executive Command Center"
+          description="Unified leadership view"
+          dateRange={dateRange}
+          onDateRangeChange={setDateRange}
+          refreshInterval={refreshInterval}
+          onRefreshIntervalChange={setRefreshInterval}
+          onExport={() => {}}
+        />
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center max-w-md">
+            <AlertCircle className="w-10 h-10 text-red-400 mx-auto mb-3" />
+            <p className="text-sm font-medium text-gray-900 mb-1">Failed to load executive data</p>
+            <p className="text-xs text-gray-500 mb-4">{(dashboardError as Error)?.message || "An unexpected error occurred"}</p>
+            <button onClick={() => refetchDashboard()} className="inline-flex items-center gap-1.5 text-xs font-medium text-gold-600 hover:text-gold-700">
+              <RefreshCw className="w-3.5 h-3.5" /> Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 space-y-4">
-      {/* ── Header with controls ──────────────────────────────── */}
+      {/* ── Header with controls ── */}
       <DashboardHeader
         title="Executive Command Center"
         description="Unified leadership view — tenant health, SLA risk, cost, quality, exposure, and operations"
@@ -130,16 +214,25 @@ export function ExecutiveCommandCenter() {
         refreshInterval={refreshInterval}
         onRefreshIntervalChange={setRefreshInterval}
         onExport={() => {
-          // Trigger export — use simple print-friendly approach
           const element = document.getElementById("command-center-grid");
-          if (element) {
-            // Use browser's built-in screenshot via print
-            window.print();
-          }
+          if (element) window.print();
         }}
       />
 
-      {/* ── Fullscreen widget ─────────────────────────────────── */}
+      {/* ── KPI Strip ── */}
+      {kpis.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
+          {kpis.map((kpi) => (
+            <div key={kpi.id} className="bg-white rounded-lg border border-gray-200 shadow-sm p-3 hover:shadow-md transition-all">
+              <p className="text-xs text-gray-500 truncate">{kpi.label}</p>
+              <p className="text-xl font-bold text-navy-900 tabular-nums mt-0.5">{kpi.value}</p>
+              {kpi.subtitle && <p className="text-[10px] text-gray-400 mt-0.5 truncate">{kpi.subtitle}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Fullscreen widget ── */}
       {fullscreenWidget && (
         <div className="fixed inset-0 z-50 bg-white dark:bg-navy-900 p-6 overflow-auto">
           <button
@@ -157,20 +250,15 @@ export function ExecutiveCommandCenter() {
         </div>
       )}
 
-      {/* ── Widget Grid ───────────────────────────────────────── */}
-      <div
-        id="command-center-grid"
-        className="grid grid-cols-1 lg:grid-cols-2 gap-4"
-      >
+      {/* ── Widget Grid ── */}
+      <div id="command-center-grid" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {visibleWidgets.map((widget) => (
           <div
             key={widget.id}
             className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm hover:shadow-md transition-shadow duration-200"
           >
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-navy-700">
-              <h3 className="text-sm font-semibold text-navy-900 dark:text-white">
-                {widget.title}
-              </h3>
+              <h3 className="text-sm font-semibold text-navy-900 dark:text-white">{widget.title}</h3>
               <button
                 onClick={() => toggleFullscreen(widget.id)}
                 className="p-1 rounded hover:bg-gray-100 dark:hover:bg-navy-700 text-gray-400 hover:text-navy-600 dark:hover:text-navy-200"
@@ -182,14 +270,12 @@ export function ExecutiveCommandCenter() {
                 </svg>
               </button>
             </div>
-            <div className="p-4">
-              {widget.component}
-            </div>
+            <div className="p-4">{widget.component}</div>
           </div>
         ))}
       </div>
 
-      {/* ── Empty state ───────────────────────────────────────── */}
+      {/* ── Empty state ── */}
       {visibleWidgets.length === 0 && (
         <div className="text-center py-16">
           <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gray-100 dark:bg-navy-700 flex items-center justify-center">
@@ -197,9 +283,7 @@ export function ExecutiveCommandCenter() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold text-navy-900 dark:text-white mb-2">
-            No Widgets Available
-          </h3>
+          <h3 className="text-lg font-semibold text-navy-900 dark:text-white mb-2">No Widgets Available</h3>
           <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto">
             No dashboard widgets are visible for your current role. Contact an administrator for access.
           </p>

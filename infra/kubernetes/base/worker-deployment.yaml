@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: contractriskedge-worker
+  namespace: contractriskedge
+  labels:
+    app: contractriskedge
+    component: worker
+spec:
+  replicas: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: contractriskedge
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: contractriskedge
+        component: worker
+    spec:
+      serviceAccountName: contractriskedge-worker
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: worker
+          image: contractriskedge/worker:latest
+          imagePullPolicy: Always
+          command: ["celery", "-A", "app.workers", "worker", "--loglevel=info", "--concurrency=4"]
+          envFrom:
+            - configMapRef:
+                name: contractriskedge-config
+            - secretRef:
+                name: contractriskedge-secrets
+          resources:
+            requests:
+              cpu: "1"
+              memory: "1Gi"
+            limits:
+              cpu: "4"
+              memory: "4Gi"
+          livenessProbe:
+            exec:
+              command: ["celery", "-A", "app.workers", "status"]
+            initialDelaySeconds: 30
+            periodSeconds: 30

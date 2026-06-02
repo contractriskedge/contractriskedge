@@ -237,6 +237,13 @@ class DashboardStats(BaseModel):
     pending_reviews: int = 0
     completed_reviews: int = 0
     escalated_count: int = 0
+    total_escalation_events: int = 0
+    resolved_escalations: int = 0
+    escalation_resolution_rate: float = 0.0
+    unassigned_count: int = 0
+    overdue_count: int = 0
+    completed_7d: int = 0
+    avg_review_age_hours: float = 0.0
 
 
 class FindingsBySeverity(BaseModel):
@@ -425,6 +432,10 @@ class BulkExportRequest(BaseModel):
     review_ids: list[str] = Field(..., min_length=1, max_length=500)
 
 
+class BulkRedlineIdsRequest(BaseModel):
+    redline_ids: list[str] = Field(..., min_length=1, max_length=500)
+
+
 class BulkActionResponse(BaseModel):
     action_id: str
     action_type: str
@@ -521,3 +532,44 @@ class WorkspaceHydration(BaseModel):
     hydrated_at: datetime = Field(default_factory=datetime.utcnow)
     response_size_estimate_bytes: int = 0
 
+
+# ── Reviewer Ops Schemas ──────────────────────────────────────────
+
+class MyWorkItem(BaseModel):
+    """A single review item for the My Work endpoint."""
+    review_id: str
+    contract_name: Optional[str] = None
+    status: str
+    risk_score: Optional[float] = None
+    sla_deadline: Optional[datetime] = None
+    assigned_to: Optional[str] = None
+    created_at: datetime
+
+
+class QueueFilterParams(BaseModel):
+    """Filters for the operational review queue."""
+    status: Optional[str] = None
+    assigned_to: Optional[str] = None
+    risk_min: Optional[float] = None
+    risk_max: Optional[float] = None
+    age_min_hours: Optional[float] = None
+    age_max_hours: Optional[float] = None
+    escalated_only: bool = False
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+    sort_by: str = Field(default="created_at")
+    sort_order: str = Field(default="desc", pattern="^(asc|desc)$")
+
+
+class RecommendationItem(BaseModel):
+    """A recommendation derived from review findings with actual recommendation content."""
+    finding_id: str
+    review_id: str
+    clause_type: Optional[str] = None
+    severity: str
+    title: str
+    description: str
+    recommendation: str
+    confidence: float
+    risk_score: Optional[float] = None
+    created_at: datetime

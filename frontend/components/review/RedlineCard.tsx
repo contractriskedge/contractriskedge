@@ -7,7 +7,7 @@
 
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   ChevronDown, ChevronRight, Shield, AlertTriangle, TrendingDown,
   CheckCircle2, XCircle, Edit3, Lock, FileText, Info, Check, X,
@@ -46,6 +46,30 @@ export function RedlineCard({ redline, onLocate, onAccept, onReject, onEdit, imm
   const bullets: string[] = loc?.rationale_bullets || [];
   const impactAccepted = loc?.impact_accepted;
   const impactRejected = loc?.impact_rejected;
+
+  // ── Category mismatch detection ────────────────────────────────
+  // When the clause_type (from the redline DB record) doesn't align
+  // with the section_title (from the document locator), there may be
+  // a clause-to-redline mapping defect. Flag it for the reviewer.
+  const categoryMismatch = useMemo(() => {
+    if (!redline.clause_type || !loc?.section_title) return false;
+    const ct = redline.clause_type.toLowerCase().replace(/_/g, " ");
+    const st = loc.section_title.toLowerCase();
+    // Check if the section title contains a keyword related to the clause type
+    const clauseKeywords = ct.split(/[\s_]+/);
+    const sectionWords = st.split(/[\s_]+/);
+    const hasMatch = clauseKeywords.some(kw =>
+      kw.length > 3 && sectionWords.some(sw => sw.includes(kw) || kw.includes(sw))
+    );
+    return !hasMatch;
+  }, [redline.clause_type, loc?.section_title]);
+
+  const originalTextMissing = useMemo(() => {
+    const orig = (redline.original_text || "").trim();
+    const prop = (redline.proposed_text || "").trim();
+    // If original is empty or just a short heading (< 30 chars) while proposed is substantial
+    return orig.length < 30 && prop.length > 100 && redline.operation !== "insert";
+  }, [redline.original_text, redline.proposed_text, redline.operation]);
 
   // Row state styling
   const rowStateStyle = redline.status === "accepted" ? "border-l-4 border-l-emerald-500 bg-emerald-50/30 dark:bg-emerald-900/5" :
@@ -95,6 +119,31 @@ export function RedlineCard({ redline, onLocate, onAccept, onReject, onEdit, imm
       </button>
       {expanded && (
         <div className="border-t border-gray-100 px-4 py-3 dark:border-gray-700">
+          {/* ── Validation Warnings ──────────────────────────────── */}
+          {categoryMismatch && (
+            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
+              <p className="font-semibold">⚠ Possible mapping error detected</p>
+              <p className="mt-0.5">
+                Source Clause = <span className="font-medium">{loc?.section_title || "unknown"}</span> · 
+                Generated Clause = <span className="font-medium">{redline.clause_type?.replace(/_/g, " ") || "unknown"}</span>
+              </p>
+              <p className="mt-0.5 text-amber-600 dark:text-amber-400">
+                The clause category doesn&apos;t match the document section. Verify before accepting.
+              </p>
+            </div>
+          )}
+          {originalTextMissing && (
+            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
+              <p className="font-semibold">⚠ Original clause text is missing or only shows a section heading</p>
+              <p className="mt-0.5">
+                Use <span className="font-medium">Locate Source Clause</span> to verify the baseline in the document viewer.
+              </p>
+              <p className="mt-0.5 text-amber-600 dark:text-amber-400">
+                Possible mapping error — verify before accepting.
+              </p>
+            </div>
+          )}
+
           {(redline.original_text || redline.proposed_text) && (
             <div className="mb-3">
               <InlineDiffViewer
@@ -189,7 +238,7 @@ export function RedlineCard({ redline, onLocate, onAccept, onReject, onEdit, imm
               )}
               {onLocate && (
                 <button onClick={() => onLocate(redline)} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-700">
-                  <FileText className="h-3.5 w-3.5" /> Locate
+                  <FileText className="h-3.5 w-3.5" /> Locate Original Clause
                 </button>
               )}
             </div>

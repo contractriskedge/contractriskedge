@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Search, Download, Shield, Play, ChevronDown, RefreshCw,
+  Search, Download, Shield, Play, ChevronDown, RefreshCw, Loader2,
   FileText, Bell, SlidersHorizontal, MoreHorizontal, Eye,
   BarChart3, AlertTriangle, CheckCircle,
 } from "lucide-react";
@@ -15,14 +15,15 @@ interface ComplianceToolbarProps {
   onExport: () => void;
   onRunScan: () => void;
   onAuditMode: () => void;
+  isScanning?: boolean;
 }
 
-export function ComplianceToolbar({ audits, onSearch, onExport, onRunScan, onAuditMode }: ComplianceToolbarProps) {
+export function ComplianceToolbar({ audits, onSearch, onExport, onRunScan, onAuditMode, isScanning }: ComplianceToolbarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showAuditMenu, setShowAuditMenu] = useState(false);
 
   const activeAudits = audits.filter(a => a.status === "in_progress" || a.status === "scheduled");
-  const overdueTasks = 8; // from mock data
+  const overdueTasks = audits.filter(a => a.status === "failed" || a.status === "pending").length;
 
   return (
     <div className="bg-white dark:bg-navy-800 border-b border-gray-200 dark:border-navy-700">
@@ -36,8 +37,10 @@ export function ComplianceToolbar({ audits, onSearch, onExport, onRunScan, onAud
               className="w-full pl-8 pr-3 py-1.5 text-[11px] border border-gray-200 dark:border-navy-600 rounded-lg bg-gray-50 dark:bg-navy-900 text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-gold-400"
             />
           </div>
-          <button onClick={onRunScan} className="flex items-center gap-1 px-2.5 py-1.5 bg-gold-500 hover:bg-gold-600 text-white rounded-lg text-[10px] font-medium transition-colors">
-            <RefreshCw className="w-3 h-3" /> Run Scan
+          <button onClick={onRunScan} disabled={isScanning}
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-gold-500 hover:bg-gold-600 disabled:bg-gold-300 text-white rounded-lg text-[10px] font-medium transition-colors">
+            {isScanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+            {isScanning ? "Scanning..." : "Run Scan"}
           </button>
           <button onClick={onAuditMode} className="flex items-center gap-1 px-2.5 py-1.5 border border-gray-200 dark:border-navy-600 hover:bg-gray-50 dark:hover:bg-navy-700 rounded-lg text-[10px] font-medium text-gray-600 dark:text-gray-300 transition-colors">
             <Eye className="w-3 h-3" /> Audit Mode

@@ -161,7 +161,7 @@ export const policyKeys = {
 // ── Service ───────────────────────────────────────────────────────
 
 export const policyService = {
-  /** List policies with optional filters */
+  /** List policies with optional filters — maps to playbooks list endpoint */
   list: (params?: {
     tenant_id?: string;
     scope?: string;
@@ -169,50 +169,80 @@ export const policyService = {
     category?: string;
     page?: number;
     page_size?: number;
-  }) => api.get<{ data: PolicyDefinition[]; pagination: Record<string, unknown> }>("/policies", { ...params } as Record<string, unknown>),
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.tenant_id) query.set("tenant_id", params.tenant_id);
+    if (params?.scope) query.set("scope", params.scope);
+    if (params?.enabled !== undefined) query.set("enabled", String(params.enabled));
+    if (params?.category) query.set("category", params.category);
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.page_size) query.set("page_size", String(params.page_size));
+    const qs = query.toString();
+    return api.get<{ data: PolicyDefinition[]; pagination: Record<string, unknown> }>(
+      qs ? `/playbooks/?${qs}` : "/playbooks/",
+    );
+  },
 
-  /** Get a single policy by ID */
-  get: (policyId: string) => api.get<PolicyDefinition>(`/policies/${policyId}`),
+  /** Get a single policy by ID — maps to playbooks get endpoint */
+  get: (policyId: string) => api.get<PolicyDefinition>(`/playbooks/${policyId}`),
 
-  /** Create a new policy */
+  /** Create a new policy — maps to playbooks create endpoint */
   create: (body: PolicyCreateRequest) =>
-    api.post<PolicyDefinition>("/policies", body, { idempotencyKey: api.generateIdempotencyKey() }),
+    api.post<PolicyDefinition>("/playbooks/", body, { idempotencyKey: api.generateIdempotencyKey() }),
 
-  /** Update an existing policy */
+  /** Update an existing policy — maps to playbooks update endpoint */
   update: (policyId: string, body: Partial<PolicyCreateRequest>) =>
-    api.put<PolicyDefinition>(`/policies/${policyId}`, body),
+    api.put<PolicyDefinition>(`/playbooks/${policyId}`, body),
 
-  /** Delete a policy */
-  delete: (policyId: string) => api.delete(`/policies/${policyId}`),
+  /** Delete a policy — maps to playbooks archive endpoint */
+  delete: (policyId: string) => api.post(`/playbooks/${policyId}/archive`),
 
   /** Toggle policy enabled/disabled */
   toggle: (policyId: string, enabled: boolean) =>
-    api.post<PolicyDefinition>(`/policies/${policyId}/toggle`, { enabled }),
+    api.post<PolicyDefinition>(`/playbooks/${policyId}/toggle`, { enabled }),
 
-  /** Evaluate a policy against a contract (live) */
+  /** Evaluate a policy against a contract (live) — maps to playbooks evaluate endpoint */
   evaluate: (body: PolicyEvaluationRequest) =>
-    api.post<PolicyEvaluationResult>("/policies/evaluate", body, { idempotencyKey: api.generateIdempotencyKey() }),
+    api.post<PolicyEvaluationResult>("/playbooks/evaluate", body, { idempotencyKey: api.generateIdempotencyKey() }),
 
-  /** Simulate a policy change without saving (dry-run) */
+  /** Simulate a policy change without saving (dry-run) — maps to policy simulate endpoint */
   simulate: (body: PolicyEvaluationRequest & { proposed_rules: ConditionGroup }) =>
-    api.post<PolicyEvaluationResult>("/policies/simulate", body),
+    api.post<PolicyEvaluationResult>("/policy/dry-run", body),
 
-  /** Get policy version history */
+  /** Get policy version history — maps to playbooks versions endpoint */
   listVersions: (policyId: string) =>
-    api.get<{ data: PolicyVersion[] }>(`/policies/${policyId}/versions`),
+    api.get<{ data: PolicyVersion[] }>(`/playbooks/${policyId}/versions`),
 
-  /** Rollback to a specific version */
+  /** Rollback to a specific version — maps to playbooks rollback endpoint */
   rollback: (policyId: string, versionNumber: number) =>
-    api.post<PolicyDefinition>(`/policies/${policyId}/rollback`, { version_number: versionNumber }),
+    api.post<PolicyDefinition>(`/playbooks/${policyId}/rollback/${versionNumber}`),
 
-  /** Get policy audit trail */
+  /** Get policy audit trail — maps to playbooks audit endpoint */
   getAuditLog: (policyId: string) =>
-    api.get<{ data: PolicyAuditEntry[] }>(`/policies/${policyId}/audit`),
+    api.get<{ data: PolicyAuditEntry[] }>(`/playbooks/${policyId}/audit`),
 
-  /** Bulk evaluate multiple policies against a contract */
+  /** Bulk evaluate multiple policies against a contract — maps to playbooks evaluate endpoint */
   bulkEvaluate: (contractId: string, options?: { tenant_id?: string; simulation_mode?: boolean }) =>
     api.post<{ results: PolicyEvaluationResult[]; summary: { passed: number; failed: number; total: number } }>(
-      "/policies/bulk-evaluate",
+      "/playbooks/evaluate",
       { contract_id: contractId, ...options },
     ),
+
+  /** Get policy health check — maps to policy health endpoint */
+  getHealth: (playbookId: string) =>
+    api.get<Record<string, unknown>>(`/policy/playbooks/${playbookId}/health`),
+
+  /** Get policy rule graph — maps to policy graph endpoint */
+  getRuleGraph: (playbookId: string) =>
+    api.get<Record<string, unknown>>(`/policy/playbooks/${playbookId}/graph`),
+
+  /** Get impact analysis — maps to policy impact-analysis endpoint */
+  getImpactAnalysis: (playbookId: string) =>
+    api.post<Record<string, unknown>>(`/policy/playbooks/${playbookId}/impact-analysis`),
+
+  /** List policy overrides — maps to playbooks overrides endpoint */
+  listOverrides: (params?: { status?: string }) => {
+    const query = params?.status ? `?status=${params.status}` : "";
+    return api.get<{ data: Record<string, unknown>[] }>(`/playbooks/overrides${query}`);
+  },
 };

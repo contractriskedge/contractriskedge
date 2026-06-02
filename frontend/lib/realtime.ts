@@ -214,8 +214,8 @@ export class RealtimeClient {
       return;
     }
 
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      return; // Already connected
+    if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
+      return; // Already connected or connecting
     }
 
     this.intentionalClose = false;

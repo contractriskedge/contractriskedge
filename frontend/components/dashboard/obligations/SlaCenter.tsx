@@ -33,7 +33,7 @@ function SectionCard({ title, subtitle, children }: { title: string; subtitle?: 
 
 // ── SLA Performance Chart ───────────────────────────────────────────────────
 
-export function SlaPerformanceChart({ data }: { data: SlaMetric[] }) {
+export function SlaPerformanceChart({ data, predictions }: { data: SlaMetric[]; predictions?: any[] }) {
   const chartData = data.map((d) => ({ name: d.vendor, performance: d.performance, target: parseFloat(d.slaTarget.replace("%", "")) }));
   return (
     <SectionCard title="SLA Performance by Vendor" subtitle="Actual vs target performance %">
@@ -58,7 +58,7 @@ export function SlaPerformanceChart({ data }: { data: SlaMetric[] }) {
 
 // ── SLA Vendor Table ────────────────────────────────────────────────────────
 
-export function SlaVendorTable({ data }: { data: SlaMetric[] }) {
+export function SlaVendorTable({ data, breaches }: { data: SlaMetric[]; breaches?: any[] }) {
   return (
     <SectionCard title="SLA Governance" subtitle="Vendor SLA status and breach tracking">
       <div className="space-y-1.5">
@@ -93,7 +93,7 @@ export function SlaVendorTable({ data }: { data: SlaMetric[] }) {
 
 // ── Financial Exposure ──────────────────────────────────────────────────────
 
-export function FinancialExposurePanel({ data }: { data: FinancialExposure[] }) {
+export function FinancialExposurePanel({ data, valueAtRisk }: { data: FinancialExposure[]; valueAtRisk?: any }) {
   const total = data.reduce((s, d) => s + d.totalExposure, 0);
   return (
     <SectionCard title="Financial Exposure Analysis" subtitle={`Total exposure: $${total.toFixed(1)}M`}>

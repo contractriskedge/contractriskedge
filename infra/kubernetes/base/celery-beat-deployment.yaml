@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: contractriskedge-celery-beat
+  namespace: contractriskedge
+  labels:
+    app: contractriskedge
+    component: celery-beat
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: contractriskedge
+      component: celery-beat
+  template:
+    metadata:
+      labels:
+        app: contractriskedge
+        component: celery-beat
+    spec:
+      serviceAccountName: contractriskedge-worker
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: celery-beat
+          image: contractriskedge/worker:latest
+          imagePullPolicy: Always
+          command: ["celery", "-A", "app.workers", "beat", "--loglevel=info"]
+          envFrom:
+            - configMapRef:
+                name: contractriskedge-config
+            - secretRef:
+                name: contractriskedge-secrets
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

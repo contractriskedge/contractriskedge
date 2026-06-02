@@ -1,0 +1,111 @@
+{
+  "title": "ContractRiskEdge — Provider Reliability",
+  "uid": "cre-provider-reliability",
+  "version": 1,
+  "schemaVersion": 39,
+  "tags": ["contractriskedge", "providers", "reliability", "openai"],
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "title": "OpenAI API Latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(openai_request_duration_seconds_bucket{environment=~\"$env\"}[2m])) by (le))",
+          "legendFormat": "P50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(openai_request_duration_seconds_bucket{environment=~\"$env\"}[2m])) by (le))",
+          "legendFormat": "P95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(openai_request_duration_seconds_bucket{environment=~\"$env\"}[2m])) by (le))",
+          "legendFormat": "P99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "title": "OpenAI Error Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(openai_requests_total{environment=~\"$env\", status=\"error\"}[5m])) / sum(rate(openai_requests_total{environment=~\"$env\"}[5m]))",
+          "legendFormat": "Error Rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": { "steps": [{ "color": "green" }, { "color": "orange", "value": 0.02 }, { "color": "red", "value": 0.05 }] }
+        }
+      }
+    },
+    {
+      "title": "OpenAI Retry Count Distribution",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum by (retry_count) (rate(openai_retries_total{environment=~\"$env\"}[5m]))",
+          "legendFormat": "{{retry_count}} retries"
+        }
+      ]
+    },
+    {
+      "title": "Provider Fallback Activations",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(increase(provider_fallback_activations_total{environment=~\"$env\"}[1h]))",
+          "legendFormat": "Fallbacks"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "green" }, { "color": "orange", "value": 5 }, { "color": "red", "value": 20 }] }
+        }
+      }
+    },
+    {
+      "title": "Embedding Model Latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(embedding_request_duration_seconds_bucket{environment=~\"$env\"}[2m])) by (le))",
+          "legendFormat": "P95 Embedding"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "title": "Token Consumption Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        {
+          "expr": "sum(rate(openai_token_usage_total{environment=~\"$env\"}[5m])) by (model)",
+          "legendFormat": "{{model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      }
+    }
+  ]
+}

@@ -1,20 +1,26 @@
 /**
  * WorkflowIntelligenceDashboard — Workflow operations metrics.
  *
- * Sprint 10 Priority 3.
- *
- * Shows:
- * - Workflow latency analyzer
- * - Queue depth & bottlenecks
- * - Reviewer throughput analytics
- * - Approval delay tracker
- * - Automation effectiveness
+ * All tabs connected to real backend analytics endpoints:
+ * - Latency    → GET /api/v1/analytics/predict/stage-durations
+ * - Queues     → GET /api/v1/analytics/predict/bottlenecks
+ * - Reviewers  → GET /api/v1/analytics/predict/reviewer-workload
+ * - Approvals  → GET /api/v1/analytics/predict/batch-sla-breaches
+ * - Automation → GET /api/v1/analytics/health
  */
 
 "use client";
 
 import React, { useState } from "react";
 import { DashboardHeader } from "../command-center/DashboardHeader";
+import {
+  useStageDurationPercentiles,
+  usePredictBottlenecks,
+  useReviewerWorkload,
+  useBatchSlaBreaches,
+  useSystemHealth,
+  useReviewAging,
+} from "@/services/hooks/useAnalytics";
 
 type DateRange = "24h" | "7d" | "30d" | "90d";
 type RefreshInterval = 0 | 15 | 30 | 60;
@@ -75,201 +81,386 @@ export function WorkflowIntelligenceDashboard() {
   );
 }
 
-// ── Tab Components ───────────────────────────────────────────────────
+// ── Latency Analysis ───────────────────────────────────────────────
 
 function WorkflowLatencyAnalyzer() {
-  const stages = [
-    { name: "Ingestion", p50: "12s", p90: "45s", p99: "2m", trend: "stable" },
-    { name: "AI Analysis", p50: "3m", p90: "8m", p99: "15m", trend: "up" },
-    { name: "Review", p50: "4h", p90: "12h", p99: "24h", trend: "stable" },
-    { name: "Approval", p50: "8h", p90: "24h", p99: "48h", trend: "up" },
-    { name: "Negotiation", p50: "24h", p90: "72h", p99: "120h", trend: "down" },
-  ];
+  const { data: stageDurations, isLoading } = useStageDurationPercentiles();
+  const { data: reviewAging } = useReviewAging();
+
+  if (isLoading) {
+    return (
+      <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-6">
+        <div className="space-y-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-16 rounded-lg bg-gray-100 dark:bg-navy-700 animate-pulse" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const stages = stageDurations ?? {};
 
   return (
-    <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm">
-      <div className="px-4 py-3 border-b border-gray-100 dark:border-navy-700 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-navy-900 dark:text-white">Stage Duration Percentiles</h3>
-        <span className="text-xs text-gray-500">Total cycle time: 42h avg</span>
+    <div className="space-y-4">
+      {/* Stage Duration Percentiles */}
+      <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+        <h3 className="text-sm font-semibold text-navy-900 dark:text-white mb-3">Stage Duration Percentiles (hours)</h3>
+        {Object.keys(stages).length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-navy-700">
+                  <th className="pb-2 font-medium">Stage</th>
+                  <th className="pb-2 font-medium">P50</th>
+                  <th className="pb-2 font-medium">P75</th>
+                  <th className="pb-2 font-medium">P95</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(stages).map(([stage, vals]) => (
+                  <tr key={stage} className="border-b border-gray-50 dark:border-navy-700">
+                    <td className="py-2 font-medium text-navy-900 dark:text-white capitalize">{stage.replace(/_/g, " ")}</td>
+                    <td className="py-2 text-gray-600">{vals.p50.toFixed(1)}h</td>
+                    <td className="py-2 text-gray-600">{vals.p75.toFixed(1)}h</td>
+                    <td className="py-2 text-gray-600">{vals.p95.toFixed(1)}h</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-xs text-gray-500">Insufficient data to compute stage durations yet.</p>
+        )}
       </div>
-      <div className="p-4">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="text-gray-500 dark:text-gray-400">
-              <th className="text-left pb-2 font-medium">Stage</th>
-              <th className="text-right pb-2 font-medium">p50</th>
-              <th className="text-right pb-2 font-medium">p90</th>
-              <th className="text-right pb-2 font-medium">p99</th>
-              <th className="text-center pb-2 font-medium">Trend</th>
-            </tr>
-          </thead>
-          <tbody>
-            {stages.map((s) => (
-              <tr key={s.name} className="border-t border-gray-100 dark:border-navy-700">
-                <td className="py-2 font-medium text-navy-900 dark:text-white">{s.name}</td>
-                <td className="py-2 text-right text-gray-600 dark:text-gray-400">{s.p50}</td>
-                <td className="py-2 text-right text-gray-600 dark:text-gray-400">{s.p90}</td>
-                <td className="py-2 text-right text-gray-600 dark:text-gray-400">{s.p99}</td>
-                <td className="py-2 text-center">
-                  <span className={`text-xs ${
-                    s.trend === "up" ? "text-red-500" : s.trend === "down" ? "text-green-500" : "text-gray-400"
-                  }`}>
-                    {s.trend === "up" ? "↑" : s.trend === "down" ? "↓" : "→"}
-                  </span>
-                </td>
-              </tr>
+
+      {/* Review Aging Distribution */}
+      <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+        <h3 className="text-sm font-semibold text-navy-900 dark:text-white mb-3">Review Age Distribution</h3>
+        {reviewAging && reviewAging.length > 0 ? (
+          <div className="space-y-2">
+            {reviewAging.map((bucket) => (
+              <div key={bucket.bucket} className="flex items-center gap-3">
+                <span className="text-xs text-gray-600 dark:text-gray-400 w-32">{bucket.bucket}</span>
+                <div className="flex-1 h-4 bg-gray-100 dark:bg-navy-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-blue-500"
+                    style={{
+                      width: `${Math.min((bucket.count / Math.max(...reviewAging.map((b) => b.count))) * 100, 100)}%`,
+                    }}
+                  />
+                </div>
+                <span className="text-xs text-gray-500 w-8 text-right">{bucket.count}</span>
+              </div>
             ))}
-          </tbody>
-        </table>
+          </div>
+        ) : (
+          <p className="text-xs text-gray-500">No review aging data available.</p>
+        )}
       </div>
     </div>
   );
 }
+
+// ── Queue Depth & Bottlenecks ──────────────────────────────────────
 
 function QueueDepthBottleneck() {
-  const queues = [
-    { name: "Ingestion", depth: 3, sla: "healthy" },
-    { name: "AI Analysis", depth: 12, sla: "warning" },
-    { name: "Review", depth: 8, sla: "healthy" },
-    { name: "Approval", depth: 15, sla: "critical" },
-    { name: "Negotiation", depth: 5, sla: "healthy" },
-  ];
+  const { data: bottlenecks, isLoading } = usePredictBottlenecks();
+
+  if (isLoading) {
+    return (
+      <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-6">
+        <div className="space-y-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-12 rounded-lg bg-gray-100 dark:bg-navy-700 animate-pulse" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const items = bottlenecks?.bottlenecks ?? [];
+  const summary = bottlenecks?.summary;
 
   return (
-    <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm">
-      <div className="px-4 py-3 border-b border-gray-100 dark:border-navy-700">
-        <h3 className="text-sm font-semibold text-navy-900 dark:text-white">Queue Depth by Stage</h3>
-      </div>
-      <div className="p-4 space-y-2">
-        {queues.map((q) => (
-          <div key={q.name} className="flex items-center gap-2">
-            <span className="text-xs text-gray-600 dark:text-gray-400 w-24">{q.name}</span>
-            <div className="flex-1 h-3 bg-gray-100 dark:bg-navy-700 rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full"
-                style={{
-                  width: `${(q.depth / 20) * 100}%`,
-                  backgroundColor: q.sla === "critical" ? "#EF4444" : q.sla === "warning" ? "#F59E0B" : "#10B981",
-                }}
-              />
-            </div>
-            <span className="text-xs font-medium text-navy-900 dark:text-white w-6 text-right">{q.depth}</span>
-            <span className={`text-[10px] ${
-              q.sla === "critical" ? "text-red-500" : q.sla === "warning" ? "text-amber-500" : "text-green-500"
-            }`}>{q.sla}</span>
+    <div className="space-y-4">
+      {/* Summary Cards */}
+      {summary && (
+        <div className="grid grid-cols-3 gap-4">
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4 text-center">
+            <p className="text-2xl font-bold text-navy-900 dark:text-white">{items.length}</p>
+            <p className="text-xs text-gray-500">Total Bottlenecks</p>
           </div>
-        ))}
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4 text-center">
+            <p className="text-2xl font-bold text-red-600">{summary.critical_count}</p>
+            <p className="text-xs text-gray-500">Critical</p>
+          </div>
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4 text-center">
+            <p className="text-2xl font-bold text-amber-600">{summary.total_at_risk}</p>
+            <p className="text-xs text-gray-500">At Risk</p>
+          </div>
+        </div>
+      )}
+
+      {/* Bottleneck List */}
+      <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+        <h3 className="text-sm font-semibold text-navy-900 dark:text-white mb-3">Detected Bottlenecks</h3>
+        {items.length > 0 ? (
+          <div className="space-y-2">
+            {items.map((b, i) => (
+              <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 dark:bg-navy-700">
+                <span className={`w-2 h-2 rounded-full mt-1 shrink-0 ${
+                  b.severity === "critical" ? "bg-red-500" : b.severity === "warning" ? "bg-amber-500" : "bg-blue-500"
+                }`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-navy-900 dark:text-white">{b.stage}</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">{b.message}</p>
+                </div>
+                <span className="text-[10px] text-gray-400">{b.review_id.slice(0, 8)}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-gray-500">No bottlenecks detected. All stages operating normally.</p>
+        )}
       </div>
     </div>
   );
 }
+
+// ── Reviewer Throughput ────────────────────────────────────────────
 
 function ReviewerThroughputAnalytics() {
-  const reviewers = [
-    { name: "Emily Rodriguez", completed: 15, avgCycle: "4.2h", accuracy: 97, trend: "up" },
-    { name: "Sarah Chen", completed: 12, avgCycle: "6.8h", accuracy: 95, trend: "stable" },
-    { name: "Lisa Park", completed: 11, avgCycle: "5.1h", accuracy: 96, trend: "up" },
-    { name: "Mike Johnson", completed: 9, avgCycle: "7.3h", accuracy: 93, trend: "down" },
-    { name: "James Wilson", completed: 7, avgCycle: "8.9h", accuracy: 91, trend: "up" },
-  ];
+  const { data: workload, isLoading } = useReviewerWorkload();
 
-  const maxCompleted = Math.max(...reviewers.map((r) => r.completed));
+  if (isLoading) {
+    return (
+      <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-6">
+        <div className="space-y-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-16 rounded-lg bg-gray-100 dark:bg-navy-700 animate-pulse" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const reviewers = workload?.reviewers ?? [];
 
   return (
-    <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm">
-      <div className="px-4 py-3 border-b border-gray-100 dark:border-navy-700">
-        <h3 className="text-sm font-semibold text-navy-900 dark:text-white">Reviewer Throughput (Last 7 Days)</h3>
-      </div>
-      <div className="p-4 space-y-2">
-        {reviewers.map((r) => (
-          <div key={r.name} className="flex items-center gap-3">
-            <span className="text-xs text-gray-600 dark:text-gray-400 w-28 truncate">{r.name}</span>
-            <div className="flex-1 h-3 bg-gray-100 dark:bg-navy-700 rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full bg-navy-500 dark:bg-navy-400"
-                style={{ width: `${(r.completed / maxCompleted) * 100}%` }}
-              />
-            </div>
-            <span className="text-xs font-medium text-navy-900 dark:text-white w-6 text-right">{r.completed}</span>
-            <span className="text-[10px] text-gray-400 w-14 text-right">{r.avgCycle}</span>
-            <span className="text-[10px] text-gray-400 w-10 text-right">{r.accuracy}%</span>
-            <span className={`text-xs ${
-              r.trend === "up" ? "text-green-500" : r.trend === "down" ? "text-red-500" : "text-gray-400"
-            }`}>{r.trend === "up" ? "↑" : r.trend === "down" ? "↓" : "→"}</span>
-          </div>
-        ))}
-      </div>
+    <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+      <h3 className="text-sm font-semibold text-navy-900 dark:text-white mb-3">Reviewer Workload</h3>
+      {reviewers.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-navy-700">
+                <th className="pb-2 font-medium">Reviewer</th>
+                <th className="pb-2 font-medium">Active</th>
+                <th className="pb-2 font-medium">Completed</th>
+                <th className="pb-2 font-medium">Overload Prob.</th>
+                <th className="pb-2 font-medium">Avg Time</th>
+                <th className="pb-2 font-medium">Backlog</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reviewers.map((r) => (
+                <tr key={r.reviewer} className="border-b border-gray-50 dark:border-navy-700">
+                  <td className="py-2.5 font-medium text-navy-900 dark:text-white">{r.reviewer}</td>
+                  <td className="py-2.5 text-gray-600">{r.active_count}</td>
+                  <td className="py-2.5 text-gray-600">{r.completed_count}</td>
+                  <td className="py-2.5">
+                    <span className={`font-medium ${
+                      r.overload_probability > 0.7 ? "text-red-600" : r.overload_probability > 0.4 ? "text-amber-600" : "text-green-600"
+                    }`}>
+                      {Math.round(r.overload_probability * 100)}%
+                    </span>
+                  </td>
+                  <td className="py-2.5 text-gray-600">{r.avg_completion_hours.toFixed(1)}h</td>
+                  <td className="py-2.5 text-gray-600">{r.predicted_backlog_hours.toFixed(1)}h</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="text-xs text-gray-500">No reviewer workload data available.</p>
+      )}
     </div>
   );
 }
+
+// ── Approval Delay Tracker ─────────────────────────────────────────
 
 function ApprovalDelayTracker() {
-  const expiring = [
-    { id: "APPR-128", title: "Liability Cap Approval", age: "22h", risk: "high" },
-    { id: "APPR-129", title: "Exception - Force Majeure", age: "18h", risk: "high" },
-    { id: "APPR-130", title: "Standard Review Sign-off", age: "12h", risk: "medium" },
-    { id: "APPR-131", title: "Data Privacy Waiver", age: "8h", risk: "low" },
-  ];
+  const { data: slaBreaches, isLoading } = useBatchSlaBreaches(20);
+
+  if (isLoading) {
+    return (
+      <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-6">
+        <div className="space-y-3">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-12 rounded-lg bg-gray-100 dark:bg-navy-700 animate-pulse" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const items = slaBreaches ?? [];
 
   return (
-    <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm">
-      <div className="px-4 py-3 border-b border-gray-100 dark:border-navy-700 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-navy-900 dark:text-white">Approvals at Risk of Timeout</h3>
-        <span className="text-xs text-red-500 font-medium">2 expiring within 24h</span>
+    <div className="space-y-4">
+      {/* Summary */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4 text-center">
+          <p className="text-2xl font-bold text-navy-900 dark:text-white">{items.length}</p>
+          <p className="text-xs text-gray-500">Reviews at Risk</p>
+        </div>
+        <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4 text-center">
+          <p className="text-2xl font-bold text-red-600">
+            {items.filter((i) => i.breach_probability > 0.7).length}
+          </p>
+          <p className="text-xs text-gray-500">High Risk (&gt;70%)</p>
+        </div>
+        <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4 text-center">
+          <p className="text-2xl font-bold text-amber-600">
+            {items.filter((i) => i.breach_probability > 0.4 && i.breach_probability <= 0.7).length}
+          </p>
+          <p className="text-xs text-gray-500">Medium Risk (40–70%)</p>
+        </div>
       </div>
-      <div className="p-4 space-y-2">
-        {expiring.map((a) => (
-          <div key={a.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-navy-700">
-            <span className={`w-1.5 h-1.5 rounded-full ${
-              a.risk === "high" ? "bg-red-500" : a.risk === "medium" ? "bg-yellow-500" : "bg-blue-500"
-            }`} />
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-navy-900 dark:text-white truncate">{a.title}</p>
-              <p className="text-[10px] text-gray-400">{a.id}</p>
-            </div>
-            <span className={`text-xs font-medium ${
-              a.risk === "high" ? "text-red-500" : "text-gray-500"
-            }`}>{a.age}</span>
+
+      {/* Table */}
+      <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+        <h3 className="text-sm font-semibold text-navy-900 dark:text-white mb-3">SLA Breach Predictions</h3>
+        {items.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-navy-700">
+                  <th className="pb-2 font-medium">Review</th>
+                  <th className="pb-2 font-medium">Breach Prob.</th>
+                  <th className="pb-2 font-medium">Risk Score</th>
+                  <th className="pb-2 font-medium">Elapsed</th>
+                  <th className="pb-2 font-medium">SLA Deadline</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((r) => (
+                  <tr key={r.review_id} className="border-b border-gray-50 dark:border-navy-700">
+                    <td className="py-2.5 font-medium text-navy-900 dark:text-white">{r.review_id.slice(0, 12)}</td>
+                    <td className="py-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 h-1.5 bg-gray-100 dark:bg-navy-700 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${Math.round(r.breach_probability * 100)}%`,
+                              backgroundColor: r.breach_probability > 0.7 ? "#EF4444" : r.breach_probability > 0.4 ? "#F59E0B" : "#10B981",
+                            }}
+                          />
+                        </div>
+                        <span className={`font-medium ${
+                          r.breach_probability > 0.7 ? "text-red-600" : r.breach_probability > 0.4 ? "text-amber-600" : "text-green-600"
+                        }`}>
+                          {Math.round(r.breach_probability * 100)}%
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-2.5 text-gray-600">{r.risk_score?.toFixed(1) ?? "—"}</td>
+                    <td className="py-2.5 text-gray-600">{r.elapsed_hours.toFixed(0)}h</td>
+                    <td className="py-2.5 text-gray-600">
+                      {r.sla_deadline ? new Date(r.sla_deadline).toLocaleDateString() : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        ))}
+        ) : (
+          <p className="text-xs text-gray-500">No reviews at risk of SLA breach.</p>
+        )}
       </div>
     </div>
   );
 }
 
+// ── Automation Effectiveness ───────────────────────────────────────
+
 function AutomationEffectiveness() {
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm">
-        <div className="px-4 py-3 border-b border-gray-100 dark:border-navy-700">
-          <h3 className="text-sm font-semibold text-navy-900 dark:text-white">Automation Rate</h3>
-        </div>
-        <div className="p-4 text-center">
-          <div className="relative w-24 h-24 mx-auto">
-            <svg className="w-24 h-24 -rotate-90" viewBox="0 0 36 36">
-              <circle cx="18" cy="18" r="15.5" fill="none" stroke="#E5E7EB" strokeWidth="3" className="dark:stroke-navy-600" />
-              <circle cx="18" cy="18" r="15.5" fill="none" stroke="#10B981" strokeWidth="3" strokeDasharray="68 32" strokeLinecap="round" />
-            </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-lg font-bold text-navy-900 dark:text-white">68%</span>
-            </div>
-          </div>
-          <p className="text-xs text-gray-500 mt-2">Auto-decisions / Total</p>
+  const { data: health, isLoading } = useSystemHealth();
+
+  if (isLoading) {
+    return (
+      <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-6">
+        <div className="space-y-3">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-16 rounded-lg bg-gray-100 dark:bg-navy-700 animate-pulse" />
+          ))}
         </div>
       </div>
-      <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm">
-        <div className="px-4 py-3 border-b border-gray-100 dark:border-navy-700">
-          <h3 className="text-sm font-semibold text-navy-900 dark:text-white">AI Acceptance Rate</h3>
+    );
+  }
+
+  if (!health) {
+    return (
+      <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-8 text-center">
+        <p className="text-sm text-gray-500">No automation data available.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4 text-center">
+          <p className="text-2xl font-bold text-navy-900 dark:text-white">{health.active_ai_runs}</p>
+          <p className="text-xs text-gray-500">Active AI Runs</p>
         </div>
-        <div className="p-4 space-y-3">
-          <div className="text-center">
-            <span className="text-2xl font-bold text-navy-900 dark:text-white">87.3%</span>
-            <p className="text-xs text-gray-500">Recommendation acceptance (↑ 4.2% vs last month)</p>
+        <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4 text-center">
+          <p className="text-2xl font-bold text-green-600">{Math.round(health.ai_success_rate * 100)}%</p>
+          <p className="text-xs text-gray-500">AI Success Rate</p>
+        </div>
+        <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4 text-center">
+          <p className="text-2xl font-bold text-navy-900 dark:text-white">{health.active_uploads}</p>
+          <p className="text-xs text-gray-500">Active Uploads</p>
+        </div>
+        <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4 text-center">
+          <p className="text-2xl font-bold text-amber-600">{health.sla_breaches}</p>
+          <p className="text-xs text-gray-500">SLA Breaches</p>
+        </div>
+      </div>
+
+      {/* Health Status */}
+      <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-navy-900 dark:text-white">System Health</h3>
+          <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+            health.status === "healthy" ? "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-300" :
+            health.status === "degraded" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300" :
+            "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-300"
+          }`}>
+            {health.status}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-4 text-xs">
+          <div>
+            <span className="text-gray-500">Upload Success Rate</span>
+            <p className="font-medium text-navy-900 dark:text-white">{Math.round(health.upload_success_rate * 100)}%</p>
           </div>
-          <div className="flex items-center justify-between text-xs text-gray-500 pt-2 border-t border-gray-100 dark:border-navy-700">
-            <span>Time saved: <span className="font-medium text-navy-900 dark:text-white">124h</span></span>
-            <span>Manual error rate: <span className="font-medium text-red-500">2.1%</span></span>
-            <span>Auto error rate: <span className="font-medium text-green-500">0.8%</span></span>
+          <div>
+            <span className="text-gray-500">Recent Errors (24h)</span>
+            <p className="font-medium text-navy-900 dark:text-white">{health.recent_errors_24h}</p>
+          </div>
+          <div>
+            <span className="text-gray-500">Pending Reviews</span>
+            <p className="font-medium text-navy-900 dark:text-white">{health.pending_reviews}</p>
+          </div>
+          <div>
+            <span className="text-gray-500">Upload Success Rate</span>
+            <p className="font-medium text-navy-900 dark:text-white">{Math.round(health.upload_success_rate * 100)}%</p>
           </div>
         </div>
       </div>

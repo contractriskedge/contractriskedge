@@ -29,21 +29,23 @@ interface AIQualityGateWidgetProps {
   summary?: QualitySummaryData | null;
 }
 
-const DEFAULT_DATA: QualitySummaryData = {
-  latestBenchmarkScore: 87,
-  benchmarkPassed: true,
-  hallucinationRate: 3.2,
-  hallucinationTrend: [2.8, 3.1, 2.9, 3.4, 3.0, 3.3, 3.2],
-  regressionCount: 2,
-  criticalRegressions: 0,
-  majorRegressions: 1,
-  minorRegressions: 1,
-  deploymentBlocked: false,
-  blockReasons: [],
-};
-
 export function AIQualityGateWidget({ summary }: AIQualityGateWidgetProps) {
-  const data = summary ?? DEFAULT_DATA;
+  // No data state
+  if (!summary) {
+    return (
+      <div className="flex flex-col items-center justify-center py-8 text-center">
+        <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-navy-700 flex items-center justify-center mb-2">
+          <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <p className="text-sm font-medium text-gray-500 dark:text-gray-400">No AI quality data available</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Connect to the backend to see AI quality gate metrics.</p>
+      </div>
+    );
+  }
+
+  const data = summary;
 
   return (
     <div className="space-y-3">

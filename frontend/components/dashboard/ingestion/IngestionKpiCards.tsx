@@ -1,59 +1,42 @@
 "use client";
 
 import React from "react";
-import { motion } from "framer-motion";
-import {
-  FileText, ScanEye, Brain, CopyX, ListOrdered, AlertTriangle,
-  Tags, CheckSquare, TrendingUp, TrendingDown, Minus,
-} from "lucide-react";
-import type { IngestionKpi } from "./types";
+import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+import type { CompactKpi } from "./types";
 
-const iconMap: Record<string, React.ReactNode> = {
-  FileText: <FileText className="w-4 h-4" />,
-  ScanEye: <ScanEye className="w-4 h-4" />,
-  Brain: <Brain className="w-4 h-4" />,
-  CopyX: <CopyX className="w-4 h-4" />,
-  ListOrdered: <ListOrdered className="w-4 h-4" />,
-  AlertTriangle: <AlertTriangle className="w-4 h-4" />,
-  Tags: <Tags className="w-4 h-4" />,
-  CheckSquare: <CheckSquare className="w-4 h-4" />,
+const dot: Record<string, string> = {
+  critical: "bg-red-500", warning: "bg-amber-500", success: "bg-green-500", info: "bg-blue-500",
 };
 
-function MiniSparkline({ data, color }: { data: number[]; color: string }) {
-  const max = Math.max(...data); const min = Math.min(...data); const range = max - min || 1;
-  const w = 64, h = 22;
-  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - min) / range) * h}`).join(" ");
-  return <svg width={w} height={h} className="flex-shrink-0 opacity-70" aria-hidden="true"><polyline fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" points={pts} /></svg>;
-}
-
-export function IngestionKpiCards({ metrics, onKpiClick }: { metrics: IngestionKpi[]; onKpiClick?: (id: string) => void }) {
+export function IngestionKpiCards({ metrics, onKpiClick }: { metrics: CompactKpi[]; onKpiClick?: (id: string) => void }) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
-      {metrics.map((m, i) => {
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
+      {metrics.map((m) => {
         const TrendIcon = m.trendDirection === "up" ? TrendingUp : m.trendDirection === "down" ? TrendingDown : Minus;
-        const isBadUp = m.id === "duplicates" || m.id === "failed-imports" || m.id === "queue-size";
+        const isBadUp = m.id === "failed-jobs" || m.id === "processing-queue";
         const tc = (m.trendDirection === "up" && isBadUp) ? "text-red-500" :
           (m.trendDirection === "down" && isBadUp) ? "text-green-500" :
           m.trendDirection === "up" ? "text-green-500" :
           m.trendDirection === "down" ? "text-red-500" : "text-gray-400";
-        const strokeColor = m.severity === "critical" ? "#EF4444" : m.severity === "warning" ? "#F97316" : m.severity === "success" ? "#22C55E" : "#3B82F6";
         return (
-          <motion.button key={m.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
-            className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-all p-3 cursor-pointer group text-left w-full"
-            whileHover={{ y: -1, scale: 1.02 }} onClick={() => onKpiClick?.(m.id)} title={m.tooltip}>
-            <div className="flex items-center justify-between mb-2">
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center bg-gradient-to-br ${m.color} text-white shadow-xs`}>{iconMap[m.icon] || <FileText className="w-4 h-4" />}</div>
-              <MiniSparkline data={m.sparklineData} color={strokeColor} />
+          <button key={m.id} onClick={() => onKpiClick?.(m.id)} title={m.tooltip}
+            className="bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-700 rounded px-2.5 py-1.5 text-left hover:border-gray-300 dark:hover:border-navy-600 transition-colors cursor-pointer w-full"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <div className={`w-1.5 h-1.5 rounded-full ${dot[m.severity]}`} />
+                <span className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{m.label}</span>
+              </div>
+              <div className="flex items-center gap-0.5">
+                <TrendIcon className={`w-2.5 h-2.5 ${tc}`} />
+                <span className={`text-[9px] font-semibold tabular-nums ${tc}`}>{m.trend > 0 ? "+" : ""}{m.trend}%</span>
+              </div>
             </div>
-            <p className="text-lg font-bold text-navy-900 tabular-nums tracking-tight">{m.value}</p>
-            <p className="text-[10px] text-gray-500 mt-0.5 truncate">{m.label}</p>
-            <div className="flex items-center gap-1 mt-1 pt-1 border-t border-gray-50">
-              <TrendIcon className={`w-3 h-3 ${tc}`} />
-              <span className={`text-[10px] font-semibold tabular-nums ${tc}`}>{m.trend > 0 ? "+" : ""}{m.trend}%</span>
-            </div>
-          </motion.button>
+            <p className="text-sm font-bold text-navy-900 dark:text-white tabular-nums tracking-tight leading-tight mt-0.5">{m.value}</p>
+          </button>
         );
       })}
     </div>
   );
 }
+

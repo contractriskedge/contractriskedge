@@ -1,4 +1,4 @@
-"""LLM provider abstraction layer with OpenAI implementation, structured output parsing, and retry-safe inference."""
+"""LLM provider abstraction layer with OpenAI implementation, provider selection, and retry-safe inference."""
 
 from __future__ import annotations
 
@@ -12,7 +12,11 @@ from typing import Optional
 from pydantic import BaseModel, ValidationError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+from app.domains.ai.providers.capabilities import ProviderHealth
+
 logger = logging.getLogger(__name__)
+
+_LAZY_EXPORTS = frozenset({"LLMProviderRegistry", "llm_registry"})
 
 
 @dataclass
@@ -39,16 +43,11 @@ class LLMResponse:
     cost_usd: float = 0.0
 
 
-class LLMProviderError(Exception):
-    """Base error for LLM provider failures."""
+class BaseLLMProvider(ABC):
+    """Abstract LLM provider interface for pluggable AI providers."""
 
-
-class RateLimitError(LLMProviderError):
-    """Provider rate limit exceeded."""
-
-
-class LLMProvider(ABC):
-    """Abstract LLM provider interface."""
+    def __init__(self):
+        self._health = ProviderHealth(provider_name=self.provider_name)
 
     @abstractmethod
     async def complete(self, request: LLMRequest) -> LLMResponse:
@@ -64,8 +63,37 @@ class LLMProvider(ABC):
     def supported_models(self) -> list[str]:
         ...
 
+    @property
+    def supported_regions(self) -> list[str]:
+        return ["us", "eu", "apac", "latam", "uk", "global"]
 
-class OpenAIProvider(LLMProvider):
+    @property
+    def health(self) -> ProviderHealth:
+        return self._health
+
+    @property
+    def health_score(self) -> float:
+        return self._health.health_score
+
+    def record_metrics(self, latency_ms: int, cost_usd: float, success: bool = True) -> None:
+        if success:
+            self._health.record_success(latency_ms=latency_ms, cost_usd=cost_usd)
+        else:
+            self._health.record_failure(latency_ms=latency_ms, cost_usd=cost_usd)
+
+    def is_available(self) -> bool:
+        return self._health.is_available()
+
+
+class LLMProviderError(Exception):
+    """Base error for LLM provider failures."""
+
+
+class RateLimitError(LLMProviderError):
+    """Provider rate limit exceeded."""
+
+
+class OpenAIProvider(BaseLLMProvider):
     """OpenAI LLM provider with retry-safe inference and cost tracking."""
 
     RATES = {
@@ -75,13 +103,21 @@ class OpenAIProvider(LLMProvider):
     }
     DEFAULT_MODEL = "gpt-4o"
     MAX_RETRIES = 3
+    # OpenAI completion token limits (not context window size).
+    MAX_COMPLETION_TOKENS: dict[str, int] = {
+        "gpt-4o": 16384,
+        "gpt-4o-mini": 16384,
+        "gpt-4-turbo": 4096,
+    }
 
     def __init__(self, api_key: str):
+        super().__init__()
         self._api_key = api_key
         self._client = None
 
     @property
-    def provider_name(self) -> str: return "openai"
+    def provider_name(self) -> str:
+        return "openai"
 
     @property
     def supported_models(self) -> list[str]:
@@ -107,11 +143,23 @@ class OpenAIProvider(LLMProvider):
             messages.append({"role": "system", "content": request.system_prompt})
         messages.append({"role": "user", "content": request.prompt})
 
+        model = request.model or self.DEFAULT_MODEL
+        max_tokens = request.max_tokens
+        model_cap = self.MAX_COMPLETION_TOKENS.get(model, 4096)
+        if max_tokens > model_cap:
+            logger.warning(
+                "Capping max_tokens from %s to %s for model %s",
+                max_tokens,
+                model_cap,
+                model,
+            )
+            max_tokens = model_cap
+
         kwargs = {
-            "model": request.model or self.DEFAULT_MODEL,
+            "model": model,
             "messages": messages,
             "temperature": request.temperature,
-            "max_tokens": request.max_tokens,
+            "max_tokens": max_tokens,
         }
         if request.response_format:
             kwargs["response_format"] = request.response_format
@@ -127,6 +175,7 @@ class OpenAIProvider(LLMProvider):
         latency_ms = int((time.monotonic() - start) * 1000)
         usage = response.usage
         model = response.model
+        self.record_metrics(latency_ms=latency_ms, cost_usd=0.0, success=True)
 
         return LLMResponse(
             content=response.choices[0].message.content,
@@ -136,12 +185,41 @@ class OpenAIProvider(LLMProvider):
             completion_tokens=usage.completion_tokens,
             total_tokens=usage.total_tokens,
             latency_ms=latency_ms,
-            cost_usd=self._estimate_cost(model, usage.prompt_tokens, usage.completion_tokens),
         )
 
     def _estimate_cost(self, model: str, prompt_tokens: int, completion_tokens: int) -> float:
         rates = self.RATES.get(model, self.RATES[self.DEFAULT_MODEL])
         return (prompt_tokens * rates["input"]) + (completion_tokens * rates["output"])
+
+
+class AnthropicProvider(BaseLLMProvider):
+    """Placeholder Anthropic provider abstraction."""
+
+    @property
+    def provider_name(self) -> str:
+        return "anthropic"
+
+    @property
+    def supported_models(self) -> list[str]:
+        return ["claude-3.5", "claude-4"]
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        raise NotImplementedError("AnthropicProvider is not implemented yet.")
+
+
+class AzureOpenAIProvider(BaseLLMProvider):
+    """Placeholder Azure OpenAI provider abstraction."""
+
+    @property
+    def provider_name(self) -> str:
+        return "azure_openai"
+
+    @property
+    def supported_models(self) -> list[str]:
+        return ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        raise NotImplementedError("AzureOpenAIProvider is not implemented yet.")
 
 
 class StructuredOutputParser:
@@ -202,20 +280,14 @@ class StructuredOutputParser:
         return 0.5  # Parsed but failed schema validation
 
 
-class LLMProviderRegistry:
-    """Registry of available LLM providers."""
+def __getattr__(name: str):
+    """Lazy re-exports so registry can import BaseLLMProvider without a circular import."""
+    if name in _LAZY_EXPORTS:
+        from app.domains.ai.providers.registry import LLMProviderRegistry, llm_registry
 
-    def __init__(self):
-        self._providers: dict[str, LLMProvider] = {}
-
-    def register(self, provider: LLMProvider):
-        self._providers[provider.provider_name] = provider
-
-    def get(self, name: str = "openai") -> LLMProvider:
-        provider = self._providers.get(name)
-        if not provider:
-            raise ValueError(f"LLM provider '{name}' not registered")
-        return provider
+        return {"LLMProviderRegistry": LLMProviderRegistry, "llm_registry": llm_registry}[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-llm_registry = LLMProviderRegistry()
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | _LAZY_EXPORTS)

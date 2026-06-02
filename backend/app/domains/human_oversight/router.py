@@ -85,6 +85,8 @@ async def decide_approval(
     """Approve, reject, or conditionally approve an AI recommendation."""
     try:
         return await service.decide(approval_id, decision, actor=user.id)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -97,6 +99,17 @@ async def list_pending_approvals(
 ):
     """List pending approval requests, optionally filtered by review."""
     return await service.list_pending(review_id=review_id)
+
+
+@router.post("/approvals/bulk-decide", response_model=BulkDecisionResult)
+async def bulk_decide_approvals(
+    request: BulkDecisionRequest,
+    service: ApprovalService = Depends(get_approval_service),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(Permissions.WORKFLOWS_APPROVE)),
+):
+    """Decide multiple approvals in bulk (approve / reject / conditionally_approved)."""
+    return await service.bulk_decide(request, actor=user.id)
 
 
 # ── Policy Exceptions ───────────────────────────────────────────────

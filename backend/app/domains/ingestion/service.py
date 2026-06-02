@@ -205,6 +205,35 @@ class IngestionService:
 
         return {"upload_id": str(upload_id), "status": "cancelled"}
 
+    async def delete_upload(self, upload_id: str) -> None:
+        """Delete an upload and its associated data.
+
+        Allowed in any ingestion state so operators can remove stuck or unwanted
+        jobs from the ingestion queue. Related rows cascade; in-flight workers
+        no-op when the upload record is gone.
+        """
+        upload = await self.repository.get_upload(upload_id, self.tenant_id)
+        if not upload:
+            raise UploadNotFoundError(upload_id)
+
+        # Clean up storage if object exists
+        if upload.storage_key:
+            try:
+                await storage_service.delete_object(upload.storage_bucket or "", upload.storage_key)
+            except Exception as exc:
+                logger.warning("Failed to clean up storage for deleted upload %s: %s", upload_id, exc)
+
+        # Delete from database
+        await self.repository.delete_upload(upload_id, self.tenant_id)
+
+        await self.event_bus.emit(UploadCancelled(
+            tenant_id=self.tenant_id,
+            actor_id=self.user.id,
+            data={"upload_id": str(upload_id), "reason": "deleted"},
+        ))
+
+        logger.info("Upload %s deleted by %s", upload_id, self.user.id)
+
     async def retry_ingestion(self, upload_id: str) -> dict:
         """Retry ingestion from FAILED or re-queue a stuck in-progress upload."""
         upload = await self.repository.get_upload(upload_id, self.tenant_id)

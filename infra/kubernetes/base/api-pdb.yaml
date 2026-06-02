@@ -1,0 +1,23 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: contractriskedge-api-pdb
+  namespace: contractriskedge
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: contractriskedge
+      component: api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: contractriskedge-worker-pdb
+  namespace: contractriskedge
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: contractriskedge
+      component: worker

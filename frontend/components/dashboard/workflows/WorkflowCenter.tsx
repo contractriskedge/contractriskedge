@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Workflow, Download, RefreshCw } from "lucide-react";
+import { Workflow, Download, RefreshCw, Loader2, AlertCircle } from "lucide-react";
 import { WorkflowKpiCards } from "./WorkflowKpiCards";
 import { KanbanBoard } from "./KanbanBoard";
 import { WorkflowAiInsights } from "./AiInsights";
@@ -10,7 +10,7 @@ import { ApprovalTable } from "./ApprovalTable";
 import { WorkflowDetailDrawer } from "./WorkflowDetailDrawer";
 import { SlaBreachChart, SlaBreachRateChart, TeamWorkload, AutomationRulesPanel } from "./SlaCenter";
 import { WorkflowFilterBar } from "./WorkflowFilterBar";
-import { workflowKpis, workflowItems, workflowInsights, slaMetrics, teamMembers, automationRules } from "./mockData";
+import { useWorkflowDashboard, useWorkflows } from "@/services/hooks/useWorkflows";
 import type { WorkflowItem } from "./types";
 
 interface WorkflowFilters {
@@ -22,6 +22,17 @@ const defaultFilters: WorkflowFilters = { stage: "", priority: "", slaStatus: ""
 export function WorkflowCenter() {
   const [filters, setFilters] = useState<WorkflowFilters>({ ...defaultFilters });
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowItem | null>(null);
+
+  // Real API hooks replacing mockData
+  const { data: dashboardData, isLoading, error, refetch } = useWorkflowDashboard();
+  const { data: workflowsData } = useWorkflows();
+
+  const workflowKpis = dashboardData?.kpis ?? [];
+  const workflowItems = workflowsData?.data ?? dashboardData?.workflows ?? [];
+  const workflowInsights = [];
+  const slaMetrics = [];
+  const teamMembers = [];
+  const automationRules = [];
 
   const handleFilterChange = useCallback((key: keyof WorkflowFilters, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -39,6 +50,34 @@ export function WorkflowCenter() {
     }
     return true;
   });
+
+  // Loading state
+  if (isLoading && workflowItems.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 text-gold-400 animate-spin mx-auto mb-3" />
+          <p className="text-sm text-gray-500">Loading workflow data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error && workflowItems.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center max-w-md">
+          <AlertCircle className="w-10 h-10 text-red-400 mx-auto mb-3" />
+          <p className="text-sm font-medium text-gray-900 mb-1">Failed to load workflow data</p>
+          <p className="text-xs text-gray-500 mb-4">{(error as Error)?.message || "An unexpected error occurred"}</p>
+          <button onClick={() => refetch()} className="inline-flex items-center gap-1.5 text-xs font-medium text-gold-600 hover:text-gold-700">
+            <RefreshCw className="w-3.5 h-3.5" /> Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 pb-24">

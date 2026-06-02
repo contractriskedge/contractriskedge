@@ -9,11 +9,21 @@ from app.dependencies import get_db, get_current_user, get_tenant_id, get_event_
 from app.kernel.security.auth import UserContext
 from app.kernel.security.rbac import require_permission
 from app.kernel.security.permissions import Permissions
-from app.domains.ai.schemas import AnalysisRequest, AnalysisResponse, AnalysisStatusResponse
+from app.domains.ai.schemas import (
+    AIReviewCopilotRequest,
+    AIReviewCopilotResponse,
+    AIReviewFeedbackRequest,
+    AIReviewFeedbackResponse,
+    AnalysisRequest,
+    AnalysisResponse,
+    AnalysisStatusResponse,
+)
 from app.domains.ai.service import AIService
+from app.domains.ai.copilot import ReviewCopilotService
 from app.domains.ai.repository import AIRepository
 from app.domains.vectors.repository import VectorRepository
 from app.domains.ingestion.repository import IngestionRepository
+from app.domains.review.audit_trail import AuditTrailService
 from app.kernel.events.bus import EventBus
 
 router = APIRouter(prefix="/ai", tags=["AI Analysis"])
@@ -60,6 +70,48 @@ async def analyze_contract(
         status="processing",
         message="Analysis pipeline dispatched to worker."
 )
+
+
+async def get_review_copilot_service(
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
+    event_bus: EventBus = Depends(get_event_bus),
+) -> ReviewCopilotService:
+    ai_service = AIService(
+        ai_repo=AIRepository(db, tenant_id=tenant_id),
+        vector_repo=VectorRepository(db, tenant_id=tenant_id),
+        ingest_repo=IngestionRepository(db, tenant_id=tenant_id),
+        event_bus=event_bus,
+        user=user,
+        tenant_id=tenant_id,
+    )
+    return ReviewCopilotService(
+        ai_service=ai_service,
+        audit_trail=AuditTrailService(db, tenant_id=tenant_id),
+        user=user,
+        tenant_id=tenant_id,
+    )
+
+
+@router.post("/copilot/suggest", response_model=AIReviewCopilotResponse)
+async def suggest_review_actions(
+    body: AIReviewCopilotRequest,
+    service: ReviewCopilotService = Depends(get_review_copilot_service),
+    _: None = Depends(require_permission(Permissions.AI_VIEW)),
+):
+    """Generate AI review suggestions and record audit-grade trace data."""
+    return await service.suggest(body)
+
+
+@router.post("/copilot/feedback", response_model=AIReviewFeedbackResponse)
+async def submit_review_feedback(
+    body: AIReviewFeedbackRequest,
+    service: ReviewCopilotService = Depends(get_review_copilot_service),
+    _: None = Depends(require_permission(Permissions.AI_VIEW)),
+):
+    """Capture reviewer feedback on AI Copilot suggestions."""
+    return await service.record_feedback(body)
 
 
 @router.get("/runs", response_model=dict

@@ -337,6 +337,19 @@ export function InlineDiffViewer(props: InlineDiffViewerProps) {
     };
   }, [sources]);
 
+  // ── Source mapping confidence ─────────────────────────────────
+  // When the locator has low confidence or the original text is very
+  // short compared to proposed, warn the reviewer.
+  const sourceMappingWeak = useMemo(() => {
+    const origLen = (sources.contractBaseline || "").length;
+    const propLen = (sources.displayText || "").length;
+    // Weak if original is just a heading (< 60 chars) while proposed is substantial
+    // or if original is empty and this isn't a pure insert
+    if (!sources.contractBaseline && !sources.isPureInsert) return true;
+    if (origLen < 60 && propLen > 200 && !sources.isPureInsert) return true;
+    return false;
+  }, [sources]);
+
   if (!sources.displayText && !sources.contractBaseline) return null;
 
   // Pure delete
@@ -403,7 +416,35 @@ export function InlineDiffViewer(props: InlineDiffViewerProps) {
   return (
     <div className={`rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/50 ${className}`}>
       {header}
-      {showProvenance ? (
+
+      {/* ── Source mapping weak warning ─────────────────────────── */}
+      {sourceMappingWeak && (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
+          <p className="font-semibold">⚠ Source clause could not be reliably located</p>
+          <p className="mt-0.5">
+            The original clause text shown below may not match the document section.
+            Use <span className="font-medium">Locate Source Clause</span> to verify the baseline.
+          </p>
+        </div>
+      )}
+
+      {/* ── Side-by-side Original vs Proposed when source is weak ── */}
+      {sourceMappingWeak && sources.contractBaseline ? (
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 mb-3">
+          <div className="rounded-lg border border-gray-200 bg-gray-50/80 p-2.5 dark:border-gray-700 dark:bg-gray-800/30">
+            <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Original Clause</p>
+            <p className="text-xs leading-relaxed whitespace-pre-wrap text-gray-700 dark:text-gray-300">
+              {sources.contractBaseline}
+            </p>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-white p-2.5 dark:border-gray-700 dark:bg-gray-800/50">
+            <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Proposed Clause</p>
+            <p className="text-xs leading-relaxed whitespace-pre-wrap text-gray-700 dark:text-gray-300">
+              {sources.displayText}
+            </p>
+          </div>
+        </div>
+      ) : showProvenance ? (
         <ProvenanceTabs
           aiText={aiText}
           customizedText={customizedText}
@@ -419,7 +460,7 @@ export function InlineDiffViewer(props: InlineDiffViewerProps) {
           </div>
         </>
       )}
-      {!showProvenance && segments.length > 0 && (
+      {!showProvenance && segments.length > 0 && !sourceMappingWeak && (
         <p className="mt-2 text-[10px] text-gray-400 dark:text-gray-500">
           <span className="text-red-600 dark:text-red-400">Strikethrough</span> = removed ·{" "}
           <span className="text-green-700 dark:text-green-400">Highlight</span> = added

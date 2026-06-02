@@ -20,12 +20,9 @@ const WORKFLOW_STAGES = ["Draft", "Review", "Approval", "Negotiation", "Executed
 
 function FilterSelect({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (v: string) => void }) {
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="text-[11px] border border-gray-200 rounded-md px-2 py-1.5 text-gray-600 bg-white hover:border-gray-300 focus:border-navy-400 focus:ring-1 focus:ring-navy-400 transition-colors min-w-[100px]"
-      aria-label={label}
-    >
+    <select value={value} onChange={(e) => onChange(e.target.value)}
+      className="text-[11px] border border-gray-200 dark:border-navy-600 rounded-md px-2 py-1 text-gray-600 dark:text-gray-300 bg-white dark:bg-navy-800 hover:border-gray-300 dark:hover:border-navy-500 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors min-w-[100px]"
+      aria-label={label}>
       <option value="">{label}</option>
       {options.map((o) => <option key={o} value={o}>{o}</option>)}
     </select>
@@ -36,35 +33,23 @@ export function FilterBar({ filters, onChange, onReset }: FilterBarProps) {
   const activeCount = Object.values(filters).filter((v) => v !== "").length;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="flex items-center gap-2 flex-wrap bg-white rounded-lg border border-gray-200 shadow-sm px-3 py-2"
-    >
-      <Filter className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+    <div className="flex items-center gap-2 flex-wrap bg-white dark:bg-navy-800 rounded-lg border border-gray-200 dark:border-navy-700 px-3 py-1.5">
+      <Filter className="w-3 h-3 text-gray-400 flex-shrink-0" />
       <FilterSelect label="Vendor" value={filters.vendor} options={VENDORS} onChange={(v) => onChange("vendor", v)} />
       <FilterSelect label="Geography" value={filters.geography} options={GEOGRAPHIES} onChange={(v) => onChange("geography", v)} />
       <FilterSelect label="Type" value={filters.contractType} options={CONTRACT_TYPES} onChange={(v) => onChange("contractType", v)} />
       <FilterSelect label="Business Unit" value={filters.businessUnit} options={BUSINESS_UNITS} onChange={(v) => onChange("businessUnit", v)} />
       <FilterSelect label="Owner" value={filters.owner} options={OWNERS} onChange={(v) => onChange("owner", v)} />
-      <select
-        value={filters.riskLevel}
-        onChange={(e) => onChange("riskLevel", e.target.value)}
-        className="text-[11px] border border-gray-200 rounded-md px-2 py-1.5 text-gray-600 bg-white hover:border-gray-300 focus:border-navy-400 focus:ring-1 focus:ring-navy-400 transition-colors"
-        aria-label="Risk Level"
-      >
+      <select value={filters.riskLevel} onChange={(e) => onChange("riskLevel", e.target.value)}
+        className="text-[11px] border border-gray-200 dark:border-navy-600 rounded-md px-2 py-1 text-gray-600 dark:text-gray-300 bg-white dark:bg-navy-800 hover:border-gray-300 dark:hover:border-navy-500 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors" aria-label="Risk Level">
         <option value="">Risk Level</option>
         <option value="critical">Critical</option>
         <option value="high">High</option>
         <option value="medium">Medium</option>
         <option value="low">Low</option>
       </select>
-      <select
-        value={filters.status}
-        onChange={(e) => onChange("status", e.target.value)}
-        className="text-[11px] border border-gray-200 rounded-md px-2 py-1.5 text-gray-600 bg-white hover:border-gray-300 focus:border-navy-400 focus:ring-1 focus:ring-navy-400 transition-colors"
-        aria-label="Status"
-      >
+      <select value={filters.status} onChange={(e) => onChange("status", e.target.value)}
+        className="text-[11px] border border-gray-200 dark:border-navy-600 rounded-md px-2 py-1 text-gray-600 dark:text-gray-300 bg-white dark:bg-navy-800 hover:border-gray-300 dark:hover:border-navy-500 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors" aria-label="Status">
         <option value="">Status</option>
         <option value="active">Active</option>
         <option value="expiring_soon">Expiring Soon</option>
@@ -72,23 +57,19 @@ export function FilterBar({ filters, onChange, onReset }: FilterBarProps) {
         <option value="pending_signature">Pending Signature</option>
         <option value="expired">Expired</option>
       </select>
-      <select
-        value={filters.workflowStage}
-        onChange={(e) => onChange("workflowStage", e.target.value)}
-        className="text-[11px] border border-gray-200 rounded-md px-2 py-1.5 text-gray-600 bg-white hover:border-gray-300 focus:border-navy-400 focus:ring-1 focus:ring-navy-400 transition-colors"
-        aria-label="Workflow Stage"
-      >
+      <select value={filters.workflowStage} onChange={(e) => onChange("workflowStage", e.target.value)}
+        className="text-[11px] border border-gray-200 dark:border-navy-600 rounded-md px-2 py-1 text-gray-600 dark:text-gray-300 bg-white dark:bg-navy-800 hover:border-gray-300 dark:hover:border-navy-500 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors" aria-label="Workflow Stage">
         <option value="">Workflow</option>
         {WORKFLOW_STAGES.map((s) => <option key={s} value={s.toLowerCase()}>{s}</option>)}
       </select>
       {activeCount > 0 && (
         <>
-          <span className="text-[10px] text-navy-600 font-medium bg-navy-50 px-1.5 py-0.5 rounded">{activeCount} active</span>
-          <button onClick={onReset} className="text-[10px] text-gray-400 hover:text-red-500 flex items-center gap-0.5 transition-colors">
+          <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium bg-blue-50 dark:bg-blue-900/20 px-1.5 py-0.5 rounded">{activeCount} active</span>
+          <button onClick={onReset} className="text-[10px] text-gray-400 hover:text-red-500 dark:hover:text-red-400 flex items-center gap-0.5 transition-colors">
             <RotateCcw className="w-3 h-3" /> Reset
           </button>
         </>
       )}
-    </motion.div>
+    </div>
   );
 }

@@ -25,6 +25,7 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { reviewService } from "@/services/api/reviews";
+import { ApiRequestError } from "@/services/api/client";
 import type {
   ReviewFilterParams,
   FindingResolveRequest,
@@ -44,6 +45,8 @@ import type {
   CommentItem,
   DashboardResponse,
   PaginatedResponse,
+  MyWorkItem,
+  RecommendationItem,
 } from "@/services/api/client";
 import {
   getGlobalConnectionState,
@@ -119,7 +122,8 @@ export function useReview(reviewId: string | undefined) {
       reviewId ? findReviewInQueryCache(queryClient, reviewId) : undefined,
     staleTime: 15_000,
     gcTime: 5 * 60_000,
-    retry: 2,
+    retry: (count, err) =>
+      !(err instanceof ApiRequestError && err.status_code === 404) && count < 2,
   });
 }
 
@@ -579,14 +583,48 @@ export function useGenerateMitigationRedline(reviewId: string) {
     }) => reviewService.generateMitigationRedline(reviewId, body),
 
     onSuccess: () => {
-      // Invalidate redlines list so the new redline appears
       queryClient.invalidateQueries({
         queryKey: [...reviewKeys.detail(reviewId), "redlines"],
       });
-      // Also invalidate risk breakdown since a new redline may change exposure
       queryClient.invalidateQueries({
         queryKey: [...reviewKeys.all, "risk-breakdown", reviewId],
       });
     },
+  });
+}
+
+// ── Reviewer Ops Hooks ──────────────────────────────────────────
+
+export function useMyWork() {
+  return useQuery({
+    queryKey: [...reviewKeys.all, "my-work"],
+    queryFn: () => reviewService.getMyWork(),
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useQueue(params?: Record<string, unknown>) {
+  return useQuery({
+    queryKey: [...reviewKeys.all, "queue", params],
+    queryFn: () => reviewService.getQueue(params as Record<string, string>),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+  });
+}
+
+export function useRecommendations(params?: {
+  severity?: string;
+  clause_type?: string;
+  min_confidence?: number;
+  limit?: number;
+}) {
+  return useQuery({
+    queryKey: [...reviewKeys.all, "recommendations", params],
+    queryFn: () => reviewService.getRecommendations(params),
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
   });
 }

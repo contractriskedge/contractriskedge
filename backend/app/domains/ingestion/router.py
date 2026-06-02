@@ -655,6 +655,29 @@ async def list_uploads(
     )
 
 
+# ── DELETE /uploads/{upload_id} ─────────────────────────────────────────────
+
+
+@router.delete(
+    "/{upload_id}",
+    summary="Delete an upload",
+    description="Remove an upload and its associated data from the system, including in-progress pipeline jobs.",
+    responses={
+        200: {"description": "Upload deleted"},
+        404: {"model": ErrorResponse, "description": "Upload not found"},
+        409: {"model": ErrorResponse, "description": "Upload cannot be deleted"},
+    },
+)
+async def delete_upload(
+    upload_id: str,
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+    service: IngestionService = Depends(get_ingestion_service),
+):
+    """Delete an upload and its associated data (any ingestion state)."""
+    await service.delete_upload(upload_id)
+    return {"upload_id": upload_id, "deleted": True, "message": "Upload deleted"}
+
+
 # ── GET /uploads/queue/stats ────────────────────────────────────────────────
 
 

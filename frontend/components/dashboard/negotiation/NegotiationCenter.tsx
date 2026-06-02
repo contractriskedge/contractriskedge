@@ -18,6 +18,7 @@ import { RightPanel } from "./RightPanel";
 import { TopToolbar } from "./TopToolbar";
 import { ActivityTimeline } from "./ActivityTimeline";
 import { IssueDetailDrawer } from "./IssueDetailDrawer";
+import { NegotiationClauseDrawer } from "./NegotiationClauseDrawer";
 
 // ── Negotiation Center ───────────────────────────────────────────────────
 
@@ -30,6 +31,7 @@ export function NegotiationCenter() {
   const [panelMode, setPanelMode] = useState<PanelMode>("review");
   const [activeClauseId, setActiveClauseId] = useState<string | null>(null);
   const [activeIssueId, setActiveIssueId] = useState<string | null>(null);
+  const [showClauseDrawer, setShowClauseDrawer] = useState(false);
   const [showLeftSidebar, setShowLeftSidebar] = useState(true);
   const [showRightPanel, setShowRightPanel] = useState(true);
   const [showActivityTimeline, setShowActivityTimeline] = useState(false);
@@ -76,6 +78,11 @@ export function NegotiationCenter() {
     console.log("Applied fallback:", fb.id);
   }, []);
 
+  const handleClauseSelect = useCallback((clauseId: string) => {
+    setActiveClauseId(clauseId);
+    setShowClauseDrawer(true);
+  }, []);
+
   const handleGenerateAiRedlines = useCallback(() => {
     // In a real app, this would trigger AI redline generation
     console.log("Generating AI redlines...");
@@ -87,6 +94,18 @@ export function NegotiationCenter() {
   }, []);
 
   const activeIssue = issues.find(i => i.id === activeIssueId) || null;
+  const activeClause = clauses.find(c => c.clauseId === activeClauseId) || null;
+
+  // Get original and modified text for the active clause
+  const originalVersion = session.versions.find(v => v.id === "v1");
+  const originalClause = originalVersion?.content.find(c => c.clauseId === activeClauseId);
+  const modifiedClause = clauses.find(c => c.clauseId === activeClauseId);
+  const activeClauseOriginalText = originalClause?.content || modifiedClause?.content || "";
+  const activeClauseModifiedText = modifiedClause?.content || "";
+  const activeClauseComments = redlines
+    .filter(r => r.clauseId === activeClauseId)
+    .flatMap(r => r.comments)
+    .concat(issues.filter(i => i.clauseId === activeClauseId).flatMap(i => i.comments));
 
   return (
     <div className="h-full flex flex-col bg-gray-50 dark:bg-navy-900">
@@ -143,7 +162,7 @@ export function NegotiationCenter() {
                 activeClauseId={activeClauseId}
                 activeIssueId={activeIssueId}
                 redlineCountByClause={redlineCountByClause}
-                onClauseSelect={setActiveClauseId}
+                onClauseSelect={handleClauseSelect}
                 onIssueSelect={setActiveIssueId}
               />
             </motion.div>
@@ -241,6 +260,20 @@ export function NegotiationCenter() {
         onClose={() => setActiveIssueId(null)}
         onStatusChange={handleIssueStatusChange}
         onEscalate={handleIssueEscalate}
+      />
+
+      {/* Clause Detail Drawer */}
+      <NegotiationClauseDrawer
+        clause={activeClause}
+        originalText={activeClauseOriginalText}
+        modifiedText={activeClauseModifiedText}
+        redlines={redlines}
+        insights={session.insights}
+        playbooks={session.playbooks}
+        comments={activeClauseComments}
+        isOpen={showClauseDrawer && !!activeClause}
+        onClose={() => setShowClauseDrawer(false)}
+        onApplyFallback={handleApplyFallback}
       />
     </div>
   );

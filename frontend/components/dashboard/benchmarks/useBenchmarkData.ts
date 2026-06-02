@@ -2,9 +2,12 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getAuthToken, getBenchmarkDashboard, listBenchmarkCorpora, seedBenchmarkData } from "@/lib/api";
-import { benchmarkKpis as mockKpis, clauseBenchmarks as mockClauseBenchmarks, industryComparisons as mockIndustryComparisons } from "./mockData";
 import type { ClauseBenchmark, BenchmarkKpi as BenchmarkKpiType, IndustryComparison as IndustryComparisonType } from "./types";
 import type { BenchmarkDashboardData, BenchmarkCorpus } from "@/lib/api";
+
+const mockKpis: BenchmarkKpiType[] = [];
+const mockClauseBenchmarks: ClauseBenchmark[] = [];
+const mockIndustryComparisons: IndustryComparisonType[] = [];
 
 interface BenchmarkDataState {
   loading: boolean;

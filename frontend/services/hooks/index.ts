@@ -83,3 +83,60 @@ export {
   getGlobalConnectionState,
   setGlobalConnectionState,
 } from "./useAdaptivePolling";
+
+// ── Phase 2: Real data hooks (replacing mockData) ────────────────
+export {
+  useContracts,
+  useContractKpis,
+  useContractById,
+  useSavedViews,
+  contractKeys,
+} from "./useContracts";
+
+export {
+  useProcurementDashboard,
+  useSuppliers,
+  useSupplierById,
+  procurementKeys,
+} from "./useProcurement";
+
+export {
+  useComplianceDashboard,
+  useComplianceFrameworks,
+  useComplianceFindings,
+  complianceKeys,
+} from "./useCompliance";
+
+export {
+  useWorkflowDashboard,
+  useWorkflows,
+  workflowKeys,
+} from "./useWorkflows";
+
+export {
+  useBenchmarkDashboard,
+  useIndustryBenchmarks,
+  benchmarkKeys,
+} from "./useBenchmarks";
+
+export {
+  useAdminDashboard,
+  useAdminUsers,
+  useAuditLogs,
+  adminKeys,
+} from "./useAdmin";
+
+export {
+  usePendingExceptions,
+  usePendingApprovals,
+  useHumanOversightDashboard,
+  useDecideApproval,
+  useReviewException,
+  humanOversightKeys,
+} from "./useHumanOversight";
+
+export {
+  useAIQualityDashboard,
+  usePrompts,
+  aiGovernanceKeys,
+} from "./useAIGovernance";

@@ -1,13 +1,20 @@
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { LoginPage } from "@/components/auth/LoginPage";
-import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { Loader2 } from "lucide-react";
 
 export default function Home() {
   const { user, isLoading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!isLoading && user) {
+      router.replace("/dashboard");
+    }
+  }, [isLoading, user, router]);
 
   if (isLoading) {
     return (
@@ -21,5 +28,9 @@ export default function Home() {
     return <LoginPage />;
   }
 
-  return <DashboardLayout />;
+  return (
+    <div className="min-h-screen bg-navy-900 flex items-center justify-center">
+      <Loader2 className="w-8 h-8 text-gold-400 animate-spin" />
+    </div>
+  );
 }

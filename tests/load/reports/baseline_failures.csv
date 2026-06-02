@@ -1,0 +1,43 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+POST,mt_write,CatchResponseError('Tenant mt-tenant-ba30a553 write error: 500'),2,2026-05-28T01:20:02Z,2026-05-28T01:20:07Z
+GET,exec_health_poll,CatchResponseError('Health error: 0'),20,2026-05-28T01:20:15Z,2026-05-28T01:21:44Z
+POST,mt_write,CatchResponseError('Tenant mt-tenant-055b9223 write error: 500'),2,2026-05-28T01:20:05Z,2026-05-28T01:20:10Z
+GET,ws_connect,CatchResponseError('WS connect error: 0'),182,2026-05-28T01:20:13Z,2026-05-28T01:21:45Z
+GET,mt_read,CatchResponseError('Tenant mt-tenant-ba30a553 server error: 500'),4,2026-05-28T01:20:00Z,2026-05-28T01:20:12Z
+POST,exec_invalidation,CatchResponseError('Invalidation error: 0'),13,2026-05-28T01:20:12Z,2026-05-28T01:21:41Z
+GET,mt_read,CatchResponseError('Tenant mt-tenant-f06807f3 server error: 500'),3,2026-05-28T01:19:59Z,2026-05-28T01:20:08Z
+POST,ws_subscribe,CatchResponseError('WS subscribe error: 500'),11,2026-05-28T01:20:00Z,2026-05-28T01:20:11Z
+POST,mt_write,CatchResponseError('Tenant mt-tenant-a09670b1 write error: 500'),1,2026-05-28T01:20:02Z,2026-05-28T01:20:02Z
+GET,mt_read,CatchResponseError('Tenant mt-tenant-1eee281d server error: 500'),2,2026-05-28T01:20:05Z,2026-05-28T01:20:09Z
+PUT,flood_file_upload,CatchResponseError('File upload error: 0'),74,2026-05-28T01:20:13Z,2026-05-28T01:21:45Z
+GET,exec_anomaly_check,CatchResponseError('Anomaly error: 0'),29,2026-05-28T01:20:12Z,2026-05-28T01:21:46Z
+GET,chaos_health,CatchResponseError('Health check failed during chaos: 0'),42,2026-05-28T01:20:13Z,2026-05-28T01:21:44Z
+GET,mt_read,CatchResponseError('Tenant mt-tenant-055b9223 server error: 500'),2,2026-05-28T01:20:01Z,2026-05-28T01:20:07Z
+GET,flood_list_uploads,CatchResponseError('List error: 500'),14,2026-05-28T01:19:59Z,2026-05-28T01:20:11Z
+POST,ws_publish,CatchResponseError('WS publish error: 500'),11,2026-05-28T01:20:00Z,2026-05-28T01:20:09Z
+GET,mt_read,CatchResponseError('Tenant mt-tenant-a09670b1 server error: 500'),1,2026-05-28T01:20:06Z,2026-05-28T01:20:06Z
+POST,ws_publish,CatchResponseError('WS publish error: 0'),78,2026-05-28T01:20:12Z,2026-05-28T01:21:46Z
+POST,ws_disconnect,CatchResponseError('WS disconnect error: 0'),264,2026-05-28T01:20:14Z,2026-05-28T01:21:43Z
+GET,mt_cross_tenant,CatchResponseError('Cross-tenant error: 500'),1,2026-05-28T01:20:09Z,2026-05-28T01:20:09Z
+GET,exec_anomaly_check,CatchResponseError('Anomaly error: 500'),6,2026-05-28T01:20:01Z,2026-05-28T01:20:09Z
+GET,exec_health_poll,CatchResponseError('Health error: 500'),1,2026-05-28T01:19:59Z,2026-05-28T01:19:59Z
+POST,burst_upload,CatchResponseError('Burst upload error: 0'),137,2026-05-28T01:20:13Z,2026-05-28T01:21:46Z
+POST,chaos_write,CatchResponseError('Chaos write error: 500'),19,2026-05-28T01:19:59Z,2026-05-28T01:20:11Z
+POST,ws_broadcast,CatchResponseError('Broadcast error: 0'),29,2026-05-28T01:20:14Z,2026-05-28T01:21:43Z
+POST,chaos_write,CatchResponseError('Chaos write error: 0'),136,2026-05-28T01:20:12Z,2026-05-28T01:21:45Z
+GET,flood_status_check,CatchResponseError('Status error: 500'),20,2026-05-28T01:20:01Z,2026-05-28T01:20:12Z
+POST,ws_broadcast,CatchResponseError('Broadcast error: 500'),5,2026-05-28T01:20:03Z,2026-05-28T01:20:12Z
+GET,flood_status_check,CatchResponseError('Status error: 0'),253,2026-05-28T01:20:13Z,2026-05-28T01:21:46Z
+GET,ws_connect,CatchResponseError('WS connect error: 500'),17,2026-05-28T01:19:59Z,2026-05-28T01:20:12Z
+POST,exec_invalidation,CatchResponseError('Invalidation error: 500'),3,2026-05-28T01:20:05Z,2026-05-28T01:20:12Z
+GET,ws_reconnect,CatchResponseError('WS reconnect error: 0'),264,2026-05-28T01:20:14Z,2026-05-28T01:21:43Z
+GET,burst_ws_health,CatchResponseError('WS health error: 0'),122,2026-05-28T01:20:14Z,2026-05-28T01:21:46Z
+POST,mt_write,CatchResponseError('Tenant mt-tenant-9772432f write error: 500'),2,2026-05-28T01:20:03Z,2026-05-28T01:20:08Z
+GET,burst_ws_health,CatchResponseError('WS health error: 500'),11,2026-05-28T01:19:59Z,2026-05-28T01:20:11Z
+PUT,flood_file_upload,CatchResponseError('File upload error: 500'),5,2026-05-28T01:20:03Z,2026-05-28T01:20:12Z
+GET,mt_isolation,CatchResponseError('Isolation check error: 0'),31,2026-05-28T01:20:15Z,2026-05-28T01:21:45Z
+POST,burst_upload,CatchResponseError('Burst upload error: 500'),10,2026-05-28T01:20:01Z,2026-05-28T01:20:11Z
+GET,flood_list_uploads,CatchResponseError('List error: 0'),169,2026-05-28T01:20:13Z,2026-05-28T01:21:46Z
+POST,ws_subscribe,CatchResponseError('WS subscribe error: 0'),98,2026-05-28T01:20:12Z,2026-05-28T01:21:45Z
+GET,mt_cross_tenant,CatchResponseError('Cross-tenant error: 0'),31,2026-05-28T01:20:13Z,2026-05-28T01:21:43Z
+GET,mt_isolation,CatchResponseError('Isolation check error: 500'),6,2026-05-28T01:20:02Z,2026-05-28T01:20:08Z

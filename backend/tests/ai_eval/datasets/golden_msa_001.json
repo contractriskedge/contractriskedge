@@ -1,0 +1,69 @@
+{
+  "contract_id": "golden_msa_001",
+  "contract_type": "msa",
+  "description": "Master Services Agreement with standard terms and indemnification",
+  "jurisdiction": "us",
+  "risk_profile": "standard",
+  "tags": ["msa", "services", "standard"],
+  "expected_risk_score": 0.50,
+  "expected_clause_types": [
+    "liability",
+    "indemnification",
+    "payment",
+    "termination",
+    "confidentiality",
+    "governing_law",
+    "warranty",
+    "insurance"
+  ],
+  "expected_findings": [
+    {
+      "clause_type": "liability",
+      "severity": "high",
+      "title": "Limitation of liability",
+      "description_contains": "limitation of liability",
+      "min_confidence": 0.8,
+      "required": true
+    },
+    {
+      "clause_type": "indemnification",
+      "severity": "high",
+      "title": "Indemnification obligations",
+      "description_contains": "indemnif",
+      "min_confidence": 0.8,
+      "required": true
+    },
+    {
+      "clause_type": "payment",
+      "severity": "medium",
+      "title": "Payment terms",
+      "description_contains": "payment",
+      "min_confidence": 0.7,
+      "required": true
+    },
+    {
+      "clause_type": "warranty",
+      "severity": "medium",
+      "title": "Warranty disclaimer",
+      "description_contains": "warrant",
+      "min_confidence": 0.7,
+      "required": true
+    },
+    {
+      "clause_type": "termination",
+      "severity": "medium",
+      "title": "Termination for convenience",
+      "description_contains": "termination",
+      "min_confidence": 0.7,
+      "required": false
+    },
+    {
+      "clause_type": "insurance",
+      "severity": "medium",
+      "title": "Insurance requirements",
+      "description_contains": "insurance",
+      "min_confidence": 0.7,
+      "required": false
+    }
+  ]
+}

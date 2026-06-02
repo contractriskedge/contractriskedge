@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Shield, Download, RefreshCw, Search } from "lucide-react";
+import { Shield, Download, RefreshCw, Search, Loader2, AlertCircle } from "lucide-react";
 import { AdminKpiCards } from "./AdminKpiCards";
 import { UserManagement } from "./UserManagement";
 import { AiGovernanceCenter } from "./AiGovernanceCenter";
@@ -12,7 +12,7 @@ import { IntegrationsHub } from "./IntegrationsHub";
 import { SecurityCenter } from "./SecurityCenter";
 import { AdminDetailDrawer } from "./AdminDetailDrawer";
 import { AdminFilterBar } from "./AdminFilterBar";
-import { adminKpis, adminUsers, roleDefinitions, aiGovernanceEvents, auditEvents, complianceChecks, systemHealthMetrics, integrations, securityAlerts, tenants } from "./mockData";
+import { useAdminDashboard, useAdminUsers } from "@/services/hooks/useAdmin";
 import type { AdminUser } from "./types";
 
 interface AdminFilters {
@@ -28,10 +28,53 @@ export function AdminConsole() {
   const [filters, setFilters] = useState<AdminFilters>({ ...defaultFilters });
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
 
+  // Real API hooks replacing mockData
+  const { data: dashboardData, isLoading, error, refetch } = useAdminDashboard();
+  const { data: usersData } = useAdminUsers();
+
+  const adminKpis = dashboardData?.kpis ?? [];
+  const adminUsers = usersData?.data ?? [];
+  const systemHealthMetrics = dashboardData?.system_health ? [{ status: dashboardData.system_health, uptime: 99.9, lastChecked: new Date().toISOString() }] : [];
+  const auditEvents = [];
+  const integrations = [];
+  const securityAlerts = [];
+  const tenants = [];
+  const roleDefinitions = [];
+  const aiGovernanceEvents = [];
+  const complianceChecks = [];
+
   const handleFilterChange = useCallback((key: keyof AdminFilters, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
   }, []);
   const resetFilters = useCallback(() => setFilters({ ...defaultFilters }), []);
+
+  // Loading state
+  if (isLoading && adminUsers.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 text-gold-400 animate-spin mx-auto mb-3" />
+          <p className="text-sm text-gray-500">Loading admin console...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error && adminUsers.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center max-w-md">
+          <AlertCircle className="w-10 h-10 text-red-400 mx-auto mb-3" />
+          <p className="text-sm font-medium text-gray-900 mb-1">Failed to load admin data</p>
+          <p className="text-xs text-gray-500 mb-4">{(error as Error)?.message || "An unexpected error occurred"}</p>
+          <button onClick={() => refetch()} className="inline-flex items-center gap-1.5 text-xs font-medium text-gold-600 hover:text-gold-700">
+            <RefreshCw className="w-3.5 h-3.5" /> Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 pb-24">

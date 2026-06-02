@@ -1,0 +1,69 @@
+{
+  "contract_id": "golden_saas_001",
+  "contract_type": "saas",
+  "description": "SaaS agreement with data privacy, auto-renewal, and limitation of liability",
+  "jurisdiction": "us",
+  "risk_profile": "high_risk",
+  "tags": ["saas", "cloud", "high_risk"],
+  "expected_risk_score": 0.65,
+  "expected_clause_types": [
+    "data_privacy",
+    "liability",
+    "payment",
+    "renewal",
+    "termination",
+    "confidentiality",
+    "governing_law",
+    "security"
+  ],
+  "expected_findings": [
+    {
+      "clause_type": "data_privacy",
+      "severity": "critical",
+      "title": "Data processing and privacy obligations",
+      "description_contains": "data",
+      "min_confidence": 0.8,
+      "required": true
+    },
+    {
+      "clause_type": "liability",
+      "severity": "high",
+      "title": "Limitation of liability cap",
+      "description_contains": "liability",
+      "min_confidence": 0.8,
+      "required": true
+    },
+    {
+      "clause_type": "renewal",
+      "severity": "high",
+      "title": "Auto-renewal clause",
+      "description_contains": "renewal",
+      "min_confidence": 0.8,
+      "required": true
+    },
+    {
+      "clause_type": "payment",
+      "severity": "medium",
+      "title": "Subscription fees",
+      "description_contains": "fee",
+      "min_confidence": 0.7,
+      "required": true
+    },
+    {
+      "clause_type": "security",
+      "severity": "high",
+      "title": "Data security obligations",
+      "description_contains": "security",
+      "min_confidence": 0.7,
+      "required": true
+    },
+    {
+      "clause_type": "termination",
+      "severity": "medium",
+      "title": "Termination for breach",
+      "description_contains": "termination",
+      "min_confidence": 0.7,
+      "required": false
+    }
+  ]
+}

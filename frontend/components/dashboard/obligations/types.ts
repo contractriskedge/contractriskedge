@@ -87,6 +87,89 @@ export interface TimelineEvent {
   contractId: string;
 }
 
+// ── API Response Types (snake_case, matching backend) ────────────
+
+export interface ObligationKpiResponse {
+  total_obligations: number;
+  active_count: number;
+  overdue_count: number;
+  escalated_count: number;
+  completed_count: number;
+  breached_count: number;
+  avg_risk_score: number;
+  total_exposure: number;
+  at_risk_amount: number;
+  pending_review: number;
+  upcoming_due: number;
+  compliance_rate: number;
+}
+
+export interface SlaBreachResponse {
+  id: string;
+  vendor: string;
+  contract_type: string | null;
+  performance: number;
+  target: string;
+  breached_at: string;
+  status: string;
+}
+
+export interface VendorRiskResponse {
+  vendor: string;
+  score: number;
+  risk_level: string;
+  breach_count: number;
+  contract_count: number;
+  trend: number;
+  predicted_risk: number;
+}
+
+export interface SlaPredictionResponse {
+  vendor: string;
+  current_performance: number;
+  predicted_performance: number;
+  breach_probability: number;
+  risk_level: string;
+  recommendation: string;
+}
+
+export interface RiskAnalysisResponse {
+  obligation_id: string;
+  risk_score: number;
+  risk_level: string;
+  breach_probability: number;
+  escalation_recommended: boolean;
+  recommended_action: string;
+  confidence: number;
+  analysis: string;
+}
+
+export interface AnomalyResponse {
+  id: string;
+  obligation_id: string;
+  anomaly_type: string;
+  severity: string;
+  description: string;
+  detected_at: string;
+  score: number;
+}
+
+export interface FinancialExposureSummaryResponse {
+  total_exposure: number;
+  overdue_amount: number;
+  at_risk_amount: number;
+  recovered_amount: number;
+  by_category: FinancialExposure[];
+  trend: number;
+}
+
+export interface ValueAtRiskResponse {
+  total_var: number;
+  probability: number;
+  confidence_level: number;
+  by_category: { category: string; var: number; probability: number }[];
+}
+
 export const OBLIGATION_TYPES: { id: ObligationType; label: string; icon: string }[] = [
   { id: "payment", label: "Payment", icon: "DollarSign" },
   { id: "deliverable", label: "Deliverable", icon: "FileText" },

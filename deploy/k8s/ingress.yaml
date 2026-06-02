@@ -1,0 +1,39 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: contractrisk-ingress
+  namespace: contractrisk
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+spec:
+  tls:
+    - hosts:
+        - app.contractriskedge.com
+        - api.contractriskedge.com
+      secretName: contractrisk-tls
+  rules:
+    - host: app.contractriskedge.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: contractrisk-frontend
+                port:
+                  number: 3000
+    - host: api.contractriskedge.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: contractrisk-api
+                port:
+                  number: 8000

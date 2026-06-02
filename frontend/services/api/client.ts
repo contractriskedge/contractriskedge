@@ -511,6 +511,13 @@ export interface DashboardResponse {
     pending_reviews: number;
     completed_reviews: number;
     escalated_count: number;
+    total_escalation_events: number;
+    resolved_escalations: number;
+    escalation_resolution_rate: number;
+    unassigned_count: number;
+    overdue_count: number;
+    completed_7d: number;
+    avg_review_age_hours: number;
   };
   findings_by_severity: Record<string, number>;
   findings_by_clause_type: Record<string, number>;
@@ -526,6 +533,31 @@ export interface DashboardResponse {
   sla_at_risk: number;
 }
 
+// ── Reviewer Ops Types ──────────────────────────────────────────
+
+export interface MyWorkItem {
+  review_id: string;
+  contract_name: string | null;
+  status: string;
+  risk_score: number | null;
+  sla_deadline: string | null;
+  assigned_to: string | null;
+  created_at: string;
+}
+
+export interface RecommendationItem {
+  finding_id: string;
+  review_id: string;
+  clause_type: string | null;
+  severity: string;
+  title: string;
+  description: string;
+  recommendation: string;
+  confidence: number;
+  risk_score: number | null;
+  created_at: string;
+}
+
 // ── Error Classes ─────────────────────────────────────────────────
 
 /** Normalize FastAPI error bodies (string detail or validation array). */
@@ -539,6 +571,12 @@ function formatApiErrorMessage(
   const detail = body.detail;
   if (typeof detail === "string" && detail) {
     return detail;
+  }
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const nested = detail as Record<string, unknown>;
+    if (typeof nested.message === "string" && nested.message) {
+      return nested.message;
+    }
   }
   if (Array.isArray(detail)) {
     const parts = detail.map((item) => {
@@ -602,27 +640,35 @@ function getStoredToken(): string | null {
   }
 }
 
-async function getValidToken(): Promise<string | null> {
+export async function getValidToken(): Promise<string | null> {
   const token = getStoredToken();
   if (token) return token;
 
-  // Try to get a dev token
-  try {
-    const res = await fetch(`${API_BASE}/auth/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      const newToken = data.access_token;
-      if (typeof window !== "undefined") {
-        localStorage.setItem("auth_token", newToken);
+  // Try to get a dev token — retry a few times in case AuthProvider
+  // is still initialising.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`${API_BASE}/auth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const newToken = data.access_token;
+        if (typeof window !== "undefined") {
+          localStorage.setItem("auth_token", newToken);
+        }
+        return newToken;
       }
-      return newToken;
+    } catch {
+      if (attempt === 2) {
+        console.warn("[api] Dev token fetch failed after 3 attempts");
+      }
+      // Wait briefly before retrying
+      await new Promise((r) => setTimeout(r, 200));
     }
-  } catch {
-    // Silently fail — auth will be handled by the auth provider
   }
+
   return null;
 }
 
@@ -924,6 +970,40 @@ export const api = {
       throw new ApiRequestError(apiError);
     }
     return responseBody as T;
+  },
+
+  /**
+   * Download a binary file from the API with auth headers (exports, DOCX, ZIP).
+   */
+  downloadFile: async (
+    path: string,
+    filename: string,
+    accept?: string,
+  ): Promise<void> => {
+    const authToken = await getValidToken();
+    const headers: Record<string, string> = {};
+    if (accept) headers.Accept = accept;
+    if (authToken) headers.Authorization = `Bearer ${authToken}`;
+
+    const res = await fetch(`${API_BASE}${path}`, { headers });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new NetworkError(
+        detail
+          ? `Download failed (${res.status}): ${detail.slice(0, 200)}`
+          : `Download failed (${res.status})`,
+      );
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
   },
 
   /** Generate an idempotency key for mutation operations */

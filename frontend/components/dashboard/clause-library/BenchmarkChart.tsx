@@ -35,7 +35,7 @@ export function BenchmarkChart({ data }: { data: BenchmarkData[] }) {
         <p className="text-[10px] text-gray-500 mt-0.5">Your scores vs market median (P25–P75 range)</p>
       </div>
       <div className="p-4">
-        <div className="h-72">
+        <div className="w-full h-72">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />

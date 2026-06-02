@@ -17,16 +17,9 @@ if config.config_file_name is not None:
 # add your model's MetaData object here
 # for 'autogenerate' support
 from app.kernel.database.base import Base
-from app.kernel.database import models  # noqa: F401
-import app.domains.ingestion.models  # noqa: F401
-import app.domains.search.models  # noqa: F401
-import app.domains.ai.models  # noqa: F401
-import app.domains.review.models  # noqa: F401
-import app.domains.notify.models  # noqa: F401
-import app.domains.playbook.models  # noqa: F401
-import app.domains.extraction.models  # noqa: F401
-import app.domains.vectors.models  # noqa: F401
-import app.domains.admin.models  # noqa: F401
+from app.kernel.database.orm_registry import register_orm_models
+
+register_orm_models()
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,

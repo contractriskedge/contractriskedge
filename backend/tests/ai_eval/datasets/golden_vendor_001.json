@@ -1,0 +1,68 @@
+{
+  "contract_id": "golden_vendor_001",
+  "contract_type": "vendor",
+  "description": "Vendor agreement with service levels, insurance, and compliance",
+  "jurisdiction": "us",
+  "risk_profile": "standard",
+  "tags": ["vendor", "services", "standard"],
+  "expected_risk_score": 0.50,
+  "expected_clause_types": [
+    "liability",
+    "payment",
+    "termination",
+    "confidentiality",
+    "insurance",
+    "compliance",
+    "dispute_resolution"
+  ],
+  "expected_findings": [
+    {
+      "clause_type": "liability",
+      "severity": "high",
+      "title": "Vendor liability and caps",
+      "description_contains": "liability",
+      "min_confidence": 0.8,
+      "required": true
+    },
+    {
+      "clause_type": "payment",
+      "severity": "high",
+      "title": "Fee schedule and payment terms",
+      "description_contains": "fee",
+      "min_confidence": 0.8,
+      "required": true
+    },
+    {
+      "clause_type": "insurance",
+      "severity": "medium",
+      "title": "Insurance coverage requirements",
+      "description_contains": "insurance",
+      "min_confidence": 0.7,
+      "required": true
+    },
+    {
+      "clause_type": "compliance",
+      "severity": "medium",
+      "title": "Regulatory compliance",
+      "description_contains": "compliance",
+      "min_confidence": 0.7,
+      "required": true
+    },
+    {
+      "clause_type": "confidentiality",
+      "severity": "medium",
+      "title": "Confidential information protection",
+      "description_contains": "confidential",
+      "min_confidence": 0.7,
+      "required": true
+    },
+    {
+      "clause_type": "termination",
+      "severity": "medium",
+      "title": "Termination for cause",
+      "description_contains": "termination",
+      "min_confidence": 0.7,
+      "required": false
+    }
+  ]
+}

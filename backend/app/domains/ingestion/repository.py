@@ -151,3 +151,12 @@ class IngestionRepository(BaseRepository):
             query = query.where(UploadSession.ingestion_state == state)
         result = await self.session.execute(query)
         return result.scalar() or 0
+
+    async def delete_upload(self, upload_id: str, tenant_id: str) -> None:
+        """Delete an upload record from the database."""
+        from sqlalchemy import delete as sa_delete
+        stmt = sa_delete(UploadSession).where(
+            UploadSession.upload_id == upload_id,
+            UploadSession.tenant_id == tenant_id,
+        )
+        await self.session.execute(stmt)

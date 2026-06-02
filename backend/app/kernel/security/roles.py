@@ -57,6 +57,7 @@ class Roles:
             "audit:read",
             "reviews:export",
             "benchmarks:read", "benchmarks:write",
+            "admin:tenant",
         },
         LEGAL_REVIEWER: {
             "contracts:read", "contracts:approve",

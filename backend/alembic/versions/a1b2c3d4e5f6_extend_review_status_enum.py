@@ -1,6 +1,6 @@
 """Extend review_status enum with workflow states.
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: p4q5r6s7t8u9
 Revises: 246c2ccbd7ed
 Create Date: 2026-05-18
 """
@@ -11,7 +11,7 @@ from typing import Sequence, Union
 
 from alembic import op
 
-revision: str = "a1b2c3d4e5f6"
+revision: str = "p4q5r6s7t8u9"
 down_revision: Union[str, None] = "246c2ccbd7ed"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

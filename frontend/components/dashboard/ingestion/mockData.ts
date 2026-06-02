@@ -1,22 +1,20 @@
 // ── Enterprise Document Ingestion & Import Center Mock Data ──────────────
 
 import type {
-  IngestionKpi, ImportSource, ImportJob, ProcessingQueue, FailedImport,
+  CompactKpi, ImportSource, ImportJob, ProcessingQueue, FailedImport,
   ImportTemplate, AiExtractionInsight, DuplicateGroup, IngestionAnalytics,
   PipelineStage, ValidationResult, ExtractedMetadata,
 } from "./types";
 
 // ── KPI Data ─────────────────────────────────────────────────────────────
 
-export const mockIngestionKpis: IngestionKpi[] = [
-  { id: "docs-processed", label: "Documents Processed", value: "24,892", trend: 12, trendDirection: "up", icon: "FileText", color: "from-blue-500 to-blue-600", severity: "info", sparklineData: [18000, 19500, 21000, 22500, 23800, 24892], tooltip: "24,892 documents processed through ingestion pipeline" },
-  { id: "ocr-accuracy", label: "OCR Accuracy Rate", value: "97.4%", trend: 1.8, trendDirection: "up", icon: "ScanEye", color: "from-green-500 to-green-600", severity: "success", sparklineData: [93.2, 94.5, 95.3, 96.1, 96.8, 97.4], tooltip: "97.4% average OCR accuracy across all document types" },
-  { id: "ai-extraction", label: "AI Extraction Confidence", value: "91.2%", trend: 3.5, trendDirection: "up", icon: "Brain", color: "from-purple-500 to-purple-600", severity: "success", sparklineData: [85.0, 86.8, 88.2, 89.5, 90.4, 91.2], tooltip: "91.2% average AI extraction confidence score" },
-  { id: "duplicates", label: "Duplicates Detected", value: "847", trend: -15, trendDirection: "down", icon: "CopyX", color: "from-amber-500 to-amber-600", severity: "warning", sparklineData: [1200, 1100, 980, 920, 870, 847], tooltip: "847 duplicate contracts detected and flagged for review" },
-  { id: "queue-size", label: "Processing Queue", value: "234", trend: -22, trendDirection: "down", icon: "ListOrdered", color: "from-teal-500 to-teal-600", severity: "info", sparklineData: [520, 480, 380, 310, 265, 234], tooltip: "234 documents currently in processing queue" },
-  { id: "failed-imports", label: "Failed Imports", value: "28", trend: -35, trendDirection: "down", icon: "AlertTriangle", color: "from-red-500 to-red-600", severity: "critical", sparklineData: [65, 55, 48, 38, 32, 28], tooltip: "28 documents failed processing, 12 require manual intervention" },
-  { id: "classified", label: "Contracts Classified", value: "18,432", trend: 9, trendDirection: "up", icon: "Tags", color: "from-gold-500 to-gold-600", severity: "info", sparklineData: [14000, 15200, 16200, 17200, 18000, 18432], tooltip: "18,432 contracts automatically classified by AI" },
-  { id: "metadata-score", label: "Metadata Completion", value: "88.6%", trend: 4.2, trendDirection: "up", icon: "CheckSquare", color: "from-emerald-500 to-emerald-600", severity: "success", sparklineData: [81.0, 83.2, 85.0, 86.5, 87.8, 88.6], tooltip: "88.6% average metadata field completion rate" },
+export const mockCompactKpis: CompactKpi[] = [
+  { id: "uploaded-today", label: "Uploaded Today", value: "24,892", trend: 12, trendDirection: "up", icon: "Upload", severity: "info", tooltip: "24,892 documents uploaded today" },
+  { id: "processing-queue", label: "Processing Queue", value: "234", trend: -22, trendDirection: "down", icon: "ListOrdered", severity: "info", tooltip: "234 documents in processing queue" },
+  { id: "failed-jobs", label: "Failed Jobs", value: "28", trend: -35, trendDirection: "down", icon: "AlertTriangle", severity: "critical", tooltip: "28 failed imports" },
+  { id: "avg-processing-time", label: "Avg Processing Time", value: "2.4m", trend: -8, trendDirection: "down", icon: "Clock", severity: "info", tooltip: "Average processing time per document" },
+  { id: "ocr-accuracy", label: "OCR Accuracy", value: "97.4%", trend: 1.8, trendDirection: "up", icon: "ScanEye", severity: "success", tooltip: "97.4% average OCR accuracy" },
+  { id: "high-risk-contracts", label: "High Risk Contracts", value: "12", trend: -5, trendDirection: "down", icon: "ShieldAlert", severity: "warning", tooltip: "12 contracts flagged as high risk" },
 ];
 
 // ── Import Sources ───────────────────────────────────────────────────────

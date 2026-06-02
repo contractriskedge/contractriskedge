@@ -9,8 +9,12 @@ import { RelationshipAiInsights } from "./AiInsights";
 import { NodeDetailDrawer } from "./NodeDetailDrawer";
 import { GraphFilterBar } from "./GraphFilterBar";
 import { RelationshipTimeline } from "./Timeline";
-import { mockGraphData, graphKpis, relationshipInsights, timelineEvents } from "./mockData";
 import type { GraphNodeData, GraphMode } from "./types";
+
+const mockGraphData = { nodes: [], edges: [] };
+const graphKpis = [];
+const relationshipInsights = [];
+const timelineEvents = [];
 
 export function RelationshipGraph() {
   const [selectedNode, setSelectedNode] = useState<GraphNodeData | null>(null);

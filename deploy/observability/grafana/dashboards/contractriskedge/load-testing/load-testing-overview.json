@@ -1,0 +1,149 @@
+{
+  "title": "ContractRiskEdge — Load Testing Overview",
+  "uid": "cre-load-testing-overview",
+  "version": 1,
+  "schemaVersion": 39,
+  "tags": ["contractriskedge", "load-testing"],
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "templating": {
+    "list": [
+      {
+        "name": "env",
+        "type": "constant",
+        "label": "Environment",
+        "query": "staging",
+        "current": { "text": "staging", "value": "staging" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "title": "Requests Per Second (Total)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{environment=~\"$env\"}[1m]))",
+          "legendFormat": "Total RPS"
+        },
+        {
+          "expr": "sum(rate(http_requests_total{environment=~\"$env\", status_code=~\"5..\"}[1m]))",
+          "legendFormat": "5xx Errors"
+        },
+        {
+          "expr": "sum(rate(http_requests_total{environment=~\"$env\", status_code=~\"4..\"}[1m]))",
+          "legendFormat": "4xx Errors"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "thresholds": { "steps": [{ "color": "green" }, { "color": "red", "value": 100 }] }
+        }
+      }
+    },
+    {
+      "title": "P50 / P95 / P99 Latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{environment=~\"$env\"}[2m])) by (le))",
+          "legendFormat": "P50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{environment=~\"$env\"}[2m])) by (le))",
+          "legendFormat": "P95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{environment=~\"$env\"}[2m])) by (le))",
+          "legendFormat": "P99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "steps": [{ "color": "green" }, { "color": "orange", "value": 1 }, { "color": "red", "value": 5 }] }
+        }
+      }
+    },
+    {
+      "title": "CPU Usage by Service",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "avg(rate(container_cpu_usage_seconds_total{environment=~\"$env\"}[1m])) by (container_label_com_docker_compose_service)",
+          "legendFormat": "{{container_label_com_docker_compose_service}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        }
+      }
+    },
+    {
+      "title": "Memory Usage by Service",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "avg(container_memory_usage_bytes{environment=~\"$env\"}) by (container_label_com_docker_compose_service)",
+          "legendFormat": "{{container_label_com_docker_compose_service}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      }
+    },
+    {
+      "title": "Error Rate by Endpoint",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (endpoint) (rate(http_requests_total{environment=~\"$env\", status_code=~\"5..\"}[5m])) / sum by (endpoint) (rate(http_requests_total{environment=~\"$env\"}[5m])))",
+          "legendFormat": "{{endpoint}}"
+        }
+      ]
+    },
+    {
+      "title": "Active Users (Locust)",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 16 },
+      "targets": [
+        {
+          "expr": "sum(locust_users{environment=~\"$env\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "thresholds": { "steps": [{ "color": "green" }, { "color": "yellow", "value": 100 }, { "color": "red", "value": 200 }] }
+        }
+      }
+    },
+    {
+      "title": "Total Failures (Locust)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 16 },
+      "targets": [
+        {
+          "expr": "sum(locust_failures_total{environment=~\"$env\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "green" }, { "color": "red", "value": 1 }] }
+        }
+      }
+    }
+  ]
+}

@@ -9,18 +9,31 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from app.config import settings
 from app.domains.ai.models import ExecutionStatus
 from app.domains.ai.schemas import (
-    AnalysisRequest, AnalysisResult, AnalysisStatusResponse,
-    RiskFinding, RedlineSuggestion, ClauseClassification, Obligation,
+    AIExecutionContext,
+    AIGuardrailViolation,
+    AnalysisRequest,
+    AnalysisResult,
+    AnalysisStatusResponse,
+    RiskFinding,
+    RedlineSuggestion,
+    ClauseClassification,
+    Obligation,
     RiskTraceability,
 )
+from app.domains.ai.guardrails import GuardrailEngine
 from app.domains.ai.llm import (
     OpenAIProvider, LLMRequest, LLMResponse,
     StructuredOutputParser, llm_registry,
+)
+from app.domains.ai.orchestration import (
+    AIExecutionOrchestrator,
+    AIExecutionPlanner,
+    AIRequestEnvelope,
 )
 from app.domains.ai.prompts import prompt_registry
 from app.domains.ai.repository import AIRepository
@@ -246,30 +259,82 @@ class AIService:
                         ),
                     )
 
-        # 1. Initialize provider
         provider = OpenAIProvider(api_key=settings.openai_api_key)
         llm_registry.register(provider)
 
-        # 2. Create execution run
+        # 2. Retrieve chunks and render prompts for execution planning
+        chunks = await self.vector_repo.get_chunks_by_upload(upload_id, self.tenant_id)
+        if not chunks:
+            raise ValueError(f"No chunks found for upload {upload_id}")
+
+        prompt_text, analysis_request, prompt_version = await self._build_risk_analysis_request(chunks, provider)
+
+        planner = AIExecutionPlanner(tenant_id=self.tenant_id)
+        execution_plan = planner.build(
+            operation_type="risk_review",
+            model=analysis_request.model or "gpt-4o",
+            provider_name=provider.provider_name,
+            preferred_fallbacks=getattr(settings, "ai_provider_fallback_order", [provider.provider_name]),
+            metadata={
+                "prompt_version": prompt_version,
+                "analysis_type": analysis_type,
+            },
+        )
+
+        envelope = AIRequestEnvelope(
+            tenant_id=self.tenant_id,
+            user_id=self.user.id if self.user else None,
+            contract_id=None,
+            upload_id=upload_id,
+            operation_type="risk_review",
+            execution_plan=execution_plan,
+            retrieval_context={"upload_id": upload_id},
+            audit_context={
+                "prompt_text": prompt_text,
+                "system_prompt": analysis_request.system_prompt,
+                "analysis_type": analysis_type,
+                "user_role": getattr(self.user, "role", None),
+            },
+        )
+
+        orchestrator = AIExecutionOrchestrator(self.ai_repo.session, self.tenant_id, self.user.id if self.user else None)
+        outcome = await orchestrator.execute(envelope)
+        risk_result = outcome.response
+
+        execution_context = self._build_execution_context(
+            provider=provider,
+            model=analysis_request.model or "gpt-4o",
+            prompt_version=prompt_version,
+            analysis_prompt_version=prompt_version,
+            guardrail_violations=outcome.guardrail_violations or [],
+            analysis_type=analysis_type,
+        )
+
+        # 3. Create execution run with execution metadata
         run = await self.ai_repo.create_run(
-            upload_id=upload_id, tenant_id=self.tenant_id,
-            analysis_type=analysis_type, model="gpt-4o",
-            provider="openai", user_id=self.user.id if self.user else None,
+            upload_id=upload_id,
+            tenant_id=self.tenant_id,
+            analysis_type=analysis_type,
+            model=analysis_request.model or "gpt-4o",
+            provider=provider.provider_name,
+            user_id=self.user.id if self.user else None,
+            prompt_version=prompt_version,
+            analysis_prompt_version=prompt_version,
+            execution_context=execution_context,
         )
 
         try:
-            # 3. Retrieve chunks
-            chunks = await self.vector_repo.get_chunks_by_upload(upload_id, self.tenant_id)
-            if not chunks:
-                raise ValueError(f"No chunks found for upload {upload_id}")
-
             total_tokens = 0
             total_cost = 0.0
 
             # 4. Execute risk analysis
-            risk_result = await self._execute_risk_analysis(chunks, provider)
+            risk_result = await provider.complete(analysis_request)
             total_tokens += risk_result.total_tokens if hasattr(risk_result, 'total_tokens') else 0
             total_cost += risk_result.cost_usd if hasattr(risk_result, 'cost_usd') else 0.0
+
+            # Evaluate guardrails on prompt and response
+            guardrail_engine = GuardrailEngine()
+            pre_violations = guardrail_engine.evaluate_prompt(prompt_text)
 
             # Parse and validate structured output
             parsed = StructuredOutputParser.parse_json(risk_result.content)
@@ -282,52 +347,77 @@ class AIService:
                     extra={"upload_id": upload_id, "run_id": str(run.run_id)},
                 )
 
+            post_violations = guardrail_engine.evaluate_response(prompt_text, risk_result.content)
+            guardrail_violations = pre_violations + post_violations
+
             analysis_result = self._build_analysis_result(
                 validated.model_dump() if validated else parsed,
                 risk_result.model,
+                guardrail_violations=guardrail_violations,
+                execution_context=execution_context,
             )
 
             # 5. Store findings
             if analysis_result.findings:
-                await self.ai_repo.store_findings(
-                    run_id=run.run_id,
-                    upload_id=upload_id,
-                    tenant_id=self.tenant_id,
-                    findings=analysis_result.findings,
-                    chunks=chunks,
-                )
-
-            # 6. Generate redlines if full analysis
-            if analysis_type == "full" or analysis_type == "redline_only":
-                redline_results = await self._generate_redlines(chunks, analysis_result.findings, provider)
-                analysis_result.redlines = redline_results
-                if analysis_result.redlines:
-                    await self.ai_repo.store_redlines(
+                try:
+                    await self.ai_repo.store_findings(
                         run_id=run.run_id,
                         upload_id=upload_id,
                         tenant_id=self.tenant_id,
-                        redlines=analysis_result.redlines,
+                        findings=analysis_result.findings,
                         chunks=chunks,
                     )
+                except Exception as store_err:
+                    logger.error("Failed to store findings for upload %s: %s", upload_id, store_err)
+                    raise
+
+            # 6. Generate redlines if full analysis
+            if analysis_type == "full" or analysis_type == "redline_only":
+                try:
+                    redline_results = await self._generate_redlines(chunks, analysis_result.findings, provider)
+                    analysis_result.redlines = redline_results
+                except Exception as redline_err:
+                    logger.error("Failed to generate redlines for upload %s: %s", upload_id, redline_err)
+                    analysis_result.redlines = []
+                if analysis_result.redlines:
+                    try:
+                        await self.ai_repo.store_redlines(
+                            run_id=run.run_id,
+                            upload_id=upload_id,
+                            tenant_id=self.tenant_id,
+                            redlines=analysis_result.redlines,
+                            chunks=chunks,
+                        )
+                    except Exception as store_err:
+                        logger.error("Failed to store redlines for upload %s: %s", upload_id, store_err)
+                        analysis_result.redlines = []
 
             # 7. Complete run
             latency = risk_result.latency_ms if hasattr(risk_result, 'latency_ms') else 0
-            await self.ai_repo.complete_run(
-                run_id=run.run_id, result=analysis_result,
-                tokens={"prompt": risk_result.prompt_tokens if hasattr(risk_result, 'prompt_tokens') else 0,
-                        "completion": risk_result.completion_tokens if hasattr(risk_result, 'completion_tokens') else 0,
-                        "total": total_tokens},
-                cost_usd=total_cost, latency_ms=latency,
-            )
+            try:
+                await self.ai_repo.complete_run(
+                    run_id=run.run_id, result=analysis_result,
+                    tokens={"prompt": risk_result.prompt_tokens if hasattr(risk_result, 'prompt_tokens') else 0,
+                            "completion": risk_result.completion_tokens if hasattr(risk_result, 'completion_tokens') else 0,
+                            "total": total_tokens},
+                    cost_usd=total_cost, latency_ms=latency,
+                )
+            except Exception as complete_err:
+                logger.error("Failed to complete run for upload %s: %s", upload_id, complete_err)
+                raise
 
             # 7. Populate review BEFORE marking upload review-ready (workflow integrity)
-            review = await self._populate_review_from_ai(
-                upload_id=upload_id,
-                run_id=str(run.run_id),
-                risk_score=analysis_result.risk_score,
-                findings_count=len(analysis_result.findings),
-                redlines_count=len(analysis_result.redlines),
-            )
+            try:
+                review = await self._populate_review_from_ai(
+                    upload_id=upload_id,
+                    run_id=str(run.run_id),
+                    risk_score=analysis_result.risk_score,
+                    findings_count=len(analysis_result.findings),
+                    redlines_count=len(analysis_result.redlines),
+                )
+            except Exception as pop_err:
+                logger.error("Failed to populate review for upload %s: %s", upload_id, pop_err)
+                raise
 
             # 8. Mark ingestion review-ready only after review record exists
             await self._mark_review_ready_if_needed(upload_id)
@@ -343,6 +433,7 @@ class AIService:
             return analysis_result
 
         except Exception as exc:
+            logger.error("AI analysis failed for upload %s: %s", upload_id, exc, exc_info=True)
             try:
                 await self.ai_repo.session.rollback()
                 await self.ai_repo.fail_run(run.run_id, str(exc))
@@ -350,9 +441,8 @@ class AIService:
             except Exception as rollback_exc:
                 logger.error(
                     "AI analysis rollback also failed for upload %s: %s",
-                    upload_id, rollback_exc,
+                    upload_id, rollback_exc, exc_info=True,
                 )
-            logger.error("AI analysis failed for upload %s: %s", upload_id, exc)
             raise
 
     async def _mark_review_ready_if_needed(self, upload_id: str) -> None:
@@ -479,6 +569,7 @@ class AIService:
         # Import AI findings → review_findings
         stmt_findings = select(AIFinding).where(AIFinding.run_id == run_id)
         ai_findings = (await self.ai_repo.session.execute(stmt_findings)).scalars().all()
+        ai_finding_to_review: dict[str, str] = {}
         for af in ai_findings:
             rf = ReviewFinding(
                 review_id=review.review_id,
@@ -496,18 +587,31 @@ class AIService:
                 page_numbers=af.page_numbers,
             )
             self.ai_repo.session.add(rf)
+            await self.ai_repo.session.flush()
+            ai_finding_to_review[str(af.finding_id)] = str(rf.finding_id)
 
         # Import AI redlines → review_redlines
         stmt_redlines = select(AIRedline).where(AIRedline.run_id == run_id)
         ai_redlines = (await self.ai_repo.session.execute(stmt_redlines)).scalars().all()
 
-        # Build a lookup from clause_type to finding IDs for linking redlines to findings
-        finding_by_clause: dict[str, list[str]] = {}
-        for af in ai_findings:
-            ct = af.clause_type or "other"
-            if ct not in finding_by_clause:
-                finding_by_clause[ct] = []
-            finding_by_clause[ct].append(str(af.finding_id))
+        def _link_redline_to_review_finding(ar: AIRedline) -> Optional[str]:
+            """Map AI redline → review_finding via chunk overlap, else unique clause_type."""
+            ar_chunks = {str(c) for c in (ar.chunk_ids or [])}
+            best_af: Optional[AIFinding] = None
+            best_overlap = 0
+            for af in ai_findings:
+                overlap = len(ar_chunks & {str(c) for c in (af.chunk_ids or [])})
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_af = af
+            if best_af and best_overlap > 0:
+                return ai_finding_to_review.get(str(best_af.finding_id))
+
+            ct = ar.clause_type or "other"
+            same_type = [af for af in ai_findings if (af.clause_type or "other") == ct]
+            if len(same_type) == 1:
+                return ai_finding_to_review.get(str(same_type[0].finding_id))
+            return None
 
         for ar in ai_redlines:
             # Carry traceability metadata from the AI redline JSONB, if present
@@ -515,11 +619,7 @@ class AIService:
             raw_meta = getattr(ar, "ai_metadata", None)
             ai_meta = raw_meta if isinstance(raw_meta, dict) else {}
 
-            # Link redline to the first matching finding by clause_type
-            linked_finding_id = None
-            ct = ar.clause_type or "other"
-            if ct in finding_by_clause and finding_by_clause[ct]:
-                linked_finding_id = finding_by_clause[ct][0]
+            linked_finding_id = _link_redline_to_review_finding(ar)
 
             rr = ReviewRedline(
                 review_id=review.review_id,
@@ -593,6 +693,65 @@ class AIService:
 
         return await provider.complete(request)
 
+    async def _build_risk_analysis_request(
+        self,
+        chunks: list,
+        provider: OpenAIProvider,
+    ) -> tuple[str, LLMRequest, int]:
+        """Render the risk analysis prompt and request for execution."""
+        chunk_data = [
+            {"text": c.text[:2000], "page_numbers": c.page_numbers or [1]}
+            for c in chunks[:50]
+        ]
+
+        prompt = prompt_registry.render(
+            "risk_analysis", version="1.0.0",
+            chunks=chunk_data,
+        )
+
+        template = prompt_registry.get("risk_analysis")
+        request = LLMRequest(
+            prompt=prompt,
+            system_prompt=template.system_prompt if template else None,
+            model=template.default_model if template else "gpt-4o",
+            temperature=template.default_temperature if template else 0.1,
+            max_tokens=template.default_max_tokens if template else 4096,
+            response_format={"type": "json_object"},
+        )
+
+        prompt_version = int(getattr(template, "version", "1").split(".")[0]) if template else 1
+        return prompt, request, prompt_version
+
+    def _build_execution_context(
+        self,
+        provider: OpenAIProvider,
+        model: str,
+        prompt_version: int,
+        analysis_prompt_version: int,
+        guardrail_violations: list[Any],
+        analysis_type: str,
+    ) -> dict[str, Any]:
+        """Build execution metadata for traceability and replay."""
+        rule_ids = []
+        for violation in guardrail_violations:
+            if hasattr(violation, "rule_id"):
+                rule_ids.append(getattr(violation, "rule_id"))
+            elif isinstance(violation, dict):
+                rule_ids.append(violation.get("rule_id"))
+
+        return {
+            "provider": provider.provider_name,
+            "model": model,
+            "prompt_version": prompt_version,
+            "analysis_prompt_version": analysis_prompt_version,
+            "guardrail_rule_ids": [rid for rid in rule_ids if rid],
+            "source": "ai_analysis_service",
+            "context": {
+                "user_id": self.user.id if self.user else None,
+                "analysis_type": analysis_type,
+            },
+        }
+
     async def _generate_redlines(
         self, chunks: list, findings: list[RiskFinding], provider: OpenAIProvider,
     ) -> list[RedlineSuggestion]:
@@ -641,18 +800,18 @@ class AIService:
 
             # Use v4 prompt — playbook-aware, forbids section numbering, returns risk traceability
             prompt = prompt_registry.render(
-                "redline_generation", version=4,
+                "redline_generation", version="4.0.0",
                 clause_type=finding.clause_type,
                 original_text=relevant_text[:2000],
                 context=f"Risk: {finding.title}\nDescription: {finding.description}",
                 playbook_context=playbook_context,
             )
 
-            template = prompt_registry.get("redline_generation", version=4)
+            template = prompt_registry.get("redline_generation", version="4.0.0")
             request = LLMRequest(
                 prompt=prompt,
                 system_prompt=template.system_prompt if template else None,
-                model=template.model if template else "gpt-4o",
+                model=template.default_model if template else "gpt-4o",
                 temperature=0.2,
                 response_format={"type": "json_object"},
             )
@@ -755,10 +914,29 @@ class AIService:
         )
         return redlines
 
-    def _build_analysis_result(self, parsed: Optional[dict], model: str) -> AnalysisResult:
+    def _build_analysis_result(
+        self,
+        parsed: Optional[dict],
+        model: str,
+        guardrail_violations: list[AIGuardrailViolation] | None = None,
+        execution_context: Optional[dict[str, Any]] = None,
+    ) -> AnalysisResult:
         """Build structured AnalysisResult from parsed LLM output."""
         if not parsed:
-            return AnalysisResult(model_used=model, confidence=0.0)
+            return AnalysisResult(
+                model_used=model,
+                confidence=0.0,
+                guardrail_violations=guardrail_violations or [],
+                execution_context=AIExecutionContext(
+                    provider=execution_context.get("provider", "") if execution_context else "",
+                    model=execution_context.get("model", model) if execution_context else model,
+                    prompt_version=execution_context.get("prompt_version") if execution_context else None,
+                    analysis_prompt_version=execution_context.get("analysis_prompt_version") if execution_context else None,
+                    guardrail_rule_ids=execution_context.get("guardrail_rule_ids", []) if execution_context else [],
+                    source=execution_context.get("source", "ai_analysis_service") if execution_context else "ai_analysis_service",
+                    context=execution_context.get("context", {}) if execution_context else {},
+                ) if execution_context else None,
+            )
 
         findings = []
         for f in parsed.get("findings", []):
@@ -797,6 +975,16 @@ class AIService:
             findings=findings,
             model_used=model,
             confidence=0.9 if findings else 0.0,
+            guardrail_violations=guardrail_violations or [],
+            execution_context=AIExecutionContext(
+                provider=execution_context.get("provider", ""),
+                model=execution_context.get("model", model),
+                prompt_version=execution_context.get("prompt_version"),
+                analysis_prompt_version=execution_context.get("analysis_prompt_version"),
+                guardrail_rule_ids=execution_context.get("guardrail_rule_ids", []),
+                source=execution_context.get("source", "ai_analysis_service"),
+                context=execution_context.get("context", {}),
+            ) if execution_context else None,
         )
 
     async def get_status(self, run_id: str) -> Optional[AIExecutionRun]:

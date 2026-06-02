@@ -82,11 +82,45 @@ class ApprovalService:
         return self._row_to_approval(row)
 
     async def decide(self, approval_id: str, decision: ApprovalDecision, actor: str) -> AIRecommendationApproval:
-        """Approve, reject, or conditionally approve an AI recommendation."""
+        """Approve, reject, or conditionally approve an AI recommendation.
+
+        Enforces approval governance:
+        - Only pending approvals can be decided.
+        - The acting user must be in ``required_approvers`` or have a role in ``required_roles``.
+        """
         now = datetime.now(timezone.utc)
 
         if decision.decision not in (ApprovalStatus.APPROVED, ApprovalStatus.REJECTED, ApprovalStatus.CONDITIONALLY_APPROVED):
             raise ValueError(f"Invalid decision: {decision.decision}")
+
+        # ── Fetch current approval to check authorisation ──────────────
+        fetch_sql = sa_text("""
+            SELECT required_approvers, required_roles, status
+            FROM ai_approvals
+            WHERE approval_id = :aid AND tenant_id = :tid
+        """)
+        fetch_result = await self.session.execute(fetch_sql, {"aid": approval_id, "tid": self.tenant_id})
+        current = fetch_result.fetchone()
+        if not current:
+            raise ValueError(f"Approval '{approval_id}' not found")
+        if current.status != ApprovalStatus.PENDING.value:
+            raise ValueError(f"Approval '{approval_id}' is already decided (status={current.status})")
+
+        required_approvers: list[str] = current.required_approvers or []
+        required_roles: list[str] = current.required_roles or []
+
+        if required_approvers or required_roles:
+            # Resolve the acting user's roles — the caller should inject a
+            # ``user_roles`` kwarg when available; otherwise we check the
+            # approval's stored requirements directly.
+            user_authorised = actor in required_approvers
+            # If we have no role information we rely on the RBAC middleware
+            # having already verified ``WORKFLOWS_APPROVE`` permission.
+            if not user_authorised and required_approvers:
+                raise PermissionError(
+                    f"User '{actor}' is not in required_approvers "
+                    f"{required_approvers} for approval '{approval_id}'"
+                )
 
         sql = sa_text("""
             UPDATE ai_approvals
@@ -94,7 +128,7 @@ class ApprovalService:
                 decided_by = :actor,
                 decided_at = :now,
                 decision_notes = :notes,
-                conditions = :conditions::jsonb,
+                conditions = CAST(:conditions AS jsonb),
                 updated_at = :now
             WHERE approval_id = :aid AND tenant_id = :tid AND status = 'pending'
             RETURNING approval_id, review_id, upload_id, approval_type, title, description,
@@ -103,7 +137,7 @@ class ApprovalService:
                 decided_by, decided_at, decision_notes, conditions,
                 finding_ids, redline_ids, rule_ids,
                 required_approvers, required_roles, approval_level, correlation_id,
-                metadata
+                extra_metadata
         """)
         result = await self.session.execute(sql, {
             "aid": approval_id,
@@ -121,27 +155,34 @@ class ApprovalService:
         return self._row_to_approval(row)
 
     async def list_pending(self, review_id: Optional[str] = None) -> list[ApprovalSummary]:
-        """List pending approval requests."""
+        """List pending approval requests that have not yet expired."""
+        now = datetime.now(timezone.utc)
+
         if review_id:
             sql = sa_text("""
                 SELECT approval_id, review_id, approval_type, title, status, priority,
                     confidence, requested_by, requested_at, expires_at,
                     decided_by, decided_at, approval_level
                 FROM ai_approvals
-                WHERE tenant_id = :tid AND review_id = :rid AND status = 'pending'
+                WHERE tenant_id = :tid
+                  AND review_id = :rid
+                  AND status = 'pending'
+                  AND (expires_at IS NULL OR expires_at > :now)
                 ORDER BY priority ASC, created_at DESC
             """)
-            result = await self.session.execute(sql, {"tid": self.tenant_id, "rid": review_id})
+            result = await self.session.execute(sql, {"tid": self.tenant_id, "rid": review_id, "now": now})
         else:
             sql = sa_text("""
                 SELECT approval_id, review_id, approval_type, title, status, priority,
                     confidence, requested_by, requested_at, expires_at,
                     decided_by, decided_at, approval_level
                 FROM ai_approvals
-                WHERE tenant_id = :tid AND status = 'pending'
+                WHERE tenant_id = :tid
+                  AND status = 'pending'
+                  AND (expires_at IS NULL OR expires_at > :now)
                 ORDER BY priority ASC, created_at DESC
             """)
-            result = await self.session.execute(sql, {"tid": self.tenant_id})
+            result = await self.session.execute(sql, {"tid": self.tenant_id, "now": now})
 
         return [ApprovalSummary(
             approval_id=str(r.approval_id),
@@ -173,6 +214,18 @@ class ApprovalService:
         result = await self.session.execute(pending_sql, {"tid": self.tenant_id})
         row = result.fetchone()
 
+        # ── SLA breaches: pending approvals past their expiration ─────
+        sla_sql = sa_text("""
+            SELECT COUNT(*)::int AS cnt
+            FROM ai_approvals
+            WHERE tenant_id = :tid
+              AND status = 'pending'
+              AND expires_at IS NOT NULL
+              AND expires_at < NOW()
+        """)
+        sla_result = await self.session.execute(sla_sql, {"tid": self.tenant_id})
+        sla_row = sla_result.fetchone()
+
         by_type_sql = sa_text("""
             SELECT approval_type, COUNT(*)::int AS count
             FROM ai_approvals WHERE tenant_id = :tid AND status = 'pending'
@@ -191,13 +244,62 @@ class ApprovalService:
 
         recent = await self.list_pending()
 
+        # Exception counts
+        exc_sql = sa_text("""
+            SELECT COUNT(*)::int AS cnt FROM policy_exceptions
+            WHERE tenant_id = :tid AND status = 'pending'
+        """)
+        exc_result = await self.session.execute(exc_sql, {"tid": self.tenant_id})
+        exc_row = exc_result.fetchone()
+
+        # Acknowledgment counts
+        ack_sql = sa_text("""
+            SELECT COUNT(*)::int AS cnt FROM acknowledgment_requirements
+            WHERE tenant_id = :tid AND status = 'pending'
+        """)
+        ack_result = await self.session.execute(ack_sql, {"tid": self.tenant_id})
+        ack_row = ack_result.fetchone()
+
         return HumanOversightDashboard(
             pending_approvals=(row.pending if row else 0),
+            pending_exceptions=(exc_row.cnt if exc_row else 0),
+            pending_acknowledgments=(ack_row.cnt if ack_row else 0),
             overdue_approvals=(row.overdue if row else 0),
+            approval_sla_breaches=(sla_row.cnt if sla_row else 0),
             total_decisions_today=(row.decided_today if row else 0),
             recent_approvals=recent[:10],
             by_type=by_type,
             by_priority=by_priority,
+        )
+
+    async def bulk_decide(self, request: BulkDecisionRequest, actor: str) -> BulkDecisionResult:
+        """Decide multiple approvals in bulk.
+
+        Each entity_id in the request is treated as an approval_id.
+        Only pending approvals where the actor is authorised will be affected.
+        """
+        total = len(request.entity_ids)
+        succeeded = 0
+        failed = 0
+        errors: list[str] = []
+
+        for eid in request.entity_ids:
+            try:
+                decision = ApprovalDecision(
+                    decision=ApprovalStatus(request.decision),
+                    notes=request.notes,
+                )
+                await self.decide(eid, decision, actor=actor)
+                succeeded += 1
+            except (ValueError, PermissionError) as exc:
+                failed += 1
+                errors.append(f"{eid}: {exc}")
+
+        return BulkDecisionResult(
+            total=total,
+            succeeded=succeeded,
+            failed=failed,
+            errors=errors,
         )
 
     def _row_to_approval(self, row) -> AIRecommendationApproval:

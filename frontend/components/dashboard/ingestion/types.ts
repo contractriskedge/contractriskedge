@@ -1,20 +1,23 @@
 // ── Enterprise Document Ingestion & Import Center Types ──────────────────
 
 export type RiskLevel = "critical" | "high" | "medium" | "low" | "info";
-
 export type IngestionSource = "local" | "sharepoint" | "googledrive" | "box" | "onedrive" | "dropbox" | "email" | "sftp" | "api" | "slack";
 export type ProcessingStage = "uploading" | "queued" | "ocr" | "classifying" | "extracting" | "validating" | "relationships" | "review" | "completed" | "failed";
 export type ImportJobStatus = "running" | "completed" | "failed" | "cancelled" | "pending" | "paused";
 export type DocumentType = "contract" | "amendment" | "sla" | "dpa" | "nda" | "license" | "addendum" | "correspondence" | "invoice" | "other";
-export type ReviewStatus = "pending" | "approved" | "rejected" | "needs_review";
 
-// ── Ingestion KPI ────────────────────────────────────────────────────────
+// ── Compact KPI ──────────────────────────────────────────────────────────
 
-export interface IngestionKpi {
-  id: string; label: string; value: string; trend: number;
+export interface CompactKpi {
+  id: string;
+  label: string;
+  value: string;
+  subtitle?: string;
+  trend: number;
   trendDirection: "up" | "down" | "neutral";
-  icon: string; color: string; severity: "critical" | "warning" | "success" | "info";
-  sparklineData: number[]; tooltip: string;
+  icon: string;
+  severity: "critical" | "warning" | "success" | "info";
+  tooltip: string;
 }
 
 // ── Import Source ────────────────────────────────────────────────────────
@@ -47,7 +50,6 @@ export interface PipelineStage {
 
 export interface ImportJob {
   id: string;
-  /** Set when this job is backed by POST /api/v1/uploads (real ingestion pipeline). */
   backendUploadId?: string;
   fileName: string;
   fileSize: number;
@@ -117,7 +119,7 @@ export interface AiExtractionInsight {
   suggestedAction?: string;
 }
 
-// ── Duplicate Detection ──────────────────────────────────────────────────
+// ── Duplicate Group ──────────────────────────────────────────────────────
 
 export interface DuplicateGroup {
   id: string;
@@ -192,4 +194,27 @@ export interface ImportTemplate {
   createdBy: string;
   usageCount: number;
   lastUsed: string;
+}
+
+// ── Saved Filter ─────────────────────────────────────────────────────────
+
+export interface SavedFilter {
+  id: string;
+  name: string;
+  query: string;
+  status?: string;
+  source?: string;
+  priority?: string;
+  dateRange?: [string, string];
+}
+
+// ── Batch Action ─────────────────────────────────────────────────────────
+
+export type BatchAction = "retry" | "cancel" | "reprioritize" | "assign_queue" | "export" | "delete";
+
+// ── Table Sort ───────────────────────────────────────────────────────────
+
+export interface TableSort {
+  column: string;
+  direction: "asc" | "desc";
 }

@@ -25,17 +25,8 @@ interface AnomalyEntry {
 }
 
 interface AnomalyFeedWidgetProps {
-  errors?: any | null;
-  health?: any | null;
+  anomalies?: any | null;
 }
-
-const MOCK_ANOMALIES: AnomalyEntry[] = [
-  { id: "a1", type: "stuck_workflow", severity: "critical", timestamp: "2 min ago", title: "Workflow STK-442 Stuck", description: "AI analysis stage stalled for 45 min", acknowledged: false },
-  { id: "a2", type: "sla_breach", severity: "high", timestamp: "15 min ago", title: "SLA Breach Risk: Procurement", description: "3 reviews approaching deadline", acknowledged: false },
-  { id: "a3", type: "error_spike", severity: "medium", timestamp: "1h ago", title: "Error Rate Spike", description: "12 errors in ingestion pipeline (15 min window)", acknowledged: false },
-  { id: "a4", type: "unusual_pattern", severity: "low", timestamp: "2h ago", title: "Unusual Upload Pattern", description: "37 uploads from single IP in 5 min", acknowledged: true },
-  { id: "a5", type: "stuck_workflow", severity: "medium", timestamp: "3h ago", title: "Workflow REV-128 Stuck", description: "Awaiting human approval for 8h", acknowledged: true },
-];
 
 const SEVERITY_CONFIG = {
   critical: { bg: "bg-red-50 dark:bg-red-900/20", dot: "bg-red-500", text: "text-red-700 dark:text-red-300", label: "Critical" },
@@ -51,17 +42,33 @@ const TYPE_ICONS: Record<string, string> = {
   unusual_pattern: "🔍",
 };
 
-export function AnomalyFeedWidget({ errors, health }: AnomalyFeedWidgetProps) {
-  const [anomalies, setAnomalies] = useState<AnomalyEntry[]>(MOCK_ANOMALIES);
+export function AnomalyFeedWidget({ anomalies: anomaliesData }: AnomalyFeedWidgetProps) {
   const [filter, setFilter] = useState<string>("all");
 
+  // Use anomalies from props when available, otherwise empty
+  const anomalies: AnomalyEntry[] = React.useMemo(() => {
+    if (!anomaliesData || !Array.isArray(anomaliesData)) return [];
+    return anomaliesData.map((a: any, idx: number) => ({
+      id: a.id ?? `anomaly-${idx}`,
+      type: a.type ?? "unusual_pattern",
+      severity: a.severity ?? "low",
+      timestamp: a.timestamp ?? "",
+      title: a.title ?? "Anomaly",
+      description: a.description ?? "",
+      acknowledged: a.acknowledged ?? false,
+    }));
+  }, [anomaliesData]);
+
+  const [localAnomalies, setLocalAnomalies] = useState<AnomalyEntry[]>([]);
+  const displayAnomalies = anomalies.length > 0 ? anomalies : localAnomalies;
+
   const acknowledge = (id: string) => {
-    setAnomalies((prev) =>
+    setLocalAnomalies((prev) =>
       prev.map((a) => (a.id === id ? { ...a, acknowledged: true } : a))
     );
   };
 
-  const filtered = anomalies.filter((a) => {
+  const filtered = displayAnomalies.filter((a) => {
     if (filter === "unacknowledged") return !a.acknowledged;
     if (filter === "acknowledged") return a.acknowledged;
     return true;

@@ -29,30 +29,19 @@ interface ReviewerLoadData {
 }
 
 interface ReviewerLoadWidgetProps {
-  metrics?: any | null;
+  reviewerData?: import("@/src/lib/executive/executiveTypes").ReviewerEfficiency | null;
 }
 
-const DEFAULT_DATA: ReviewerLoadData = {
-  reviewers: [
-    { name: "Sarah Chen", assigned: 5, inReview: 3, pendingApproval: 2, completed: 12, utilization: 0.85 },
-    { name: "Mike Johnson", assigned: 3, inReview: 4, pendingApproval: 1, completed: 9, utilization: 0.72 },
-    { name: "Emily Rodriguez", assigned: 2, inReview: 2, pendingApproval: 3, completed: 15, utilization: 0.65 },
-    { name: "James Wilson", assigned: 6, inReview: 1, pendingApproval: 0, completed: 7, utilization: 0.45 },
-    { name: "Lisa Park", assigned: 4, inReview: 3, pendingApproval: 2, completed: 11, utilization: 0.78 },
-  ],
-  pendingApprovalsTotal: 8,
-  escalationRate: 0.12,
-  escalationTrend: [0.08, 0.10, 0.15, 0.11, 0.09, 0.13, 0.12],
-  bottlenecks: [
-    { stage: "Approval", severity: "high", description: "3 reviews waiting >48h for approval" },
-    { stage: "AI Analysis", severity: "medium", description: "Queue depth increasing (8 items)" },
-  ],
-};
+export function ReviewerLoadWidget({ reviewerData }: ReviewerLoadWidgetProps) {
+  if (!reviewerData) {
+    return (
+      <div className="flex items-center justify-center h-32 text-xs text-gray-400">
+        No reviewer data available
+      </div>
+    );
+  }
 
-export function ReviewerLoadWidget({ metrics }: ReviewerLoadWidgetProps) {
-  const data = DEFAULT_DATA;
-
-  const overloadedReviewers = data.reviewers.filter((r) => r.utilization >= 0.8);
+  const overloadedReviewers = reviewerData.reviewer_details.filter((r) => r.is_overloaded);
 
   return (
     <div className="space-y-3">
@@ -66,69 +55,69 @@ export function ReviewerLoadWidget({ metrics }: ReviewerLoadWidgetProps) {
         </div>
       )}
 
-      {/* ── Summary KPIs ──────────────────────────────────────── */}
+      {/* ── Summary KPIs ── */}
       <div className="grid grid-cols-3 gap-2">
         <div className="p-2 rounded-lg bg-gray-50 dark:bg-navy-700 text-center">
-          <span className="text-lg font-bold text-navy-900 dark:text-white">{data.reviewers.length}</span>
+          <span className="text-lg font-bold text-navy-900 dark:text-white">{reviewerData.reviewer_details.length}</span>
           <p className="text-[10px] text-gray-500">Active Reviewers</p>
         </div>
         <div className="p-2 rounded-lg bg-gray-50 dark:bg-navy-700 text-center">
-          <span className="text-lg font-bold text-amber-600 dark:text-amber-400">{data.pendingApprovalsTotal}</span>
-          <p className="text-[10px] text-gray-500">Pending Approvals</p>
+          <span className="text-lg font-bold text-amber-600 dark:text-amber-400">{reviewerData.reviewer_backlog}</span>
+          <p className="text-[10px] text-gray-500">Backlog</p>
         </div>
         <div className="p-2 rounded-lg bg-gray-50 dark:bg-navy-700 text-center">
-          <span className="text-lg font-bold text-navy-900 dark:text-white">{Math.round(data.escalationRate * 100)}%</span>
-          <p className="text-[10px] text-gray-500">Escalation Rate</p>
+          <span className="text-lg font-bold text-navy-900 dark:text-white">
+            {reviewerData.avg_review_completion_hours.toFixed(1)}h
+          </span>
+          <p className="text-[10px] text-gray-500">Avg Completion</p>
         </div>
       </div>
 
-      {/* ── Reviewer Workload Table ───────────────────────────── */}
+      {/* ── Reviewer Workload Table ── */}
       <div>
         <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase mb-1 block">
           Reviewer Workload
         </span>
         <div className="space-y-1">
-          {data.reviewers.map((reviewer) => (
-            <div key={reviewer.name} className="flex items-center gap-2">
-              <span className="text-xs text-gray-600 dark:text-gray-400 w-24 truncate" title={reviewer.name}>
-                {reviewer.name}
-              </span>
-              <div className="flex-1 h-2 bg-gray-100 dark:bg-navy-700 rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{
-                    width: `${reviewer.utilization * 100}%`,
-                    backgroundColor: reviewer.utilization >= 0.8 ? "#EF4444" : reviewer.utilization >= 0.6 ? "#F59E0B" : "#10B981",
-                  }}
-                />
+          {reviewerData.reviewer_details.map((reviewer) => {
+            const active = reviewer.active_reviews + reviewer.completed_reviews;
+            const capacity = 20;
+            const utilization = Math.min(active / capacity, 1);
+            return (
+              <div key={reviewer.reviewer_id} className="flex items-center gap-2">
+                <span className="text-xs text-gray-600 dark:text-gray-400 w-24 truncate" title={reviewer.reviewer_name}>
+                  {reviewer.reviewer_name}
+                </span>
+                <div className="flex-1 h-2 bg-gray-100 dark:bg-navy-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${utilization * 100}%`,
+                      backgroundColor: utilization >= 0.8 ? "#EF4444" : utilization >= 0.6 ? "#F59E0B" : "#10B981",
+                    }}
+                  />
+                </div>
+                <span className={`text-xs font-medium w-8 text-right ${
+                  utilization >= 0.8 ? "text-red-600" : "text-navy-900 dark:text-white"
+                }`}>
+                  {Math.round(utilization * 100)}%
+                </span>
               </div>
-              <span className={`text-xs font-medium w-8 text-right ${
-                reviewer.utilization >= 0.8 ? "text-red-600" : "text-navy-900 dark:text-white"
-              }`}>
-                {Math.round(reviewer.utilization * 100)}%
-              </span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
-      {/* ── Bottlenecks ───────────────────────────────────────── */}
-      {data.bottlenecks.length > 0 && (
+      {/* ── Bottlenecks ── */}
+      {reviewerData.reviewer_details.filter((r) => r.is_overloaded).length > 0 && (
         <div>
           <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase mb-1 block">
-            Bottlenecks
+            Overloaded Reviewers
           </span>
           <div className="space-y-1">
-            {data.bottlenecks.map((b, i) => (
-              <div
-                key={i}
-                className={`px-2 py-1.5 rounded-lg text-xs ${
-                  b.severity === "high"
-                    ? "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300"
-                    : "bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300"
-                }`}
-              >
-                <span className="font-medium">{b.stage}:</span> {b.description}
+            {reviewerData.reviewer_details.filter((r) => r.is_overloaded).map((r) => (
+              <div key={r.reviewer_id} className="px-2 py-1.5 rounded-lg text-xs bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300">
+                <span className="font-medium">{r.reviewer_name}:</span> {r.active_reviews} active, {r.backlog_hours.toFixed(0)}h backlog
               </div>
             ))}
           </div>

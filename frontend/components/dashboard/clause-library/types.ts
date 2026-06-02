@@ -87,18 +87,26 @@ export interface BenchmarkData {
 }
 
 export const CLAUSE_CATEGORIES: ClauseCategory[] = [
-  { id: "indemnification", name: "Indemnification", count: 24, icon: "Shield" },
-  { id: "liability", name: "Liability & Caps", count: 18, icon: "AlertTriangle" },
-  { id: "termination", name: "Termination", count: 22, icon: "XCircle" },
-  { id: "confidentiality", name: "Confidentiality", count: 16, icon: "Lock" },
-  { id: "data_privacy", name: "Data Privacy", count: 20, icon: "Shield" },
-  { id: "compliance", name: "Compliance", count: 15, icon: "CheckCircle" },
-  { id: "payment", name: "Payment Terms", count: 14, icon: "DollarSign" },
-  { id: "ip", name: "Intellectual Property", count: 12, icon: "Lightbulb" },
-  { id: "force_majeure", name: "Force Majeure", count: 10, icon: "Cloud" },
-  { id: "insurance", name: "Insurance", count: 8, icon: "Shield" },
-  { id: "sla", name: "SLA", count: 11, icon: "Activity" },
-  { id: "governing_law", name: "Governing Law", count: 9, icon: "Scale" },
+  { id: "indemnification", name: "Indemnification", count: 0, icon: "Shield" },
+  { id: "limitation_of_liability", name: "Liability & Caps", count: 0, icon: "AlertTriangle" },
+  { id: "termination", name: "Termination", count: 0, icon: "XCircle" },
+  { id: "confidentiality", name: "Confidentiality", count: 0, icon: "Lock" },
+  { id: "data_privacy", name: "Data Privacy", count: 0, icon: "Shield" },
+  { id: "compliance", name: "Compliance", count: 0, icon: "CheckCircle" },
+  { id: "payment_terms", name: "Payment Terms", count: 0, icon: "DollarSign" },
+  { id: "intellectual_property", name: "Intellectual Property", count: 0, icon: "Lightbulb" },
+  { id: "force_majeure", name: "Force Majeure", count: 0, icon: "Cloud" },
+  { id: "insurance", name: "Insurance", count: 0, icon: "Shield" },
+  { id: "sla", name: "SLA", count: 0, icon: "Activity" },
+  { id: "governing_law", name: "Governing Law", count: 0, icon: "Scale" },
+  { id: "warranty", name: "Warranty", count: 0, icon: "CheckCircle" },
+  { id: "dispute_resolution", name: "Dispute Resolution", count: 0, icon: "Scale" },
+  { id: "audit_rights", name: "Audit Rights", count: 0, icon: "FileText" },
+  { id: "assignment", name: "Assignment", count: 0, icon: "FileText" },
+  { id: "non_compete", name: "Non-Compete", count: 0, icon: "Ban" },
+  { id: "non_solicit", name: "Non-Solicit", count: 0, icon: "Ban" },
+  { id: "escrow", name: "Escrow", count: 0, icon: "Shield" },
+  { id: "general", name: "General", count: 0, icon: "FileText" },
 ];
 
 export const RISK_BG = { critical: "bg-red-500", high: "bg-orange-500", medium: "bg-yellow-500", low: "bg-green-500", info: "bg-blue-500" };

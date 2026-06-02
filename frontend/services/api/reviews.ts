@@ -18,6 +18,8 @@ import api, {
   BulkActionResponse,
   DocumentVersionItem,
   RiskBreakdown,
+  MyWorkItem,
+  RecommendationItem,
 } from "./client";
 
 // ── DTOs ──────────────────────────────────────────────────────────
@@ -328,6 +330,62 @@ export const reviewService = {
   getDashboard: () =>
     api.get<DashboardResponse>("/reviews/dashboard"),
 
+  // ── Reviewer Ops ──
+
+  /** Get My Work — reviews assigned to current user */
+  getMyWork: () =>
+    api.get<MyWorkItem[]>("/reviews/my-work"),
+
+  /** Get Queue — operational review workbench with filters */
+  getQueue: (params?: {
+    status?: string;
+    assigned_to?: string;
+    risk_min?: number;
+    risk_max?: number;
+    age_min_hours?: number;
+    age_max_hours?: number;
+    escalated_only?: boolean;
+    page?: number;
+    page_size?: number;
+    sort_by?: string;
+    sort_order?: "asc" | "desc";
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.status) query.set("status", params.status);
+    if (params?.assigned_to) query.set("assigned_to", params.assigned_to);
+    if (params?.risk_min !== undefined) query.set("risk_min", String(params.risk_min));
+    if (params?.risk_max !== undefined) query.set("risk_max", String(params.risk_max));
+    if (params?.age_min_hours !== undefined) query.set("age_min_hours", String(params.age_min_hours));
+    if (params?.age_max_hours !== undefined) query.set("age_max_hours", String(params.age_max_hours));
+    if (params?.escalated_only) query.set("escalated_only", "true");
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.page_size) query.set("page_size", String(params.page_size));
+    if (params?.sort_by) query.set("sort_by", params.sort_by);
+    if (params?.sort_order) query.set("sort_order", params.sort_order);
+    const qs = query.toString();
+    return api.get<PaginatedResponse<ReviewDetail>>(
+      qs ? `/reviews/queue?${qs}` : "/reviews/queue",
+    );
+  },
+
+  /** Get AI Recommendations from review findings */
+  getRecommendations: (params?: {
+    severity?: string;
+    clause_type?: string;
+    min_confidence?: number;
+    limit?: number;
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.severity) query.set("severity", params.severity);
+    if (params?.clause_type) query.set("clause_type", params.clause_type);
+    if (params?.min_confidence !== undefined) query.set("min_confidence", String(params.min_confidence));
+    if (params?.limit) query.set("limit", String(params.limit));
+    const qs = query.toString();
+    return api.get<RecommendationItem[]>(
+      qs ? `/reviews/recommendations?${qs}` : "/reviews/recommendations",
+    );
+  },
+
   // ── Re-analysis ──
 
   /** Trigger re-analysis on an existing review */
@@ -428,36 +486,34 @@ export const reviewService = {
   // ── Exports ──
 
   /** Export negotiation package as ZIP download */
-  exportNegotiationPackage: async (reviewId: string) => {
-    const response = await fetch(`/api/v1/reviews/${reviewId}/export-negotiation-package`, {
-      headers: { "Accept": "application/zip" },
-    });
-    if (!response.ok) throw new Error("Negotiation package export failed");
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `negotiation_package_${reviewId.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.zip`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  },
+  exportNegotiationPackage: (reviewId: string) =>
+    api.downloadFile(
+      `/reviews/${reviewId}/export-negotiation-package`,
+      `negotiation_package_${reviewId.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.zip`,
+      "application/zip",
+    ),
 
   /** Export review audit/memo as ZIP download */
-  exportReviewAudit: async (reviewId: string) => {
-    const response = await fetch(`/api/v1/reviews/${reviewId}/export-audit`, {
-      headers: { "Accept": "application/zip" },
-    });
-    if (!response.ok) throw new Error("Review audit export failed");
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `review_audit_${reviewId.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.zip`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  },
+  exportReviewAudit: (reviewId: string) =>
+    api.downloadFile(
+      `/reviews/${reviewId}/export-audit`,
+      `review_audit_${reviewId.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.zip`,
+      "application/zip",
+    ),
+
+  /** Export tracked-changes DOCX with redlines as visual markup */
+  exportTrackedChanges: (reviewId: string, versionId: string) =>
+    api.downloadFile(
+      `/reviews/${reviewId}/versions/${versionId}/export-tracked`,
+      `tracked_changes_${reviewId.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.docx`,
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ),
+
+  /** Export executive summary as ZIP download */
+  exportExecutiveSummary: (reviewId: string) =>
+    api.downloadFile(
+      `/reviews/${reviewId}/export-executive-summary`,
+      `executive_summary_${reviewId.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.zip`,
+      "application/zip",
+    ),
 };

@@ -358,7 +358,7 @@ def _find_abandoned_reviews(session, tenant_id: str):
         WHERE cr.tenant_id = :tenant_id
           AND cr.is_deleted = FALSE
           AND cr.assigned_to IS NOT NULL
-          AND cr.status NOT IN ('approved', 'rejected', 'closed', 'archived', 'finalized', 'executed')
+          AND cr.status::text NOT IN ('approved', 'rejected', 'closed', 'archived', 'finalized', 'executed')
           AND cr.updated_at < NOW() - INTERVAL :assigned_threshold
           AND NOT EXISTS (
               SELECT 1 FROM recovery_actions ra
@@ -478,29 +478,49 @@ def _get_recovery_tier(priority_score: int) -> str:
 # Ownership Resolution
 # ═══════════════════════════════════════════════════════════════════
 
+_USERS_TABLE_AVAILABLE: bool | None = None
+
+
+def _users_table_available(session) -> bool:
+    """Return True when the reviewer directory table exists (optional in dev)."""
+    global _USERS_TABLE_AVAILABLE
+    if _USERS_TABLE_AVAILABLE is not None:
+        return _USERS_TABLE_AVAILABLE
+    try:
+        exists = session.execute(sa_text("SELECT to_regclass('public.users')")).scalar()
+        _USERS_TABLE_AVAILABLE = exists is not None
+    except Exception:
+        _USERS_TABLE_AVAILABLE = False
+    if not _USERS_TABLE_AVAILABLE:
+        logger.debug(
+            "[Recovery] users table not present — reviewer availability uses workload only"
+        )
+    return _USERS_TABLE_AVAILABLE
+
+
 def _check_reviewer_availability(session, tenant_id: str, reviewer_id: str) -> tuple[bool, str]:
     """Check if a reviewer is available for new assignments.
 
     Returns:
         Tuple of (is_available: bool, reason: str)
     """
-    # Check if reviewer exists and is active
-    user_sql = sa_text("""
-        SELECT user_id, is_active, is_ooo
-        FROM users
-        WHERE user_id = :user_id AND tenant_id = :tenant_id
-    """)
-    user = session.execute(user_sql, {
-        "user_id": reviewer_id,
-        "tenant_id": tenant_id,
-    }).fetchone()
+    if _users_table_available(session):
+        user_sql = sa_text("""
+            SELECT user_id, is_active, is_ooo
+            FROM users
+            WHERE user_id = :user_id AND tenant_id = :tenant_id
+        """)
+        user = session.execute(user_sql, {
+            "user_id": reviewer_id,
+            "tenant_id": tenant_id,
+        }).fetchone()
 
-    if not user:
-        return False, "Reviewer not found"
-    if not user.is_active:
-        return False, "Reviewer is inactive"
-    if getattr(user, "is_ooo", False):
-        return False, "Reviewer is out of office"
+        if not user:
+            return False, "Reviewer not found"
+        if not user.is_active:
+            return False, "Reviewer is inactive"
+        if getattr(user, "is_ooo", False):
+            return False, "Reviewer is out of office"
 
     # Check current workload
     workload_sql = sa_text("""
@@ -509,7 +529,7 @@ def _check_reviewer_availability(session, tenant_id: str, reviewer_id: str) -> t
         WHERE assigned_to = :assigned_to
           AND tenant_id = :tenant_id
           AND is_deleted = FALSE
-          AND status NOT IN ('approved', 'rejected', 'closed', 'archived', 'finalized', 'executed')
+          AND status::text NOT IN ('approved', 'rejected', 'closed', 'archived', 'finalized', 'executed')
     """)
     workload = session.execute(workload_sql, {
         "assigned_to": reviewer_id,
@@ -518,6 +538,9 @@ def _check_reviewer_availability(session, tenant_id: str, reviewer_id: str) -> t
 
     if workload and workload.active_count >= MAX_REVIEWS_PER_REVIEWER:
         return False, f"Reviewer at max capacity ({workload.active_count}/{MAX_REVIEWS_PER_REVIEWER})"
+
+    if not _users_table_available(session):
+        return True, "Available (users directory not configured)"
 
     return True, "Available"
 
@@ -533,6 +556,9 @@ def _find_available_reviewer(session, tenant_id: str, preferred_role: str = "rev
     Returns:
         Reviewer ID string, or None if no reviewer is available.
     """
+    if not _users_table_available(session):
+        return None
+
     # Try to find a reviewer with the preferred role who is under capacity
     role_sql = sa_text("""
         SELECT u.user_id, COUNT(cr.review_id)::int AS active_count
@@ -541,7 +567,7 @@ def _find_available_reviewer(session, tenant_id: str, preferred_role: str = "rev
             ON cr.assigned_to = u.user_id
             AND cr.tenant_id = :tenant_id
             AND cr.is_deleted = FALSE
-            AND cr.status NOT IN ('approved', 'rejected', 'closed', 'archived', 'finalized', 'executed')
+            AND cr.status::text NOT IN ('approved', 'rejected', 'closed', 'archived', 'finalized', 'executed')
         WHERE u.tenant_id = :tenant_id
           AND u.is_active = TRUE
           AND (u.is_ooo IS NULL OR u.is_ooo = FALSE)
@@ -781,7 +807,7 @@ def _record_assignment_audit(
         WHERE assigned_to = :assignee
           AND tenant_id = :tenant_id
           AND is_deleted = FALSE
-          AND status NOT IN ('approved', 'rejected', 'closed', 'archived', 'finalized', 'executed')
+          AND status::text NOT IN ('approved', 'rejected', 'closed', 'archived', 'finalized', 'executed')
     """)
     workload = session.execute(workload_sql, {
         "assignee": new_assignee,

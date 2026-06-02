@@ -44,6 +44,8 @@ export function LoginPage() {
           >
             {isLoading ? (
               <Loader2 className="w-5 h-5 animate-spin" />
+            ) : process.env.NODE_ENV === "development" ? (
+              "Sign In (Dev)"
             ) : (
               "Sign In with Auth0"
             )}

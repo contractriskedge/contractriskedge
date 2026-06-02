@@ -1,0 +1,20 @@
+apiVersion: v2
+name: contractriskedge
+description: ContractRiskEdge AI Contract Intelligence Platform
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+dependencies:
+  - name: postgresql
+    version: ~15.0.0
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled
+  - name: redis
+    version: ~19.0.0
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled
+  - name: pgvector
+    version: ~0.7.0
+    repository: https://charts.cloudnative-pg.io
+    condition: pgvector.enabled

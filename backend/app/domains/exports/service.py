@@ -2,18 +2,31 @@
 
 from __future__ import annotations
 
+import csv
+import hashlib
 import io
+import json
 import logging
 import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import select, text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.exports.schemas import ExportFormat, ExportRequest, ExportResponse
+from app.config import settings
+from app.domains.exports.models import AuditExportArtifact, AuditExportJob
+from app.domains.exports.schemas import (
+    AuditExportArtifactResponse,
+    AuditExportJobResponse,
+    AuditExportRequest,
+    ExportFormat,
+    ExportRequest,
+    ExportResponse,
+)
+from app.integrations.storage.s3 import storage_service
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +162,282 @@ class ExportService:
             "period": f"{period_days} days",
         })
         return dict(result.fetchone()._mapping)
+
+    async def generate_immutable_audit_export(
+        self,
+        request: AuditExportRequest,
+        actor_id: str,
+        actor_role: Optional[str] = None,
+    ) -> AuditExportJobResponse:
+        """Create an immutable, append-only audit export job and upload artifact."""
+        filter_params = {
+            k: v for k, v in request.model_dump().items()
+            if k not in ("output_format", "export_reason", "request_id") and v is not None
+        }
+        job = AuditExportJob(
+            tenant_id=uuid.UUID(self.tenant_id),
+            actor_id=actor_id,
+            actor_role=actor_role,
+            status="pending",
+            output_format=request.output_format.value,
+            filter_params=filter_params,
+            export_reason=request.export_reason,
+            request_id=request.request_id,
+            chain_of_custody={
+                "requested_by": actor_id,
+                "requested_role": actor_role,
+                "requested_at": datetime.utcnow().isoformat() + "Z",
+                "export_reason": request.export_reason,
+                "request_id": request.request_id,
+                "filters": filter_params,
+                "output_format": request.output_format.value,
+                "source": "audit_export_service",
+            },
+        )
+        self.session.add(job)
+        await self.session.flush()
+
+        try:
+            events = await self._fetch_audit_events_for_export(request)
+            if request.output_format == ExportFormat.JSONL:
+                file_bytes = self.serialize_audit_events_jsonl(events)
+                content_type = "application/x-ndjson"
+            else:
+                file_bytes = self.serialize_audit_events_csv(events)
+                content_type = "text/csv"
+
+            checksum = self._compute_sha256(file_bytes)
+            filename = f"audit-export-{job.job_id}.{request.output_format.value}"
+            storage_key = storage_service.build_object_key(self.tenant_id, filename)
+            await storage_service.upload_fileobj(
+                settings.s3_bucket,
+                storage_key,
+                file_bytes,
+                content_type,
+                metadata={
+                    "job_id": str(job.job_id),
+                    "tenant_id": self.tenant_id,
+                    "export_reason": request.export_reason or "",
+                },
+            )
+
+            artifact = AuditExportArtifact(
+                job_id=job.job_id,
+                tenant_id=uuid.UUID(self.tenant_id),
+                filename=filename,
+                content_type=content_type,
+                content_length=len(file_bytes),
+                sha256_hash=checksum,
+                storage_key=storage_key,
+                artifact_metadata={
+                    "export_reason": request.export_reason,
+                    "request_id": request.request_id,
+                },
+            )
+            self.session.add(artifact)
+            await self.session.flush()
+
+            manifest = {
+                "job_id": str(job.job_id),
+                "tenant_id": self.tenant_id,
+                "actor_id": actor_id,
+                "actor_role": actor_role,
+                "output_format": request.output_format.value,
+                "filters": filter_params,
+                "artifact_count": 1,
+                "artifact_hashes": [checksum],
+                "created_at": job.chain_of_custody["requested_at"],
+                "export_reason": request.export_reason,
+            }
+            manifest_json = json.dumps(manifest, sort_keys=True)
+            manifest_hash = self._compute_sha256(manifest_json.encode("utf-8"))
+            manifest_signature = self._sign_manifest(manifest_json)
+
+            job.artifact_count = 1
+            job.checksum = checksum
+            job.manifest_hash = manifest_hash
+            job.manifest_signature = manifest_signature
+            job.chain_of_custody = {
+                **job.chain_of_custody,
+                "manifest_hash": manifest_hash,
+                "manifest_signature": manifest_signature,
+                "artifact_hashes": [checksum],
+            }
+            job.status = "completed"
+            job.completed_at = datetime.utcnow()
+            await self.session.flush()
+        except Exception as exc:
+            job.status = "failed"
+            job.failure_reason = str(exc)
+            await self.session.flush()
+            logger.exception("Audit export job failed: %s", exc)
+
+        return await self.get_audit_export_job(str(job.job_id))
+
+    async def _fetch_audit_events_for_export(self, request: AuditExportRequest) -> list[dict]:
+        conditions = ["tenant_id = :tenant_id"]
+        bind = {"tenant_id": self.tenant_id}
+        if request.event_type:
+            conditions.append("event_type = :event_type")
+            bind["event_type"] = request.event_type
+        if request.entity_type:
+            conditions.append("entity_type = :entity_type")
+            bind["entity_type"] = request.entity_type
+        if request.entity_id:
+            conditions.append("entity_id = :entity_id")
+            bind["entity_id"] = request.entity_id
+        if request.actor_id:
+            conditions.append("actor_id = :actor_id")
+            bind["actor_id"] = request.actor_id
+        if request.from_date:
+            conditions.append("created_at >= :from_date")
+            bind["from_date"] = request.from_date
+        if request.to_date:
+            conditions.append("created_at <= :to_date")
+            bind["to_date"] = request.to_date
+
+        sql = sa_text(f"""
+            SELECT event_id, event_type, entity_type, entity_id,
+                   actor_id, actor_role, previous_state, new_state,
+                   change_summary, correlation_id, request_id, source,
+                   metadata, created_at
+            FROM governance_audit_events
+            WHERE {' AND '.join(conditions)}
+            ORDER BY created_at DESC
+            LIMIT 50000
+        """)
+        result = await self.session.execute(sql, bind)
+        return [dict(r._mapping) for r in result.fetchall()]
+
+    def serialize_audit_events_csv(self, events: list[dict]) -> bytes:
+        headers = [
+            "event_id", "event_type", "entity_type", "entity_id",
+            "actor_id", "actor_role", "change_summary", "correlation_id",
+            "request_id", "source", "created_at", "metadata",
+            "previous_state", "new_state",
+        ]
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=headers, extrasaction="ignore")
+        writer.writeheader()
+        for event in events:
+            row = {**event}
+            row["created_at"] = event.get("created_at").isoformat() if event.get("created_at") else ""
+            row["metadata"] = json.dumps(event.get("metadata", {}), sort_keys=True)
+            row["previous_state"] = json.dumps(event.get("previous_state", {}), sort_keys=True) if event.get("previous_state") is not None else ""
+            row["new_state"] = json.dumps(event.get("new_state", {}), sort_keys=True) if event.get("new_state") is not None else ""
+            writer.writerow(row)
+        return buf.getvalue().encode("utf-8")
+
+    def serialize_audit_events_jsonl(self, events: list[dict]) -> bytes:
+        lines = []
+        for event in events:
+            if isinstance(event.get("created_at"), datetime):
+                event["created_at"] = event["created_at"].isoformat()
+            lines.append(json.dumps(event, sort_keys=True))
+        return "\n".join(lines).encode("utf-8")
+
+    @staticmethod
+    def _compute_sha256(data: bytes) -> str:
+        return hashlib.sha256(data).hexdigest()
+
+    def _sign_manifest(self, manifest_json: str) -> str:
+        signing_key = settings.secret_key or "default-signature-key"
+        signature_input = f"{signing_key}:{manifest_json}".encode("utf-8")
+        return hashlib.sha256(signature_input).hexdigest()
+
+    async def get_audit_export_job(self, job_id: str) -> AuditExportJobResponse:
+        sql = sa_text("""
+            SELECT * FROM audit_export_jobs
+            WHERE job_id = :job_id AND tenant_id = :tenant_id
+        """)
+        result = await self.session.execute(sql, {
+            "job_id": job_id,
+            "tenant_id": self.tenant_id,
+        })
+        row = result.fetchone()
+        if not row:
+            raise ValueError(f"Audit export job {job_id} not found")
+        job = dict(row._mapping)
+        artifacts = await self._fetch_audit_export_artifacts(job_id)
+        return AuditExportJobResponse(
+            job_id=str(job["job_id"]),
+            status=job["status"],
+            output_format=ExportFormat(job["output_format"]),
+            filter_params=job["filter_params"],
+            export_reason=job["export_reason"],
+            request_id=job["request_id"],
+            artifact_count=job["artifact_count"],
+            checksum=job["checksum"],
+            manifest_hash=job["manifest_hash"],
+            manifest_signature=job["manifest_signature"],
+            chain_of_custody=job["chain_of_custody"],
+            artifacts=artifacts,
+            created_at=job["created_at"],
+            completed_at=job["completed_at"],
+            failure_reason=job["failure_reason"],
+        )
+
+    async def _fetch_audit_export_artifacts(self, job_id: str) -> list[AuditExportArtifactResponse]:
+        sql = sa_text("""
+            SELECT * FROM audit_export_artifacts
+            WHERE job_id = :job_id AND tenant_id = :tenant_id
+        """)
+        result = await self.session.execute(sql, {
+            "job_id": job_id,
+            "tenant_id": self.tenant_id,
+        })
+        items = [dict(r._mapping) for r in result.fetchall()]
+        return [
+            AuditExportArtifactResponse(
+                artifact_id=str(item["artifact_id"]),
+                filename=item["filename"],
+                content_type=item["content_type"],
+                content_length=item["content_length"],
+                sha256_hash=item["sha256_hash"],
+                storage_key=item["storage_key"],
+                metadata=item["metadata"],
+                created_at=item["created_at"],
+            )
+            for item in items
+        ]
+
+    async def list_audit_export_jobs(self, page: int = 1, page_size: int = 50) -> list[AuditExportJobResponse]:
+        offset = (page - 1) * page_size
+        sql = sa_text("""
+            SELECT * FROM audit_export_jobs
+            WHERE tenant_id = :tenant_id
+            ORDER BY created_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        result = await self.session.execute(sql, {
+            "tenant_id": self.tenant_id,
+            "limit": page_size,
+            "offset": offset,
+        })
+        jobs = [dict(r._mapping) for r in result.fetchall()]
+        return [await self.get_audit_export_job(str(job["job_id"])) for job in jobs]
+
+    async def download_audit_export_artifact(self, job_id: str, artifact_id: str) -> tuple[bytes, str, str]:
+        sql = sa_text("""
+            SELECT filename, content_type, storage_key
+            FROM audit_export_artifacts
+            WHERE artifact_id = :artifact_id
+              AND job_id = :job_id
+              AND tenant_id = :tenant_id
+        """)
+        result = await self.session.execute(sql, {
+            "artifact_id": artifact_id,
+            "job_id": job_id,
+            "tenant_id": self.tenant_id,
+        })
+        row = result.fetchone()
+        if not row:
+            raise ValueError("Audit export artifact not found")
+        artifact = dict(row._mapping)
+        if not artifact["storage_key"]:
+            raise ValueError("Audit export artifact storage key missing")
+        file_bytes = await storage_service.download_fileobj(settings.s3_bucket, artifact["storage_key"])
+        return file_bytes, artifact["content_type"], artifact["filename"]
 
     async def _generate_pdf(
         self, review: dict, findings: list[dict],

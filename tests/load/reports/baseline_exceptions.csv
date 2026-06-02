@@ -1,0 +1,97 @@
+Count,Message,Traceback,Nodes
+193,'ResponseContextManager' object has no attribute 'elapsed',"  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 363, in run
+    self.execute_next_task()
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 396, in execute_next_task
+    self.execute_task(self._task_queue.popleft())
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 513, in execute_task
+    task(self.user)
+  File ""/Volumes/home/ContractRiskEdge/tests/load/locustfile.py"", line 944, in chaos_read
+    elif resp.elapsed.total_seconds() > 30:
+         ^^^^^^^^^^^^
+",local
+120,'ResponseContextManager' object has no attribute 'elapsed',"  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 363, in run
+    self.execute_next_task()
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 396, in execute_next_task
+    self.execute_task(self._task_queue.popleft())
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 513, in execute_task
+    task(self.user)
+  File ""/Volumes/home/ContractRiskEdge/tests/load/locustfile.py"", line 804, in dashboard_refresh
+    elif resp.elapsed.total_seconds() > 5:
+         ^^^^^^^^^^^^
+",local
+852,'ResponseContextManager' object has no attribute 'elapsed',"  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 363, in run
+    self.execute_next_task()
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 396, in execute_next_task
+    self.execute_task(self._task_queue.popleft())
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 513, in execute_task
+    task(self.user)
+  File ""/Volumes/home/ContractRiskEdge/tests/load/locustfile.py"", line 452, in flood_initiate_upload
+    elif resp.elapsed.total_seconds() > 30:
+         ^^^^^^^^^^^^
+",local
+143,'ResponseContextManager' object has no attribute 'elapsed',"  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 363, in run
+    self.execute_next_task()
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 396, in execute_next_task
+    self.execute_task(self._task_queue.popleft())
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 513, in execute_task
+    task(self.user)
+  File ""/Volumes/home/ContractRiskEdge/tests/load/locustfile.py"", line 322, in burst_operation
+    operation()
+  File ""/Volumes/home/ContractRiskEdge/tests/load/locustfile.py"", line 368, in _burst_dashboard
+    elif resp.elapsed.total_seconds() > 10:
+         ^^^^^^^^^^^^
+",local
+164,'ResponseContextManager' object has no attribute 'elapsed',"  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 363, in run
+    self.execute_next_task()
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 396, in execute_next_task
+    self.execute_task(self._task_queue.popleft())
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 513, in execute_task
+    task(self.user)
+  File ""/Volumes/home/ContractRiskEdge/tests/load/locustfile.py"", line 322, in burst_operation
+    operation()
+  File ""/Volumes/home/ContractRiskEdge/tests/load/locustfile.py"", line 333, in _burst_reviews
+    elif resp.elapsed.total_seconds() > 10:
+         ^^^^^^^^^^^^
+",local
+72,'ResponseContextManager' object has no attribute 'elapsed',"  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 363, in run
+    self.execute_next_task()
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 396, in execute_next_task
+    self.execute_task(self._task_queue.popleft())
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 513, in execute_task
+    task(self.user)
+  File ""/Volumes/home/ContractRiskEdge/tests/load/locustfile.py"", line 822, in metrics_poll
+    elif resp.elapsed.total_seconds() > 5:
+         ^^^^^^^^^^^^
+",local
+82,'ResponseContextManager' object has no attribute 'elapsed',"  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 363, in run
+    self.execute_next_task()
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 396, in execute_next_task
+    self.execute_task(self._task_queue.popleft())
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 513, in execute_task
+    task(self.user)
+  File ""/Volumes/home/ContractRiskEdge/tests/load/locustfile.py"", line 989, in chaos_search
+    elif resp.elapsed.total_seconds() > 20:
+         ^^^^^^^^^^^^
+",local
+139,'ResponseContextManager' object has no attribute 'elapsed',"  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 363, in run
+    self.execute_next_task()
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 396, in execute_next_task
+    self.execute_task(self._task_queue.popleft())
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 513, in execute_task
+    task(self.user)
+  File ""/Volumes/home/ContractRiskEdge/tests/load/locustfile.py"", line 322, in burst_operation
+    operation()
+  File ""/Volumes/home/ContractRiskEdge/tests/load/locustfile.py"", line 354, in _burst_search
+    elif resp.elapsed.total_seconds() > 15:
+         ^^^^^^^^^^^^
+",local
+14,'ResponseContextManager' object has no attribute 'elapsed',"  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 363, in run
+    self.execute_next_task()
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 396, in execute_next_task
+    self.execute_task(self._task_queue.popleft())
+  File ""/Volumes/home/ContractRiskEdge/.venv/lib/python3.11/site-packages/locust/user/task.py"", line 513, in execute_task
+    task(self.user)
+  File ""/Volumes/home/ContractRiskEdge/tests/load/locustfile.py"", line 874, in generate_briefing
+    elif resp.elapsed.total_seconds() > 30:
+         ^^^^^^^^^^^^
+",local

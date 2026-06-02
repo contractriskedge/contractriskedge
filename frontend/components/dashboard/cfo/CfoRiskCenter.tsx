@@ -4,10 +4,13 @@ import React, { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PanelLeft, PanelRight } from "lucide-react";
 import type { FinancialExposure, AiFinancialInsight } from "./types";
-import {
-  mockCfoKpis, mockFinancialExposures, mockRenewalForecasts,
-  mockVendorFinancialRisks, mockAiFinancialInsights, mockFinancialAnalytics,
-} from "./mockData";
+
+const mockCfoKpis = [];
+const mockFinancialExposures: FinancialExposure[] = [];
+const mockRenewalForecasts = [];
+const mockVendorFinancialRisks = [];
+const mockAiFinancialInsights: AiFinancialInsight[] = [];
+const mockFinancialAnalytics = {};
 import { CfoKpiCards } from "./CfoKpiCards";
 import { CfoToolbar } from "./CfoToolbar";
 import { CfoLeftSidebar } from "./CfoLeftSidebar";

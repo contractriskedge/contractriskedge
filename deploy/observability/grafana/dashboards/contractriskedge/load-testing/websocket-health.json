@@ -1,0 +1,110 @@
+{
+  "title": "ContractRiskEdge — WebSocket Health",
+  "uid": "cre-websocket-health",
+  "version": 1,
+  "schemaVersion": 39,
+  "tags": ["contractriskedge", "websocket", "realtime"],
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "title": "Active WebSocket Connections",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(ws_active_connections{environment=~\"$env\"}) by (tenant_id)",
+          "legendFormat": "{{tenant_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      }
+    },
+    {
+      "title": "WebSocket Messages Sent",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(ws_messages_sent_total{environment=~\"$env\"}[1m])) by (tenant_id)",
+          "legendFormat": "{{tenant_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      }
+    },
+    {
+      "title": "Delivery Failure Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(ws_delivery_failures_total{environment=~\"$env\"}[5m])) / (sum(rate(ws_messages_sent_total{environment=~\"$env\"}[5m])) + sum(rate(ws_delivery_failures_total{environment=~\"$env\"}[5m])))",
+          "legendFormat": "Failure Rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": { "steps": [{ "color": "green" }, { "color": "orange", "value": 0.02 }, { "color": "red", "value": 0.05 }] }
+        }
+      }
+    },
+    {
+      "title": "Reconnect Storm Detections",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "increase(reconnect_storm_detections_total{environment=~\"$env\"}[5m])",
+          "legendFormat": "{{tenant_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": { "steps": [{ "color": "green" }, { "color": "red", "value": 1 }] }
+        }
+      }
+    },
+    {
+      "title": "Dead-Letter Events",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "increase(outbox_events_dead_letter_total{environment=~\"$env\"}[15m])",
+          "legendFormat": "{{tenant_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": { "steps": [{ "color": "green" }, { "color": "red", "value": 1 }] }
+        }
+      }
+    },
+    {
+      "title": "Stale Event Rejection Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        {
+          "expr": "rate(stale_events_rejected_total{environment=~\"$env\"}[5m])",
+          "legendFormat": "Rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "thresholds": { "steps": [{ "color": "green" }, { "color": "red", "value": 1 }] }
+        }
+      }
+    }
+  ]
+}

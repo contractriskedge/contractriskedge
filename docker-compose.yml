@@ -96,7 +96,7 @@ services:
   backend_worker:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.worker
     environment:
       DATABASE_URL: postgresql+asyncpg://dev_user:dev_password@postgres:5432/contract_risk_dev
       REDIS_URL: redis://redis:6379/0

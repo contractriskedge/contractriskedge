@@ -1,15 +1,21 @@
 /**
- * ReviewQueue — enterprise review queue with interactive operations.
+ * ReviewQueue — enterprise operational review queue.
+ *
+ * Full-width enterprise layout consistent with AI Review Workspace.
+ * Inspired by ServiceNow, Jira, Relativity, Microsoft Purview.
  *
  * Features:
- * - Workload metrics bar (Unassigned / In Review / Overdue / Escalated / Critical)
- * - Multi-select with bulk actions (Assign / Escalate / Approve)
- * - Assign modal with reviewer picker
- * - SLA status with color-coded badges (on_track / warning / overdue)
- * - Workflow stage display
+ * - Workload metrics bar (full-width KPI strip)
+ * - Multi-select with bulk actions (Assign / Escalate / Approve / Export)
+ * - Queue filter tabs (All / My / Legal / Executive / Compliance / Escalated / Overdue)
+ * - Search and status filtering
+ * - Sortable columns with sticky header
+ * - SLA status with color-coded badges
+ * - Row-level actions (Assign / Approve / Escalate / Open)
  * - Optimistic UI updates
- * - Click to open review
- * - Action buttons disabled for immutable states
+ * - Assign modal with reviewer search
+ * - Approval and escalation modals
+ * - Overdue row indicators
  */
 
 "use client";
@@ -21,6 +27,7 @@ import {
   FileText, AlertTriangle, Clock, User, ArrowUpDown, Lock,
   Search, Check, X, Loader2, UserPlus, ArrowUpRight,
   CheckSquare, Square, ChevronDown, Eye, ThumbsUp, ThumbsDown, Download,
+  ListChecks, Brain, Filter,
 } from "lucide-react";
 import { reviewService } from "@/services/api/reviews";
 import { api } from "@/services/api/client";
@@ -104,6 +111,99 @@ const stageLabel = (status: string, stage?: string | null): string => {
   };
   return stages[status] || status.replace(/_/g, " ");
 };
+
+/**
+ * Transform raw document name / filename into a business-friendly contract title.
+ *
+ * Examples:
+ *   "CONTRACT_03_SaaS_HighRisk_2026.pdf" → "SaaS Agreement"
+ *   "MSA_Acme_Corp_FINAL.docx"          → "Master Services Agreement – Acme Corp"
+ *   "NDA_DataSync_Partners_v2.pdf"      → "Non-Disclosure Agreement – DataSync Partners"
+ *   "review_abc123"                      → "Contract Review"
+ *
+ * Falls back to a formatted version of the original filename if no pattern matches.
+ */
+function formatContractTitle(review: ReviewDetail): string {
+  const name = review.document_name || review.original_filename || "";
+  if (!name || name.startsWith("Review ")) return "Contract Review";
+
+  // Remove file extension
+  const clean = name.replace(/\.(pdf|docx?|xlsx?|txt)$/i, "");
+
+  // Pattern: TYPE_Vendor_Description or TYPE - Vendor
+  const typeMap: Record<string, string> = {
+    msa: "Master Services Agreement",
+    sow: "Statement of Work",
+    nda: "Non-Disclosure Agreement",
+    dpa: "Data Processing Agreement",
+    baa: "Business Associate Agreement",
+    sla: "Service Level Agreement",
+    saas: "SaaS Agreement",
+    license: "Software License Agreement",
+    consulting: "Consulting Services Agreement",
+    supply: "Supply Agreement",
+    distribution: "Distribution Agreement",
+    employment: "Employment Agreement",
+    lease: "Lease Agreement",
+    indemnity: "Indemnity Agreement",
+    settlement: "Settlement Agreement",
+    amendment: "Contract Amendment",
+    addendum: "Contract Addendum",
+    renewal: "Renewal Agreement",
+    termination: "Termination Agreement",
+    services: "Services Agreement",
+    partnership: "Partnership Agreement",
+    sponsorship: "Sponsorship Agreement",
+    franchise: "Franchise Agreement",
+    loan: "Loan Agreement",
+    credit: "Credit Agreement",
+    procurement: "Procurement Agreement",
+    outsourcing: "Outsourcing Agreement",
+    confidentiality: "Confidentiality Agreement",
+    non_disclosure: "Non-Disclosure Agreement",
+    non_compete: "Non-Compete Agreement",
+    construction: "Construction Contract",
+    real_estate: "Real Estate Contract",
+    insurance: "Insurance Policy",
+    warranty: "Warranty Agreement",
+    support: "Support Agreement",
+    maintenance: "Maintenance Agreement",
+    hosting: "Hosting Agreement",
+    cloud: "Cloud Services Agreement",
+    professional: "Professional Services Agreement",
+    statement_of_work: "Statement of Work",
+    master: "Master Services Agreement",
+  };
+
+  // Try to extract type and vendor from common patterns
+  // Pattern 1: "TYPE_VENDOR_..." or "TYPE-VENDOR-..."
+  const parts = clean.split(/[_\-]+/);
+  const typeKey = parts[0]?.toLowerCase();
+  const typeLabel = typeMap[typeKey];
+
+  if (typeLabel) {
+    // Try to find a vendor name in the remaining parts
+    const vendorPart = parts.slice(1).filter(p => !/^\d/.test(p) && !/v\d+$/i.test(p) && !/final/i.test(p) && !/draft/i.test(p) && !/revised/i.test(p)).join(" ");
+    if (vendorPart) {
+      return `${typeLabel} – ${vendorPart}`;
+    }
+    return typeLabel;
+  }
+
+  // Pattern 2: Contains known type keywords
+  for (const [key, label] of Object.entries(typeMap)) {
+    if (clean.toLowerCase().includes(key)) {
+      return label;
+    }
+  }
+
+  // Fallback: clean up the raw name
+  return clean
+    .replace(/[_-]/g, " ")
+    .replace(/\b\w/g, c => c.toUpperCase())
+    .replace(/\.(pdf|docx?|xlsx?|txt)$/i, "")
+    .trim() || "Contract Review";
+}
 
 function formatSLA(review: ReviewDetail): { label: string; status: string } {
   if (review.status === "approved" || review.status === "closed" || review.status === "rejected") {
@@ -461,34 +561,34 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-      {/* ── Workload Metrics Bar ── */}
+    <div className="flex flex-col h-full">
+      {/* ── Workload Metrics Bar (full-width KPI strip) ── */}
       {metrics && (
-        <div className="grid grid-cols-5 gap-px bg-gray-100 border-b border-gray-200">
+        <div className="grid grid-cols-6 gap-px bg-gray-200 dark:bg-navy-700 border-b border-gray-200 dark:border-navy-700">
           {[
-            { label: "Unassigned", value: metrics.unassigned, color: "text-amber-600", bg: "bg-amber-50" },
-            { label: "In Review", value: metrics.in_review, color: "text-purple-600", bg: "bg-purple-50" },
-            { label: "Overdue", value: metrics.overdue, color: "text-red-600", bg: "bg-red-50" },
-            { label: "Escalated", value: metrics.escalated, color: "text-orange-600", bg: "bg-orange-50" },
-            { label: "Critical", value: metrics.critical, color: "text-rose-600", bg: "bg-rose-50" },
+            { label: "Total", value: metrics.total, color: "text-gray-900 dark:text-white", bg: "bg-white dark:bg-navy-800" },
+            { label: "Unassigned", value: metrics.unassigned, color: "text-amber-600", bg: "bg-amber-50 dark:bg-amber-900/10" },
+            { label: "In Review", value: metrics.in_review, color: "text-purple-600", bg: "bg-purple-50 dark:bg-purple-900/10" },
+            { label: "Overdue", value: metrics.overdue, color: "text-red-600", bg: "bg-red-50 dark:bg-red-900/10" },
+            { label: "Escalated", value: metrics.escalated, color: "text-orange-600", bg: "bg-orange-50 dark:bg-orange-900/10" },
+            { label: "Critical", value: metrics.critical, color: "text-rose-600", bg: "bg-rose-50 dark:bg-rose-900/10" },
           ].map((item) => (
-            <div key={item.label} className={`${item.bg} px-3 py-2 text-center`}>
+            <div key={item.label} className={`${item.bg} px-4 py-2.5 text-center`}>
               <p className={`text-lg font-bold ${item.color}`}>{item.value}</p>
-              <p className="text-[9px] text-gray-500">{item.label}</p>
+              <p className="text-[9px] text-gray-500 dark:text-gray-400 uppercase tracking-wider">{item.label}</p>
             </div>
           ))}
         </div>
       )}
 
-      {/* ── Header ── */}
-      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
+      {/* ── Search & Filter Bar ── */}
+      <div className="flex items-center justify-between px-4 py-2 bg-white dark:bg-navy-800 border-b border-gray-200 dark:border-navy-700">
         <div className="flex items-center gap-2">
-          <FileText className="w-4 h-4 text-gray-500" />
-          <h3 className="text-sm font-semibold text-navy-900">Review Queue</h3>
+          <FileText className="w-4 h-4 text-gray-400" />
+          <span className="text-sm font-semibold text-navy-900 dark:text-white">Queue</span>
           <span className="text-[10px] text-gray-400">({reviews.length} total)</span>
         </div>
         <div className="flex items-center gap-2">
-          {/* Search */}
           <div className="relative">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
             <input
@@ -496,14 +596,13 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search contracts..."
-              className="w-36 pl-7 pr-2 py-1 text-[10px] border border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
+              className="w-44 pl-7 pr-2 py-1.5 text-[11px] bg-gray-50 dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded-md text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-navy-400"
             />
           </div>
-          {/* Status filter */}
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="text-[10px] border border-gray-300 rounded-lg px-2 py-1 focus:border-blue-500 focus:outline-none"
+            className="text-[10px] px-2 py-1.5 rounded-md border border-gray-200 dark:border-navy-600 bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-navy-400"
           >
             {statuses.map((s) => (
               <option key={s} value={s}>{s === "all" ? "All Status" : s.replace(/_/g, " ")}</option>
@@ -513,7 +612,7 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
       </div>
 
       {/* ── Queue Filter Tabs ── */}
-      <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center gap-1 overflow-x-auto">
+      <div className="flex items-center gap-0.5 px-4 py-1.5 bg-gray-50 dark:bg-navy-850 border-b border-gray-200 dark:border-navy-700 overflow-x-auto">
         {[
           { id: "all", label: "All Reviews" },
           { id: "my", label: "My Reviews" },
@@ -530,10 +629,10 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
               if (q.stage) setStageFilter(q.stage);
               else setStageFilter("");
             }}
-            className={`px-2.5 py-1 text-[10px] font-medium rounded-lg whitespace-nowrap transition-colors ${
+            className={`px-3 py-1.5 text-[10px] font-medium rounded-md whitespace-nowrap transition-colors ${
               queueFilter === q.id
-                ? "bg-navy-900 text-white"
-                : "text-gray-600 hover:bg-gray-200"
+                ? "bg-navy-900 text-white dark:bg-navy-600 dark:text-white shadow-sm"
+                : "text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-navy-700"
             }`}
           >
             {q.label}
@@ -543,38 +642,38 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
 
       {/* ── Bulk Action Bar ── */}
       {selectedIds.size > 0 && (
-        <div className="px-4 py-2 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
-          <span className="text-xs font-medium text-blue-700">
+        <div className="flex items-center justify-between px-4 py-2 bg-blue-50 dark:bg-blue-900/10 border-b border-blue-200 dark:border-blue-800">
+          <span className="text-xs font-medium text-blue-700 dark:text-blue-300">
             {selectedIds.size} selected
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               onClick={() => setBulkAction("assign")}
-              className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded bg-blue-100 text-blue-700 hover:bg-blue-200"
+              className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded-md bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/30 transition-colors"
             >
               <UserPlus className="w-3 h-3" /> Assign
             </button>
             <button
               onClick={() => bulkEscalateMut.mutate(Array.from(selectedIds))}
-              className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded bg-orange-100 text-orange-700 hover:bg-orange-200"
+              className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded-md bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/20 dark:text-orange-300 transition-colors"
             >
               <ArrowUpRight className="w-3 h-3" /> Escalate
             </button>
             <button
               onClick={() => bulkApproveMut.mutate(Array.from(selectedIds))}
-              className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded bg-green-100 text-green-700 hover:bg-green-200"
+              className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded-md bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/20 dark:text-green-300 transition-colors"
             >
               <Check className="w-3 h-3" /> Approve
             </button>
             <button
               onClick={() => reviewService.bulkExport(Array.from(selectedIds))}
-              className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
+              className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded-md bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-300 transition-colors"
             >
               <Download className="w-3 h-3" /> Export
             </button>
             <button
               onClick={() => setSelectedIds(new Set())}
-              className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded bg-gray-100 text-gray-600 hover:bg-gray-200"
+              className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-navy-700 dark:text-gray-300 transition-colors"
             >
               <X className="w-3 h-3" /> Clear
             </button>
@@ -606,55 +705,57 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
         )}
       </AnimatePresence>
 
-      {/* ── Table ── */}
+      {/* ── Table (full-width, sticky header) ── */}
       {filtered.length === 0 ? (
-        <div className="flex flex-col items-center py-12 text-center">
-          <FileText className="w-10 h-10 text-gray-300 mb-3" />
-          <p className="text-sm text-gray-500">No reviews found</p>
-          <p className="text-xs text-gray-400 mt-1">Complete an upload to generate a review.</p>
+        <div className="flex flex-col items-center py-16 text-center flex-1">
+          <FileText className="w-10 h-10 text-gray-300 dark:text-gray-600 mb-3" />
+          <p className="text-sm text-gray-500 dark:text-gray-400">No reviews found</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Complete an upload to generate a review.</p>
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50">
-                <th className="w-8 px-2 py-2.5">
-                  <button onClick={toggleSelectAll} className="text-gray-400 hover:text-gray-600">
+        <div className="flex-1 overflow-y-auto">
+          <table className="w-full text-xs table-fixed">
+            <thead className="sticky top-0 z-10">
+              <tr className="border-b border-gray-200 dark:border-navy-700 bg-gray-50 dark:bg-navy-850">
+                <th className="w-10 px-3 py-3">
+                  <button onClick={toggleSelectAll} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
                     {selectedIds.size === filtered.length && filtered.length > 0
                       ? <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
                       : <Square className="w-3.5 h-3.5" />
                     }
                   </button>
                 </th>
-                <th className="text-left px-2 py-2.5 font-medium text-gray-500">Contract</th>
-                <th className="text-left px-2 py-2.5 font-medium text-gray-500 cursor-pointer" onClick={() => toggleSort("risk_score")}>
+                <th className="text-left px-3 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[40%]">Contract</th>
+                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-navy-700 dark:hover:text-gray-200 w-[9%]" onClick={() => toggleSort("risk_score")}>
                   <span className="inline-flex items-center gap-1">Risk <ArrowUpDown className="w-3 h-3" /></span>
                 </th>
-                <th className="text-left px-2 py-2.5 font-medium text-gray-500 cursor-pointer" onClick={() => toggleSort("status")}>
+                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-navy-700 dark:hover:text-gray-200 w-[11%]" onClick={() => toggleSort("status")}>
                   <span className="inline-flex items-center gap-1">Status <ArrowUpDown className="w-3 h-3" /></span>
                 </th>
-                <th className="text-left px-2 py-2.5 font-medium text-gray-500">Assigned</th>
-                <th className="text-left px-2 py-2.5 font-medium text-gray-500">SLA</th>
-                <th className="text-left px-2 py-2.5 font-medium text-gray-500">Stage</th>
-                <th className="text-right px-3 py-2.5 font-medium text-gray-500">Action</th>
+                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[11%]">Assigned</th>
+                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[9%]">SLA</th>
+                <th className="text-right px-3 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[20%]">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-gray-100 dark:divide-navy-700">
               {filtered.map((review) => {
                 const sla = formatSLA(review);
                 const isSelected = selectedIds.has(review.review_id);
+                const contractName = formatContractTitle(review);
+                const rawFilename = review.original_filename || "";
+                const isOverdue = sla.status === "overdue" || sla.status === "critical_overdue";
                 return (
                   <tr
                     key={review.review_id}
-                    className={`hover:bg-gray-50 transition-colors cursor-pointer ${
-                      isSelected ? "bg-blue-50/50" : ""
-                    } ${sla.status === "overdue" ? "border-l-2 border-l-red-400" : ""}`}
+                    className={`hover:bg-gray-50 dark:hover:bg-navy-750 transition-colors cursor-pointer ${
+                      isSelected ? "bg-blue-50/50 dark:bg-blue-900/10" : "bg-white dark:bg-navy-800"
+                    } ${isOverdue ? "border-l-2 border-l-red-400" : ""}`}
                     onClick={() => onReviewSelect?.(review.review_id)}
                   >
-                    <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
+                    <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => toggleSelect(review.review_id)}
-                        className="text-gray-400 hover:text-gray-600"
+                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
                       >
                         {isSelected
                           ? <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
@@ -662,68 +763,142 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                         }
                       </button>
                     </td>
-                    <td className="px-2 py-3">
-                      <div className="flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                        <div className="min-w-0">
+                    {/* ── Contract Column (expanded, two-line) ── */}
+                    <td className="px-3 py-2.5">
+                      <div className="group relative flex items-start gap-2.5">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                          review.priority === "critical" ? "bg-red-100 dark:bg-red-900/20" :
+                          review.priority === "high" ? "bg-orange-100 dark:bg-orange-900/20" :
+                          review.priority === "medium" ? "bg-amber-100 dark:bg-amber-900/20" :
+                          "bg-gray-100 dark:bg-navy-700"
+                        }`}>
+                          <FileText className={`w-4 h-4 ${
+                            review.priority === "critical" ? "text-red-600 dark:text-red-400" :
+                            review.priority === "high" ? "text-orange-600 dark:text-orange-400" :
+                            review.priority === "medium" ? "text-amber-600 dark:text-amber-400" :
+                            "text-gray-500 dark:text-gray-400"
+                          }`} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          {/* Primary: Contract name */}
                           <div className="flex items-center gap-2">
-                            <p className="font-medium text-navy-900 truncate max-w-[140px]">
-                              {review.document_name || review.original_filename || `Review ${review.review_id.slice(0, 8)}`}
+                            <p className="text-[12px] font-semibold text-navy-900 dark:text-white truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                              {contractName}
                             </p>
-                            <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full ${
+                            <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 ${
                               review.priority === "critical"
-                                ? "bg-red-100 text-red-700"
+                                ? "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-300"
                                 : review.priority === "high"
-                                ? "bg-orange-100 text-orange-700"
+                                ? "bg-orange-100 text-orange-700 dark:bg-orange-900/20 dark:text-orange-300"
                                 : review.priority === "medium"
-                                ? "bg-amber-100 text-amber-700"
-                                : "bg-green-100 text-green-700"
+                                ? "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
+                                : "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-300"
                             }`}>{review.priority}</span>
                           </div>
-                          <p className="text-[9px] text-gray-400">
-                            {review.finding_count} findings &middot; {review.redline_count} redlines
-                          </p>
+                          {/* Secondary: Metadata row — tight grouping */}
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                            <span className="text-[10px] font-medium text-gray-600 dark:text-gray-400">
+                              {review.document_type || "Contract"}
+                            </span>
+                            <span className="w-1 h-1 rounded-full bg-gray-300 dark:bg-navy-600" />
+                            <span className="text-[9px] text-gray-400 dark:text-gray-500">
+                              {review.finding_count} findings
+                            </span>
+                            {review.redline_count > 0 && (
+                              <>
+                                <span className="w-1 h-1 rounded-full bg-gray-300 dark:bg-navy-600" />
+                                <span className="text-[9px] text-gray-400 dark:text-gray-500">
+                                  {review.redline_count} redlines
+                                </span>
+                              </>
+                            )}
+                            <span className="w-1 h-1 rounded-full bg-gray-300 dark:bg-navy-600" />
+                            <span className="text-[9px] text-gray-400 dark:text-gray-500">
+                              {stageLabel(review.status, review.workflow_stage)}
+                            </span>
+                            {rawFilename && (
+                              <span className="text-[8px] text-gray-300 dark:text-gray-600 truncate max-w-[100px] ml-1" title={rawFilename}>
+                                {rawFilename}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {/* ── Hover Tooltip Preview ── */}
+                        <div className="absolute left-0 top-full mt-1 z-20 hidden group-hover:block w-80 bg-white dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded-lg shadow-xl p-3 pointer-events-none">
+                          <div className="flex items-center gap-2 mb-2">
+                            <FileText className="w-4 h-4 text-navy-500" />
+                            <span className="text-xs font-bold text-navy-900 dark:text-white truncate">{contractName}</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
+                            <span className="text-gray-400">Review ID</span><span className="font-mono text-gray-700 dark:text-gray-300">{review.review_id.slice(0, 12)}...</span>
+                            <span className="text-gray-400">Status</span><span className="font-medium capitalize">{review.status.replace(/_/g, " ")}</span>
+                            <span className="text-gray-400">Risk Score</span><span className="font-medium">{review.risk_score != null ? `${(review.risk_score * 100).toFixed(0)}%` : "—"}</span>
+                            <span className="text-gray-400">Findings</span><span className="font-medium">{review.finding_count} ({review.redline_count} redlines)</span>
+                            <span className="text-gray-400">Assignee</span><span className="font-medium">{review.assigned_to || "Unassigned"}</span>
+                            <span className="text-gray-400">Created</span><span className="font-medium">{new Date(review.created_at).toLocaleDateString()}</span>
+                            {rawFilename && (
+                              <><span className="text-gray-400">File</span><span className="font-mono text-gray-500 text-[9px] truncate">{rawFilename}</span></>
+                            )}
+                          </div>
+                          {isOverdue && (
+                            <div className="mt-2 flex items-center gap-1 text-[9px] text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/10 rounded px-2 py-1">
+                              <AlertTriangle className="w-3 h-3" /> SLA Overdue by {Math.round(review.overdue_hours)}h
+                            </div>
+                          )}
                         </div>
                       </div>
                     </td>
-                    <td className="px-2 py-3">
+                    {/* ── Risk ── */}
+                    <td className="px-2 py-3 align-top pt-3.5">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-medium ${riskColor(review.risk_score)}`}>
                         {review.risk_score != null ? `${(review.risk_score * 100).toFixed(0)}%` : "—"}
                       </span>
                     </td>
-                    <td className="px-2 py-3">
+                    {/* ── Status ── */}
+                    <td className="px-2 py-3 align-top pt-3.5">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-medium ${statusColor(review.status)}`}>
                         {review.status.replace(/_/g, " ")}
                       </span>
                     </td>
-                    <td className="px-2 py-3">
+                    {/* ── Assigned ── */}
+                    <td className="px-2 py-3 align-top pt-3.5">
                       <div className="flex items-center gap-1.5">
-                        <User className="w-3 h-3 text-gray-400" />
-                        <span className={`text-gray-600 ${!review.assigned_to ? "italic text-gray-400" : ""}`}>
+                        <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold flex-shrink-0 ${
+                          review.assigned_to
+                            ? "bg-navy-100 text-navy-600 dark:bg-navy-700 dark:text-navy-300"
+                            : "bg-gray-100 text-gray-400 dark:bg-navy-700 dark:text-gray-500"
+                        }`}>
+                          {review.assigned_to
+                            ? review.assigned_to.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()
+                            : "—"
+                          }
+                        </div>
+                        <span className={`text-[10px] truncate max-w-[80px] ${
+                          review.assigned_to
+                            ? "text-gray-700 dark:text-gray-300 font-medium"
+                            : "italic text-gray-400 dark:text-gray-500"
+                        }`}>
                           {review.assigned_to || "Unassigned"}
                         </span>
                       </div>
                     </td>
-                    <td className="px-2 py-3">
+                    {/* ── SLA ── */}
+                    <td className="px-2 py-3 align-top pt-3.5">
                       <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium ${slaColor(sla.status)}`}>
                         {sla.status === "overdue" && <AlertTriangle className="w-3 h-3" />}
                         {sla.status === "warning" && <Clock className="w-3 h-3" />}
                         {sla.label}
                       </span>
                     </td>
-                    <td className="px-2 py-3">
-                      <span className="text-[10px] text-gray-500">
-                        {stageLabel(review.status, review.workflow_stage)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 text-right">
+                    {/* ── Actions ── */}
+                    <td className="px-3 py-3 text-right align-top pt-3">
                       <div className="flex items-center justify-end gap-1">
                         {(() => {
                           const rowActions = getAllowedActions(review.status);
                           const rowImmutable = isImmutable(review.status);
                           if (rowImmutable) {
                             return (
-                              <span className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium text-gray-400">
+                              <span className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium text-gray-400 dark:text-gray-500">
                                 <Lock className="w-3 h-3" />
                                 {getStatusLabel(review.status)}
                               </span>
@@ -734,30 +909,34 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                               {!review.assigned_to && rowActions.canAssign && (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); setAssignTarget(review.review_id); }}
-                                  className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded-lg bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors"
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded-md bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/30 transition-colors"
+                                  title="Assign reviewer"
                                 >
-                                  <UserPlus className="w-3 h-3" /> Assign
+                                  <UserPlus className="w-3 h-3" />
                                 </button>
                               )}
                               {rowActions.canApprove && (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); setApprovalTarget(review); }}
-                                  className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded-lg bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded-md bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/20 dark:text-green-300 dark:hover:bg-green-900/30 transition-colors"
+                                  title="Approve review"
                                 >
-                                  <ThumbsUp className="w-3 h-3" /> Approve
+                                  <ThumbsUp className="w-3 h-3" />
                                 </button>
                               )}
                               {rowActions.canEscalate && (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); setEscalationTarget(review); }}
-                                  className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded-lg bg-orange-100 text-orange-700 hover:bg-orange-200 transition-colors"
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded-md bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/20 dark:text-orange-300 dark:hover:bg-orange-900/30 transition-colors"
+                                  title="Escalate review"
                                 >
-                                  <ArrowUpRight className="w-3 h-3" /> Escalate
+                                  <ArrowUpRight className="w-3 h-3" />
                                 </button>
                               )}
                               <button
                                 onClick={(e) => { e.stopPropagation(); onReviewSelect?.(review.review_id); }}
-                                className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-[9px] font-medium rounded-md bg-navy-600 text-white hover:bg-navy-700 dark:bg-navy-500 dark:hover:bg-navy-600 transition-colors shadow-sm"
+                                title="Open review workspace"
                               >
                                 <Eye className="w-3 h-3" /> Open
                               </button>
@@ -774,10 +953,10 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
         </div>
       )}
 
-      {/* Footer */}
-      <div className="px-4 py-2 border-t border-gray-100 bg-gray-50 text-[10px] text-gray-400 flex items-center justify-between">
+      {/* ── Footer ── */}
+      <div className="flex items-center justify-between px-4 py-2 border-t border-gray-200 dark:border-navy-700 bg-gray-50 dark:bg-navy-850 text-[10px] text-gray-500 dark:text-gray-400 flex-shrink-0">
         <span>{filtered.length} of {reviews.length} reviews</span>
-        <span className="flex items-center gap-2">
+        <span className="flex items-center gap-3">
           {metrics && (
             <>
               <span className="inline-flex items-center gap-1">
@@ -785,6 +964,9 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
               </span>
               <span className="inline-flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-amber-400" /> {metrics.sla_at_risk || 0} at risk
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-red-400" /> {metrics.overdue || 0} overdue
               </span>
             </>
           )}

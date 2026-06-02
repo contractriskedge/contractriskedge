@@ -57,7 +57,9 @@ services:
       - key: SENTRY_DSN
         sync: false
       - key: OTEL_ENABLED
-        value: false
+        value: true
+      - key: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://otel-collector:4318
       - key: SMTP_HOST
         sync: false
       - key: SMTP_USER
@@ -66,8 +68,6 @@ services:
         sync: false
       - key: APP_URL
         value: https://app.contractriskedge.com
-      - key: DEV_AUTH_BYPASS
-        value: false
     disk:
       name: tmp
       mountPath: /tmp
@@ -109,8 +109,6 @@ services:
         sync: false
       - key: AUTH0_AUDIENCE
         sync: false
-      - key: DEV_AUTH_BYPASS
-        value: false
 
   # ── Celery Beat Scheduler ───────────────────────────────────────
   - type: worker

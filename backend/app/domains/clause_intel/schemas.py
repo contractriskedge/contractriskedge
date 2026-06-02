@@ -1,284 +1,202 @@
-"""Clause Intelligence schemas — clause graph, alternatives, negotiation lineage, semantic relationships."""
+"""Clause Intelligence Pydantic schemas."""
 
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
 
-# ── Enums ───────────────────────────────────────────────────────────
+CLAUSE_CATEGORIES = [
+    "indemnification", "limitation_of_liability", "confidentiality", "data_privacy",
+    "intellectual_property", "termination", "governing_law", "dispute_resolution",
+    "force_majeure", "payment_terms", "warranty", "insurance", "compliance",
+    "audit_rights", "assignment", "non_compete", "non_solicit", "sla", "escrow", "general",
+]
 
 
-class RelationshipType(str, Enum):
-    SIMILAR_TO = "similar_to"
-    ALTERNATIVE_TO = "alternative_to"
-    SUPERSEDES = "supersedes"
-    DEPENDS_ON = "depends_on"
-    CONFLICTS_WITH = "conflicts_with"
-    DERIVED_FROM = "derived_from"
-    FALLBACK_FOR = "fallback_for"
-    NEGOTIATED_FROM = "negotiated_from"
-
-
-class NegotiationOutcome(str, Enum):
-    ACCEPTED = "accepted"
-    REJECTED = "rejected"
-    MODIFIED = "modified"
-    WITHDRAWN = "withdrawn"
-    COUNTERED = "countered"
-
-
-class ClauseRiskInheritance(str, Enum):
-    DIRECT = "direct"           # risk directly from this clause
-    DERIVED = "derived"         # risk inherited from dependency
-    AGGREGATED = "aggregated"   # risk aggregated from multiple related clauses
-    MITIGATED = "mitigated"     # risk reduced by other clause
-
-
-# ── Clause Graph ───────────────────────────────────────────────────
-
-
-class ClauseNode(BaseModel):
-    """A node in the clause knowledge graph."""
-    clause_id: str
-    clause_type: str
-    canonical_category: str
-    title: str = ""
-    text_snippet: str = ""
-    source: str = ""  # 'contract', 'playbook', 'precedent', 'negotiation'
-    upload_id: Optional[str] = None
-    review_id: Optional[str] = None
-    tenant_id: Optional[str] = None
-    risk_score: Optional[float] = None
-    severity: Optional[str] = None
-    created_at: Optional[datetime] = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class ClauseRelationship(BaseModel):
-    """A relationship between two clauses in the knowledge graph."""
-    relationship_id: str = ""
-    source_clause_id: str
-    target_clause_id: str
-    relationship_type: RelationshipType
-    strength: float = Field(default=1.0, ge=0.0, le=1.0)
-    label: str = ""
-    evidence: str = ""
-    created_at: datetime
-
-
-class ClauseGraph(BaseModel):
-    """Complete clause knowledge graph."""
-    nodes: list[ClauseNode] = Field(default_factory=list)
-    edges: list[ClauseRelationship] = Field(default_factory=list)
-    total_clauses: int = 0
-    total_relationships: int = 0
-    clause_types: list[str] = Field(default_factory=list)
-
-
-class ClauseGraphQuery(BaseModel):
-    """Query parameters for clause graph traversal."""
+class ClauseCreate(BaseModel):
+    name: str
+    category: str
     clause_type: Optional[str] = None
-    upload_id: Optional[str] = None
-    relationship_types: Optional[list[RelationshipType]] = None
-    max_depth: int = 2
-    min_strength: float = 0.3
-    include_metadata: bool = False
-
-
-# ── Approved Alternatives ──────────────────────────────────────────
-
-
-class ApprovedAlternative(BaseModel):
-    """An approved alternative for a risky or non-standard clause."""
-    alternative_id: str = ""
-    clause_type: str
-    original_text_snippet: str = ""
-    alternative_text: str = ""
-    title: str = ""
-    rationale: str = ""
-    source: str = ""  # 'playbook', 'negotiation', 'legal_review', 'ai_generated'
-    approved_by: Optional[str] = None
-    approved_at: Optional[datetime] = None
-    effectiveness_score: Optional[float] = None  # how well this alternative reduced risk
-    risk_reduction: Optional[str] = None  # 'critical', 'high', 'medium', 'low'
-    usage_count: int = 0  # how many times this alternative has been used
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class AlternativeSearchResult(BaseModel):
-    """Search result for approved alternatives."""
-    clause_type: str
-    alternatives: list[ApprovedAlternative] = Field(default_factory=list)
-    total_found: int = 0
-    has_playbook_alternatives: bool = False
-    has_negotiation_alternatives: bool = False
-
-
-# ── Negotiation Lineage ────────────────────────────────────────────
-
-
-class NegotiationRound(BaseModel):
-    """A single round of negotiation on a clause."""
-    round_number: int
-    proposed_text: str = ""
-    response_text: str = ""
-    proposed_by: str = ""  # 'us', 'counterparty'
-    outcome: NegotiationOutcome
-    notes: str = ""
-    created_at: datetime
-
-
-class NegotiationHistory(BaseModel):
-    """Full negotiation history for a clause across a contract review."""
-    negotiation_id: str = ""
-    upload_id: str
-    review_id: Optional[str] = None
-    clause_type: str
-    original_text: str = ""
-    final_text: str = ""
-    rounds: list[NegotiationRound] = Field(default_factory=list)
-    total_rounds: int = 0
-    final_outcome: Optional[NegotiationOutcome] = None
-    days_to_resolve: Optional[int] = None
-    risk_score_initial: Optional[float] = None
-    risk_score_final: Optional[float] = None
-    risk_reduction_pct: Optional[float] = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class NegotiationPattern(BaseModel):
-    """A recurring pattern in clause negotiations."""
-    pattern_id: str = ""
-    clause_type: str
-    pattern_name: str = ""
-    description: str = ""
-    common_requests: list[str] = Field(default_factory=list)
-    typical_outcomes: list[str] = Field(default_factory=list)
-    success_rate: float = 0.0
-    average_rounds: float = 0.0
-    sample_count: int = 0
-
-
-# ── Vendor Clause Patterns ─────────────────────────────────────────
-
-
-class VendorClauseProfile(BaseModel):
-    """A vendor's typical clause patterns across contracts."""
-    vendor_name: str
-    counterparty: str = ""
-    clause_type: str
-    typical_language: str = ""
-    common_deviations: list[str] = Field(default_factory=list)
-    negotiation_tendency: str = ""  # 'flexible', 'rigid', 'moderate'
-    risk_tendency: str = ""  # 'favorable', 'neutral', 'aggressive'
-    contract_count: int = 0
-    average_risk_score: Optional[float] = None
-    last_encountered: Optional[datetime] = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class VendorPatternSummary(BaseModel):
-    """Summary of vendor clause patterns across all contracts."""
-    vendor_name: str
-    total_contracts: int = 0
-    clause_profiles: list[VendorClauseProfile] = Field(default_factory=list)
-    overall_risk_tendency: str = "neutral"
-    common_clause_types: list[str] = Field(default_factory=list)
-    last_activity: Optional[datetime] = None
-
-
-# ── Semantic Clause Graph ──────────────────────────────────────────
-
-
-class SemanticCluster(BaseModel):
-    """A cluster of semantically similar clauses."""
-    cluster_id: str = ""
-    label: str = ""
-    clause_type: str
-    clause_count: int = 0
-    representative_text: str = ""
-    risk_range: tuple[float, float] = (0.0, 0.0)
-    common_issues: list[str] = Field(default_factory=list)
-    clauses: list[ClauseNode] = Field(default_factory=list)
-
-
-class SemanticSearchResult(BaseModel):
-    """Result of a semantic clause search."""
-    query: str
-    clause_type: Optional[str] = None
-    results: list[SemanticMatch] = Field(default_factory=list)
-    total: int = 0
-
-
-class SemanticMatch(BaseModel):
-    """A semantically similar clause match."""
-    clause_id: str
-    clause_type: str
-    text_snippet: str = ""
-    similarity_score: float = 0.0
-    source: str = ""
-    upload_id: Optional[str] = None
+    text: str
+    jurisdiction: Optional[str] = None
+    contract_types: list[str] = Field(default_factory=list)
     risk_score: Optional[float] = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    owner: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+    governance_notes: Optional[str] = None
 
 
-# ── Risk Inheritance ───────────────────────────────────────────────
+class ClauseUpdate(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    clause_type: Optional[str] = None
+    text: Optional[str] = None
+    jurisdiction: Optional[str] = None
+    contract_types: Optional[list[str]] = None
+    risk_score: Optional[float] = None
+    ai_confidence: Optional[float] = None
+    ai_explanation: Optional[str] = None
+    negotiation_strength: Optional[float] = None
+    negotiation_guidance: Optional[str] = None
+    approval_status: Optional[str] = None
+    owner: Optional[str] = None
+    is_favorite: Optional[bool] = None
+    tags: Optional[list[str]] = None
+    governance_notes: Optional[str] = None
 
 
-class RiskInheritanceChain(BaseModel):
-    """Chain of risk inheritance between related clauses."""
-    source_clause_id: str
-    source_clause_type: str
-    inheritance_type: ClauseRiskInheritance
-    inherited_risk_score: float = 0.0
-    contributing_clauses: list[RiskContribution] = Field(default_factory=list)
-    mitigation_factors: list[str] = Field(default_factory=list)
-    net_risk_score: float = 0.0
+class ClauseResponse(BaseModel):
+    id: str
+    name: str
+    category: str
+    clause_type: Optional[str] = None
+    text: str
+    jurisdiction: Optional[str] = None
+    contract_types: list[str] = []
+    risk_score: Optional[float] = None
+    risk_level: Optional[str] = None
+    ai_confidence: Optional[float] = None
+    ai_explanation: Optional[str] = None
+    negotiation_strength: Optional[float] = None
+    negotiation_guidance: Optional[str] = None
+    benchmark_percentile: Optional[float] = None
+    usage_frequency: int = 0
+    approval_status: str = "draft"
+    owner: Optional[str] = None
+    version: int = 1
+    is_favorite: bool = False
+    tags: list[str] = []
+    deviation_frequency: int = 0
+    market_percentile: Optional[float] = None
+    playbook_linkage: Optional[str] = None
+    governance_notes: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
-class RiskContribution(BaseModel):
-    """A single clause's contribution to inherited risk."""
+class ClauseListParams(BaseModel):
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+    category: Optional[str] = None
+    search: Optional[str] = None
+    approval_status: Optional[str] = None
+    risk_level: Optional[str] = None
+    sort_by: str = "updated_at"
+    sort_order: str = "desc"
+
+
+class FallbackVariantResponse(BaseModel):
+    id: str
+    label: str
+    text: str
+    risk_score: Optional[float] = None
+    negotiation_strength: Optional[float] = None
+    usage_rate: Optional[float] = None
+    is_preferred: bool = False
+    jurisdiction: Optional[str] = None
+
+
+class BenchmarkResponse(BaseModel):
+    category: str
+    market_median: float
+    market_p25: Optional[float] = None
+    market_p75: Optional[float] = None
+    sample_size: int = 0
+    avg_risk_score: Optional[float] = None
+    acceptance_rate: Optional[float] = None
+    deviation_rate: Optional[float] = None
+
+
+class NegotiationHistoryResponse(BaseModel):
+    id: str
     clause_id: str
-    clause_type: str
-    risk_score: float = 0.0
-    contribution_weight: float = 0.0
-    relationship_type: RelationshipType
-    text_snippet: str = ""
+    counterparty: Optional[str] = None
+    original_text: str
+    negotiated_text: Optional[str] = None
+    outcome: Optional[str] = None
+    risk_delta: Optional[float] = None
+    strategy_used: Optional[str] = None
+    success: Optional[bool] = None
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
 
 
-# ── Clause Intelligence Summary ────────────────────────────────────
+class AiReviewRequest(BaseModel):
+    clause_text: str
+    category: str
+    jurisdiction: Optional[str] = None
+    contract_type: Optional[str] = None
 
 
-class ClauseIntelligenceDashboard(BaseModel):
-    """Executive dashboard for clause intelligence."""
-    total_clauses_analyzed: int = 0
-    total_relationships: int = 0
-    unique_clause_types: int = 0
-    approved_alternatives_count: int = 0
-    negotiation_histories: int = 0
-    vendor_patterns_tracked: int = 0
-    semantic_clusters: int = 0
-    most_common_risky_clauses: list[ClauseTypeRiskSummary] = Field(default_factory=list)
-    top_negotiated_clauses: list[ClauseTypeNegotiationSummary] = Field(default_factory=list)
+class AiReviewResponse(BaseModel):
+    risk_score: float
+    risk_level: str
+    confidence: float
+    explanation: str
+    negotiation_strength: float
+    negotiation_guidance: str
+    compliance_warnings: list[str] = []
+    suggested_fallback: Optional[str] = None
+    escalation_triggers: list[str] = []
 
 
-class ClauseTypeRiskSummary(BaseModel):
-    """Risk summary for a clause type."""
-    clause_type: str
-    count: int = 0
-    average_risk_score: float = 0.0
-    high_risk_count: int = 0
-    trend: str = "stable"  # 'improving', 'worsening', 'stable'
+class SimilarityRequest(BaseModel):
+    clause_text: str
+    category: Optional[str] = None
+    limit: int = 10
 
 
-class ClauseTypeNegotiationSummary(BaseModel):
-    """Negotiation summary for a clause type."""
-    clause_type: str
-    total_negotiations: int = 0
-    acceptance_rate: float = 0.0
-    average_rounds: float = 0.0
-    average_risk_reduction: float = 0.0
+class SimilarityResult(BaseModel):
+    clause_id: str
+    name: str
+    similarity: float
+    text: str
+    category: str
+    risk_score: Optional[float] = None
+
+
+class DeviationResponse(BaseModel):
+    clause_id: str
+    name: str
+    category: str
+    deviation_score: float
+    market_median: float
+    your_score: float
+    risk_impact: str
+    recommendation: str
+
+
+class UsageTrendResponse(BaseModel):
+    date: str
+    count: int
+    category: Optional[str] = None
+
+
+class MarketComparisonResponse(BaseModel):
+    category: str
+    your_percentile: float
+    market_median: float
+    market_p25: float
+    market_p75: float
+    sample_size: int
+
+
+class RejectionPatternResponse(BaseModel):
+    category: str
+    rejection_rate: float
+    common_reasons: list[str]
+    recommendation: str
+
+
+class ClauseKpiResponse(BaseModel):
+    total_clauses: int
+    approved_count: int
+    pending_review: int
+    deprecated_count: int
+    avg_risk_score: float
+    avg_ai_confidence: float
+    total_fallbacks: int
+    total_playbooks: int

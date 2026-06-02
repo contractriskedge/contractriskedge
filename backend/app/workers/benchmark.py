@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from celery import shared_task
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, text as sa_text
 
 from app.config import settings
 from app.domains.benchmark.models import (
@@ -50,8 +50,12 @@ async def _create_job(
     job_type: BenchmarkJobType,
     corpus_id: uuid.UUID | None = None,
     upload_id: uuid.UUID | None = None,
-) -> BenchmarkJob:
-    """Create a new BenchmarkJob record and return it."""
+) -> BenchmarkJob | None:
+    """Create a new BenchmarkJob record and return it.
+
+    Returns ``None`` if the benchmark_jobs table does not exist
+    (graceful degradation for un-migrated databases).
+    """
     session = await worker_loop.create_session(tenant_id, "system", "worker")
     try:
         job = BenchmarkJob(
@@ -67,6 +71,17 @@ async def _create_job(
         await session.commit()
         await session.refresh(job)
         return job
+    except Exception as exc:
+        await session.rollback()
+        # Graceful degradation: if the table doesn't exist, log and return None
+        if "does not exist" in str(exc) or "UndefinedTable" in str(exc):
+            logger.warning(
+                "[Benchmark] benchmark_jobs table not found — skipping job tracking "
+                "(run 'alembic upgrade head' to create it): %s",
+                exc,
+            )
+            return None
+        raise
     finally:
         await session.close()
 
@@ -93,6 +108,31 @@ async def _update_progress(job: BenchmarkJob, session, pct: int, message: str) -
     job.progress_message = message
 
 
+def _run_for_all_active_tenants(runner, *, label: str) -> dict:
+    """Run a per-tenant benchmark job for every active tenant (Celery Beat entry)."""
+    from app.kernel.database.sync_session import get_sync_factory
+
+    factory = get_sync_factory()
+    session = factory.create_session(tenant_id="system", user_id="system", user_role="admin")
+    try:
+        rows = session.execute(
+            sa_text("SELECT tenant_id FROM tenants WHERE is_active = TRUE")
+        ).fetchall()
+    finally:
+        session.close()
+
+    results: dict[str, object] = {}
+    for (tenant_id,) in rows:
+        tenant_id_str = str(tenant_id)
+        try:
+            results[tenant_id_str] = runner(tenant_id_str)
+        except Exception as exc:
+            logger.exception("[Benchmark] %s failed for tenant %s", label, tenant_id_str)
+            results[tenant_id_str] = {"status": "failed", "error": str(exc)}
+
+    return {"status": "completed", "tenants": len(results), "results": results}
+
+
 # ── Task: Recompute Benchmarks ─────────────────────────────────────
 
 
@@ -105,7 +145,7 @@ async def _update_progress(job: BenchmarkJob, session, pct: int, message: str) -
     acks_late=True,
 )
 def recompute_benchmarks(
-    tenant_id: str,
+    tenant_id: str | None = None,
     corpus_id: str | None = None,
     user_id: str = "system",
 ):
@@ -114,10 +154,17 @@ def recompute_benchmarks(
     If ``corpus_id`` is provided, only that corpus is recomputed.
     Otherwise, all active corpora for the tenant are processed.
 
+    When ``tenant_id`` is omitted (Celery Beat), runs for all active tenants.
+
     This is the primary score-freshness mechanism.  Should be scheduled
     nightly via Celery Beat.
     """
-    return worker_loop.run(_recompute_async(tenant_id, corpus_id, user_id))
+    if tenant_id is not None:
+        return worker_loop.run(_recompute_async(tenant_id, corpus_id, user_id))
+    return _run_for_all_active_tenants(
+        lambda tid: worker_loop.run(_recompute_async(tid, corpus_id, user_id)),
+        label="Recompute",
+    )
 
 
 async def _recompute_async(
@@ -143,9 +190,10 @@ async def _recompute_async(
             corpora = await engine.list_corpora()
 
         if not corpora:
-            await _update_progress(job, session, 100, "No corpora to recompute")
-            await _complete_job(job, session)
-            await session.commit()
+            if job is not None:
+                await _update_progress(job, session, 100, "No corpora to recompute")
+                await _complete_job(job, session)
+                await session.commit()
             return {"status": "skipped", "reason": "no corpora"}
 
         # Load all scores grouped by (corpus_id, category)
@@ -163,16 +211,17 @@ async def _recompute_async(
             categories = [row[0] for row in score_categories.fetchall()]
             total_categories += len(categories)
 
-        job.items_total = total_categories
-        await session.flush()
+        if job is not None:
+            job.items_total = total_categories
+            await session.flush()
 
         # Create version snapshot and lineage before recompute
         for corpus in corpora:
             version = await gov.create_version_snapshot(
                 corpus_id=corpus.corpus_id,
                 change_description="Pre-recompute snapshot",
-                created_by=f"job:{job.job_id}",
-                job_id=job.job_id,
+                created_by=f"job:{job.job_id}" if job else "system",
+                job_id=job.job_id if job else None,
             )
 
             # Count total clauses in corpus
@@ -188,11 +237,11 @@ async def _recompute_async(
             await lineage_svc.record_recompute(
                 corpus_id=corpus.corpus_id,
                 corpus_version_id=version.version_id,
-                job_id=job.job_id,
+                job_id=job.job_id if job else None,
                 operation="recompute",
                 score_count_affected=0,  # Updated after processing
                 corpus_clause_count=corpus_clause_count,
-                created_by=f"job:{job.job_id}",
+                created_by=f"job:{job.job_id}" if job else "system",
             )
 
         # Recompute scores per corpus
@@ -253,28 +302,30 @@ async def _recompute_async(
                             break
 
                 processed += len(results)
-                pct = int((processed / max(total_categories, 1)) * 100)
-                await _update_progress(
-                    job, session, pct,
-                    f"Recomputed {processed}/{total_categories} score groups",
+                if job is not None:
+                    pct = int((processed / max(total_categories, 1)) * 100)
+                    await _update_progress(
+                        job, session, pct,
+                        f"Recomputed {processed}/{total_categories} score groups",
+                    )
+
+        if job is not None:
+            job.items_processed = processed
+
+            # Update lineage with actual score count
+            for corpus in corpora:
+                latest_lineage = await session.execute(
+                    select(BenchmarkLineage).where(
+                        BenchmarkLineage.corpus_id == corpus.corpus_id,
+                        BenchmarkLineage.job_id == job.job_id,
+                    ).order_by(BenchmarkLineage.created_at.desc()).limit(1)
                 )
+                lineage_record = latest_lineage.scalar_one_or_none()
+                if lineage_record:
+                    lineage_record.score_count_affected = processed
 
-        job.items_processed = processed
-
-        # Update lineage with actual score count
-        for corpus in corpora:
-            latest_lineage = await session.execute(
-                select(BenchmarkLineage).where(
-                    BenchmarkLineage.corpus_id == corpus.corpus_id,
-                    BenchmarkLineage.job_id == job.job_id,
-                ).order_by(BenchmarkLineage.created_at.desc()).limit(1)
-            )
-            lineage_record = latest_lineage.scalar_one_or_none()
-            if lineage_record:
-                lineage_record.score_count_affected = processed
-
-        await _complete_job(job, session)
-        await session.commit()
+            await _complete_job(job, session)
+            await session.commit()
 
         logger.info(
             "[Benchmark] Recomputed %d score groups across %d corpora for tenant %s",
@@ -284,8 +335,12 @@ async def _recompute_async(
 
     except Exception as exc:
         await session.rollback()
-        await _fail_job(job, session, str(exc))
-        await session.commit()
+        if job is not None:
+            try:
+                await _fail_job(job, session, str(exc))
+                await session.commit()
+            except Exception:
+                logger.exception("[Benchmark] Failed to persist job failure for tenant %s", tenant_id)
         logger.exception("[Benchmark] Recompute failed for tenant %s", tenant_id)
         raise
 
@@ -302,7 +357,7 @@ async def _recompute_async(
     acks_late=True,
 )
 def refresh_embeddings(
-    tenant_id: str,
+    tenant_id: str | None = None,
     corpus_id: str | None = None,
     user_id: str = "system",
 ):
@@ -311,9 +366,16 @@ def refresh_embeddings(
     If ``corpus_id`` is provided, only that corpus is refreshed.
     Otherwise, all active corpora for the tenant are processed.
 
+    When ``tenant_id`` is omitted (Celery Beat), runs for all active tenants.
+
     Should be scheduled weekly or triggered after an embedding model upgrade.
     """
-    return worker_loop.run(_refresh_embeddings_async(tenant_id, corpus_id, user_id))
+    if tenant_id is not None:
+        return worker_loop.run(_refresh_embeddings_async(tenant_id, corpus_id, user_id))
+    return _run_for_all_active_tenants(
+        lambda tid: worker_loop.run(_refresh_embeddings_async(tid, corpus_id, user_id)),
+        label="Embedding refresh",
+    )
 
 
 async def _refresh_embeddings_async(
@@ -340,13 +402,15 @@ async def _refresh_embeddings_async(
         clauses = list(result.scalars().all())
 
         if not clauses:
-            await _update_progress(job, session, 100, "No clauses to refresh")
-            await _complete_job(job, session)
-            await session.commit()
+            if job is not None:
+                await _update_progress(job, session, 100, "No clauses to refresh")
+                await _complete_job(job, session)
+                await session.commit()
             return {"status": "skipped", "reason": "no clauses"}
 
-        job.items_total = len(clauses)
-        await session.flush()
+        if job is not None:
+            job.items_total = len(clauses)
+            await session.flush()
 
         processed = 0
         failed = 0
@@ -366,16 +430,18 @@ async def _refresh_embeddings_async(
                 )
                 failed += 1
 
-            pct = int(((processed + failed) / len(clauses)) * 100)
-            await _update_progress(
-                job, session, pct,
-                f"Refreshed {processed}/{len(clauses)} embeddings ({failed} failed)",
-            )
+            if job is not None:
+                pct = int(((processed + failed) / len(clauses)) * 100)
+                await _update_progress(
+                    job, session, pct,
+                    f"Refreshed {processed}/{len(clauses)} embeddings ({failed} failed)",
+                )
 
-        job.items_processed = processed
-        job.items_failed = failed
-        await _complete_job(job, session)
-        await session.commit()
+        if job is not None:
+            job.items_processed = processed
+            job.items_failed = failed
+            await _complete_job(job, session)
+            await session.commit()
 
         logger.info(
             "[Benchmark] Refreshed %d embeddings for tenant %s (%d failed)",
@@ -385,8 +451,12 @@ async def _refresh_embeddings_async(
 
     except Exception as exc:
         await session.rollback()
-        await _fail_job(job, session, str(exc))
-        await session.commit()
+        if job is not None:
+            try:
+                await _fail_job(job, session, str(exc))
+                await session.commit()
+            except Exception:
+                logger.exception("[Benchmark] Failed to persist job failure for tenant %s", tenant_id)
         logger.exception("[Benchmark] Embedding refresh failed for tenant %s", tenant_id)
         raise
 
@@ -403,7 +473,7 @@ async def _refresh_embeddings_async(
     acks_late=True,
 )
 def detect_stale_scores(
-    tenant_id: str,
+    tenant_id: str | None = None,
     stale_after_days: int = STALE_AFTER_DAYS,
 ):
     """Detect and flag benchmark scores that are based on stale corpus data.
@@ -413,10 +483,17 @@ def detect_stale_scores(
     2. The corpus has been updated (new clauses added) since the score was computed
     3. The embedding model version has changed (future: checked via metadata)
 
+    When ``tenant_id`` is omitted (Celery Beat), runs for all active tenants.
+
     This task does NOT modify scores — it returns a report of stale entries
     for review.  Use ``recompute_benchmarks`` to refresh stale scores.
     """
-    return worker_loop.run(_detect_stale_async(tenant_id, stale_after_days))
+    if tenant_id is not None:
+        return worker_loop.run(_detect_stale_async(tenant_id, stale_after_days))
+    return _run_for_all_active_tenants(
+        lambda tid: worker_loop.run(_detect_stale_async(tid, stale_after_days)),
+        label="Stale detection",
+    )
 
 
 async def _detect_stale_async(
@@ -452,17 +529,18 @@ async def _detect_stale_async(
                 if corpus_row.updated_at > score.created_at:
                     corpus_stale.append(str(score.score_id))
 
-        job.items_processed = len(scores)
-        job.items_failed = len(corpus_stale)
-        job.result_summary = {
-            "total_stale": len(scores),
-            "corpus_updated_since_score": len(corpus_stale),
-            "stale_score_ids": [str(s.score_id) for s in scores[:100]],  # First 100
-            "stale_after_days": stale_after_days,
-            "cutoff_date": cutoff.isoformat(),
-        }
-        await _complete_job(job, session)
-        await session.commit()
+        if job is not None:
+            job.items_processed = len(scores)
+            job.items_failed = len(corpus_stale)
+            job.result_summary = {
+                "total_stale": len(scores),
+                "corpus_updated_since_score": len(corpus_stale),
+                "stale_score_ids": [str(s.score_id) for s in scores[:100]],  # First 100
+                "stale_after_days": stale_after_days,
+                "cutoff_date": cutoff.isoformat(),
+            }
+            await _complete_job(job, session)
+            await session.commit()
 
         logger.info(
             "[Benchmark] Detected %d stale scores for tenant %s (%d corpus-updated)",
@@ -476,8 +554,12 @@ async def _detect_stale_async(
 
     except Exception as exc:
         await session.rollback()
-        await _fail_job(job, session, str(exc))
-        await session.commit()
+        if job is not None:
+            try:
+                await _fail_job(job, session, str(exc))
+                await session.commit()
+            except Exception:
+                logger.exception("[Benchmark] Failed to persist job failure for tenant %s", tenant_id)
         logger.exception("[Benchmark] Stale detection failed for tenant %s", tenant_id)
         raise
 
@@ -525,9 +607,10 @@ async def _export_csv_async(
             corpora = await engine.list_corpora()
 
         if not corpora:
-            await _update_progress(job, session, 100, "No corpora to export")
-            await _complete_job(job, session)
-            await session.commit()
+            if job is not None:
+                await _update_progress(job, session, 100, "No corpora to export")
+                await _complete_job(job, session)
+                await session.commit()
             return {"status": "skipped", "reason": "no corpora"}
 
         output = io.StringIO()
@@ -558,15 +641,16 @@ async def _export_csv_async(
         csv_content = output.getvalue()
         output.close()
 
-        job.items_processed = total_clauses
-        job.result_summary = {
-            "csv_size_bytes": len(csv_content),
-            "row_count": total_clauses + 1,  # +1 for header
-            "corpus_count": len(corpora),
-            "csv_content": csv_content,  # Stored for retrieval — large exports should use S3
-        }
-        await _complete_job(job, session)
-        await session.commit()
+        if job is not None:
+            job.items_processed = total_clauses
+            job.result_summary = {
+                "csv_size_bytes": len(csv_content),
+                "row_count": total_clauses + 1,  # +1 for header
+                "corpus_count": len(corpora),
+                "csv_content": csv_content,  # Stored for retrieval — large exports should use S3
+            }
+            await _complete_job(job, session)
+            await session.commit()
 
         logger.info(
             "[Benchmark] Exported %d rows for tenant %s",
@@ -580,7 +664,11 @@ async def _export_csv_async(
 
     except Exception as exc:
         await session.rollback()
-        await _fail_job(job, session, str(exc))
-        await session.commit()
+        if job is not None:
+            try:
+                await _fail_job(job, session, str(exc))
+                await session.commit()
+            except Exception:
+                logger.exception("[Benchmark] Failed to persist job failure for tenant %s", tenant_id)
         logger.exception("[Benchmark] CSV export failed for tenant %s", tenant_id)
         raise

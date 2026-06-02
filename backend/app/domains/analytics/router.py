@@ -538,6 +538,18 @@ async def delete_scheduled_report(
 # ── Anomaly Detection ────────────────────────────────────────────
 
 
+@router.get("/anomalies", response_model=AnomalyDetectionResult)
+async def detect_anomalies_short(
+    lookback_hours: int = Query(24, ge=1, le=720),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Detect anomalies in tenant metrics (SLA, volume, risk, performance)."""
+    detector = AnomalyDetector(session=db, tenant_id=tenant_id)
+    return await detector.detect_anomalies(lookback_hours=lookback_hours)
+
+
 @router.get("/executive/anomalies", response_model=AnomalyDetectionResult)
 async def detect_anomalies(
     lookback_hours: int = Query(24, ge=1, le=720),
@@ -579,3 +591,62 @@ async def generate_executive_digest(
     """Generate an executive digest — the daily/weekly briefing with anomalies and narratives."""
     generator = DigestGenerator(session=db, tenant_id=tenant_id)
     return await generator.generate_digest(style=style, period_days=period_days)
+
+
+# ── Executive AI Briefing ────────────────────────────────────────
+# Phase 2 Session 6 — LLM-powered executive intelligence narrative.
+
+
+@router.post("/executive/briefing")
+async def generate_executive_briefing(
+    style: DigestStyle = Query(DigestStyle.STANDARD, description="Briefing detail level"),
+    period_days: int = Query(7, ge=1, le=90),
+    include_recommendations: bool = Query(True),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Generate an AI-powered executive briefing with natural-language narrative synthesis.
+
+    Composes data from:
+    - Executive dashboard (portfolio, SLA, bottlenecks, exposure)
+    - Anomaly detection
+    - Trend narratives
+    - OpenAI LLM (narrative synthesis)
+
+    Returns structured briefing with executive summary, key findings,
+    recommendations, and risk escalations.
+    """
+    from app.domains.analytics.briefing_service import ExecutiveBriefingGenerator
+
+    generator = ExecutiveBriefingGenerator(session=db, tenant_id=tenant_id)
+    briefing = await generator.generate_briefing(
+        style=style,
+        lookback_days=period_days,
+        include_recommendations=include_recommendations,
+    )
+    return briefing.to_dict()
+
+
+@router.post("/executive/briefing/escalation")
+async def generate_risk_escalation_briefing(
+    lookback_hours: int = Query(24, ge=1, le=168),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Generate an AI-powered risk escalation briefing for urgent situations.
+
+    Focuses on:
+    - Anomaly spike analysis
+    - Root cause identification
+    - Impact assessment
+    - Recommended actions
+    """
+    from app.domains.analytics.briefing_service import ExecutiveBriefingGenerator
+
+    generator = ExecutiveBriefingGenerator(session=db, tenant_id=tenant_id)
+    briefing = await generator.generate_risk_escalation(
+        lookback_days=max(1, lookback_hours // 24),
+    )
+    return briefing.to_dict()

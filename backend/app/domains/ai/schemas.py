@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -286,5 +286,70 @@ class AnalysisResult(BaseModel):
     classifications: list[ClauseClassification] = Field(default_factory=list)
     obligations: list[Obligation] = Field(default_factory=list)
     redlines: list[RedlineSuggestion] = Field(default_factory=list)
+    guardrail_violations: list[AIGuardrailViolation] = Field(default_factory=list)
+    execution_context: Optional[AIExecutionContext] = None
     model_used: str = ""
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class AIGuardrailViolation(BaseModel):
+    """A guardrail check that influenced the AI recommendation."""
+    rule_id: str
+    message: str
+    severity: SeverityLevel = SeverityLevel.MEDIUM
+
+
+class AIExecutionContext(BaseModel):
+    """Execution metadata persisted for AI run traceability and replay."""
+    provider: str
+    model: str
+    prompt_version: Optional[int] = None
+    analysis_prompt_version: Optional[int] = None
+    guardrail_rule_ids: list[str] = Field(default_factory=list)
+    source: str = "ai_analysis_service"
+    trace_id: Optional[str] = None
+    execution_id: Optional[str] = None
+    correlation_id: Optional[str] = None
+    request_chain_id: Optional[str] = None
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+class AIReviewSuggestion(BaseModel):
+    """A single AI review suggestion for the reviewer."""
+    suggestion_id: str
+    title: str
+    suggestion: str
+    explanation: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    guardrail_violations: list[AIGuardrailViolation] = Field(default_factory=list)
+
+
+class AIReviewCopilotRequest(BaseModel):
+    """Request payload for the reviewer AI copilot."""
+    review_id: str
+    prompt: Optional[str] = None
+    max_suggestions: int = Field(default=3, ge=1, le=10)
+    correlation_id: Optional[str] = None
+
+
+class AIReviewCopilotResponse(BaseModel):
+    """Response payload for reviewer AI suggestions."""
+    review_id: str
+    suggestions: list[AIReviewSuggestion] = Field(default_factory=list)
+    model: str
+    prompt_version: Optional[int] = None
+    correlation_id: str
+
+
+class AIReviewFeedbackRequest(BaseModel):
+    """Reviewer feedback submitted against a Copilot suggestion."""
+    review_id: str
+    suggestion_id: str
+    helpful: bool
+    feedback: Optional[str] = None
+    correlation_id: Optional[str] = None
+
+
+class AIReviewFeedbackResponse(BaseModel):
+    """Acknowledges reviewer feedback recording."""
+    status: str

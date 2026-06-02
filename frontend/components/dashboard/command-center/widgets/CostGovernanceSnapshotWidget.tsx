@@ -28,23 +28,23 @@ interface CostGovernanceSnapshotWidgetProps {
   dashboard?: CostDashboardData | null;
 }
 
-const DEFAULT_DATA: CostDashboardData = {
-  budgetUsed: 7340,
-  budgetRemaining: 2660,
-  totalBudget: 10000,
-  dailyBurnRate: 285.50,
-  projectedOverageDate: "Jun 14, 2026",
-  modelTierDistribution: {
-    "Economy": 45,
-    "Standard": 35,
-    "Premium": 18,
-    "Custom": 2,
-  },
-  isAlerting: false,
-};
-
 export function CostGovernanceSnapshotWidget({ dashboard }: CostGovernanceSnapshotWidgetProps) {
-  const data = dashboard ?? DEFAULT_DATA;
+  // No data state
+  if (!dashboard) {
+    return (
+      <div className="flex flex-col items-center justify-center py-8 text-center">
+        <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-navy-700 flex items-center justify-center mb-2">
+          <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <p className="text-sm font-medium text-gray-500 dark:text-gray-400">No cost data available</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Connect to the backend to see cost governance metrics.</p>
+      </div>
+    );
+  }
+
+  const data = dashboard;
   const usagePct = Math.round((data.budgetUsed / data.totalBudget) * 100);
   const remainingPct = 100 - usagePct;
 

@@ -7,14 +7,19 @@ import { ClauseNavigation } from "./ClauseNavigation";
 import { DocumentViewer } from "./DocumentViewer";
 import { RightPanel } from "./RightPanel";
 import { ObligationsPanel, VersionHistory, ActivityTimeline } from "./ObligationsPanel";
-import { mockContract, versionHistory, activityEvents, negotiationIssues, workflowState } from "./mockData";
 import type { ClauseData } from "./types";
 import { RISK_BG, RISK_TEXT, RISK_BG_LIGHT } from "./types";
 
 type LeftTab = "clauses" | "obligations" | "versions" | "activity";
 
+const mockContract = null;
+const versionHistory = [];
+const activityEvents = [];
+const negotiationIssues = [];
+const workflowState = {};
+
 export function ContractDetailWorkspace() {
-  const [selectedClauseId, setSelectedClauseId] = useState<string | null>("cl-4");
+  const [selectedClauseId, setSelectedClauseId] = useState<string | null>(null);
   const [showRedlines, setShowRedlines] = useState(true);
   const [leftTab, setLeftTab] = useState<LeftTab>("clauses");
   const [contract] = useState(mockContract);

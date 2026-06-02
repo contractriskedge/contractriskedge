@@ -1,0 +1,116 @@
+{
+  "title": "ContractRiskEdge — Ingestion Throughput",
+  "uid": "cre-ingestion-throughput",
+  "version": 1,
+  "schemaVersion": 39,
+  "tags": ["contractriskedge", "ingestion", "throughput"],
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "title": "Ingestion Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(ingestion_requests_total{environment=~\"$env\"}[1m]))",
+          "legendFormat": "Ingestion RPS"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      }
+    },
+    {
+      "title": "Ingestion Latency (P50/P95/P99)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(ingestion_duration_seconds_bucket{environment=~\"$env\"}[2m])) by (le))",
+          "legendFormat": "P50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(ingestion_duration_seconds_bucket{environment=~\"$env\"}[2m])) by (le))",
+          "legendFormat": "P95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(ingestion_duration_seconds_bucket{environment=~\"$env\"}[2m])) by (le))",
+          "legendFormat": "P99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "title": "Embedding Generation Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(embedding_generations_total{environment=~\"$env\"}[1m]))",
+          "legendFormat": "Embeddings/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      }
+    },
+    {
+      "title": "Ingestion Queue Depth",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "queue_depth{environment=~\"$env\", queue=\"ingestion\"}",
+          "legendFormat": "Ingestion Queue"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": { "steps": [{ "color": "green" }, { "color": "orange", "value": 50 }, { "color": "red", "value": 200 }] }
+        }
+      }
+    },
+    {
+      "title": "Documents Processed (Cumulative)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "sum(ingestion_documents_processed_total{environment=~\"$env\"})",
+          "legendFormat": "Total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      }
+    },
+    {
+      "title": "Ingestion Success Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 6, "y": 16 },
+      "targets": [
+        {
+          "expr": "sum(rate(ingestion_requests_total{environment=~\"$env\", status=\"success\"}[5m])) / sum(rate(ingestion_requests_total{environment=~\"$env\"}[5m]))",
+          "legendFormat": "Success Rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": { "steps": [{ "color": "red", "value": 0.95 }, { "color": "orange", "value": 0.99 }, { "color": "green" }] }
+        }
+      }
+    }
+  ]
+}

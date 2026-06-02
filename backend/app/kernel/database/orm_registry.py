@@ -21,8 +21,11 @@ _MODEL_MODULES = (
     "app.domains.review.models",
     "app.domains.notify.models",
     "app.domains.playbook.models",
+    "app.domains.exports.models",
     "app.domains.admin.models",
     "app.domains.admin.heartbeat_models",
+    "app.domains.compliance.models",
+    "app.domains.human_oversight.models",
 )
 
 

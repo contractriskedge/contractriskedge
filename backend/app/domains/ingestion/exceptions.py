@@ -1,4 +1,5 @@
 """Ingestion domain exceptions with structured error codes."""
+from __future__ import annotations
 
 from app.kernel.web.exceptions import AppError, ValidationError, NotFoundError, ConflictError
 from app.kernel.web.error_codes import ErrorCode

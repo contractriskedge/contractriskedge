@@ -46,12 +46,32 @@ def _resolve_page_numbers(chunks: Sequence, indices: list[int]) -> list[int]:
 @dataclass
 class AIRepository(BaseRepository):
 
-    async def create_run(self, upload_id: str, tenant_id: str, analysis_type: str,
-                          model: str, provider: str, user_id: Optional[str] = None) -> AIExecutionRun:
+    async def create_run(
+        self,
+        upload_id: str,
+        tenant_id: str,
+        analysis_type: str,
+        model: str,
+        provider: str,
+        user_id: Optional[str] = None,
+        prompt_version: Optional[int] = None,
+        extraction_prompt_version: Optional[int] = None,
+        analysis_prompt_version: Optional[int] = None,
+        execution_context: Optional[dict[str, Any]] = None,
+    ) -> AIExecutionRun:
         run = AIExecutionRun(
-            upload_id=upload_id, tenant_id=tenant_id, user_id=user_id,
-            analysis_type=analysis_type, status=ExecutionStatus.PROCESSING,
-            model=model, provider=provider, started_at=datetime.utcnow(),
+            upload_id=upload_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            analysis_type=analysis_type,
+            status=ExecutionStatus.PROCESSING,
+            model=model,
+            provider=provider,
+            prompt_version=prompt_version,
+            extraction_prompt_version=extraction_prompt_version,
+            analysis_prompt_version=analysis_prompt_version,
+            execution_context=execution_context or {},
+            started_at=datetime.utcnow(),
         )
         self.session.add(run)
         await self.session.flush()
