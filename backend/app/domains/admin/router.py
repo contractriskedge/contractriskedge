@@ -312,6 +312,7 @@ class HeartbeatRequest(BaseModel):
 async def worker_heartbeat(
     body: HeartbeatRequest,
     service: AdminService = Depends(get_admin_service),
+    _: None = Depends(require_permission(Permissions.ADMIN_SYSTEM)),
 ):
     """Record a worker heartbeat (called periodically by workers).
 

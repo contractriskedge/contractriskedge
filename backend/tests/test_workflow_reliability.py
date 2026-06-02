@@ -68,29 +68,31 @@ class TestWorkflowStateMachine:
     """Comprehensive tests for the WorkflowState machine."""
 
     def test_all_workflow_states_exist(self):
-        """Verify all 9 states exist."""
+        """Verify all 14 states exist."""
         expected = {
-            "uploaded", "ai_analyzed", "review_ready", "in_review",
-            "escalated", "approved", "rejected", "finalized", "archived",
+            "uploaded", "analyzing", "ai_reviewed", "procurement_review",
+            "legal_review", "security_review", "negotiation", "in_review",
+            "escalated", "approved", "rejected", "finalized", "executed", "archived",
         }
         actual = {s.value for s in WorkflowState}
         assert actual == expected, f"Missing states: {expected - actual}"
 
     def test_valid_transitions_from_uploaded(self):
         allowed = WorkflowState.valid_transitions()[WorkflowState.UPLOADED]
-        assert WorkflowState.AI_ANALYZED in allowed
+        assert WorkflowState.ANALYZING in allowed
         assert WorkflowState.ARCHIVED in allowed
         assert WorkflowState.FINALIZED not in allowed
         assert WorkflowState.APPROVED not in allowed
 
-    def test_valid_transitions_from_ai_analyzed(self):
-        allowed = WorkflowState.valid_transitions()[WorkflowState.AI_ANALYZED]
-        assert WorkflowState.REVIEW_READY in allowed
+    def test_valid_transitions_from_analyzing(self):
+        allowed = WorkflowState.valid_transitions()[WorkflowState.ANALYZING]
+        assert WorkflowState.AI_REVIEWED in allowed
         assert WorkflowState.ARCHIVED in allowed
 
-    def test_valid_transitions_from_review_ready(self):
-        allowed = WorkflowState.valid_transitions()[WorkflowState.REVIEW_READY]
-        assert WorkflowState.IN_REVIEW in allowed
+    def test_valid_transitions_from_ai_reviewed(self):
+        allowed = WorkflowState.valid_transitions()[WorkflowState.AI_REVIEWED]
+        assert WorkflowState.PROCUREMENT_REVIEW in allowed
+        assert WorkflowState.LEGAL_REVIEW in allowed
         assert WorkflowState.ARCHIVED in allowed
 
     def test_valid_transitions_from_in_review(self):
@@ -123,7 +125,7 @@ class TestWorkflowStateMachine:
     def test_valid_transitions_from_finalized(self):
         allowed = WorkflowState.valid_transitions()[WorkflowState.FINALIZED]
         assert WorkflowState.ARCHIVED in allowed
-        assert len(allowed) == 1  # Only ARCHIVED
+        assert WorkflowState.EXECUTED in allowed
 
     def test_archived_is_terminal(self):
         allowed = WorkflowState.valid_transitions()[WorkflowState.ARCHIVED]
@@ -152,9 +154,10 @@ class TestWorkflowStateMachine:
     # ── validate_transition tests ─────────────────────────────
 
     @pytest.mark.parametrize("from_state,to_state", [
-        (WorkflowState.UPLOADED, WorkflowState.AI_ANALYZED),
-        (WorkflowState.AI_ANALYZED, WorkflowState.REVIEW_READY),
-        (WorkflowState.REVIEW_READY, WorkflowState.IN_REVIEW),
+        (WorkflowState.UPLOADED, WorkflowState.ANALYZING),
+        (WorkflowState.ANALYZING, WorkflowState.AI_REVIEWED),
+        (WorkflowState.AI_REVIEWED, WorkflowState.PROCUREMENT_REVIEW),
+        (WorkflowState.AI_REVIEWED, WorkflowState.LEGAL_REVIEW),
         (WorkflowState.IN_REVIEW, WorkflowState.APPROVED),
         (WorkflowState.IN_REVIEW, WorkflowState.REJECTED),
         (WorkflowState.IN_REVIEW, WorkflowState.ESCALATED),
@@ -175,8 +178,8 @@ class TestWorkflowStateMachine:
     @pytest.mark.parametrize("from_state,to_state", [
         (WorkflowState.UPLOADED, WorkflowState.FINALIZED),
         (WorkflowState.UPLOADED, WorkflowState.APPROVED),
-        (WorkflowState.AI_ANALYZED, WorkflowState.APPROVED),
-        (WorkflowState.REVIEW_READY, WorkflowState.FINALIZED),
+        (WorkflowState.ANALYZING, WorkflowState.APPROVED),
+        (WorkflowState.AI_REVIEWED, WorkflowState.FINALIZED),
         (WorkflowState.IN_REVIEW, WorkflowState.FINALIZED),
         (WorkflowState.APPROVED, WorkflowState.IN_REVIEW),
         (WorkflowState.APPROVED, WorkflowState.REJECTED),
@@ -223,13 +226,13 @@ class TestWorkflowStateMachine:
 
     @pytest.mark.parametrize("legacy,expected", [
         ("draft", "uploaded"),
-        ("ai_analyzed", "ai_analyzed"),
-        ("review_ready", "review_ready"),
+        ("ai_analyzed", "ai_reviewed"),
+        ("review_ready", "ai_reviewed"),
         ("in_review", "in_review"),
         ("changes_requested", "in_review"),
         ("escalated", "escalated"),
-        ("legal_approval", "in_review"),
-        ("exec_approval", "in_review"),
+        ("legal_approval", "legal_review"),
+        ("exec_approval", "approved"),
         ("approved", "approved"),
         ("rejected", "rejected"),
         ("finalized", "finalized"),
@@ -534,8 +537,14 @@ class TestRedlineScope:
 
 @pytest.fixture
 def mock_review_repo():
+    from sqlalchemy.ext.asyncio import AsyncSession
     repo = AsyncMock(spec=ReviewRepository)
-    repo.session = AsyncMock()
+    session = MagicMock(spec=AsyncSession)
+    # SQLAlchemy sync methods that must NOT return coroutines
+    # (these are never awaited in production code)
+    for sync_method in ('add', 'merge', 'delete', 'close'):
+        setattr(session, sync_method, MagicMock())
+    repo.session = session
     return repo
 
 
@@ -1045,7 +1054,7 @@ class TestEndToEndWorkflow:
 
     @pytest.mark.asyncio
     async def test_complete_workflow_lifecycle(self, mock_review_repo, mock_ai_repo, mock_event_bus, admin_user):
-        """Simulate: UPLOADED → AI_ANALYZED → REVIEW_READY → IN_REVIEW → APPROVED → FINALIZED → ARCHIVED."""
+        """Simulate: UPLOADED → ANALYZING → AI_REVIEWED → IN_REVIEW → APPROVED → FINALIZED → ARCHIVED."""
         service = ReviewService(
             review_repo=mock_review_repo,
             ai_repo=mock_ai_repo,
@@ -1064,21 +1073,21 @@ class TestEndToEndWorkflow:
         with patch.dict('sys.modules', {'workers.ai_worker': None}):
             with patch('app.domains.ai.service.AIService.analyze', new=AsyncMock()):
 
-                # Step 1: UPLOADED → AI_ANALYZED
+                # Step 1: UPLOADED → ANALYZING
                 review = self._make_mock_review("review-1", "uploaded")
                 mock_review_repo.get_review.return_value = review
                 mock_review_repo.update_status.return_value = review
-                result = await service.update_status("review-1", "ai_analyzed")
+                result = await service.update_status("review-1", "analyzing")
                 assert result is not None
 
-                # Step 2: AI_ANALYZED → REVIEW_READY
-                review.status = ReviewStatus.AI_ANALYZED
+                # Step 2: ANALYZING → AI_REVIEWED
+                review.status = ReviewStatus.ANALYZING
                 mock_review_repo.get_review.return_value = review
-                result = await service.update_status("review-1", "review_ready")
+                result = await service.update_status("review-1", "ai_reviewed")
                 assert result is not None
 
-                # Step 3: REVIEW_READY → IN_REVIEW
-                review.status = ReviewStatus.REVIEW_READY
+                # Step 3: AI_REVIEWED → IN_REVIEW
+                review.status = ReviewStatus.AI_REVIEWED
                 mock_review_repo.get_review.return_value = review
                 result = await service.update_status("review-1", "in_review")
                 assert result is not None

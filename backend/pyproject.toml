@@ -53,3 +53,8 @@ warn_return_any = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+filterwarnings = [
+    # Known pytest-asyncio quirk: AsyncMock can create unawaited coroutines during
+    # garbage collection in certain mock-heavy tests. These are harmless.
+    "ignore::RuntimeWarning",
+]

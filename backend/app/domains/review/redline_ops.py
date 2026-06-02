@@ -293,7 +293,7 @@ def _find_section_line(lines: list[str], section_num: int) -> Optional[str]:
     return None
 
 
-def _parse_proposed_section(proposed_text: str) -> tuple[int | None, int | None]:
+def _parse_proposed_section(proposed_text: str) -> tuple[Optional[int], Optional[int]]:
     """Extract target section and subsection numbers from proposed text.
 
     Handles: "4. Indemnification", "4.5 Subsection", "§4. Test", "IV. Roman"

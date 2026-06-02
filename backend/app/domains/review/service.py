@@ -145,7 +145,7 @@ class ReviewService:
         Uses the WorkflowState machine to validate transitions.
         Records audit trail for every transition.
         """
-        target_state = WorkflowState.from_string(new_status)
+        target_state = map_legacy_status(new_status)
         review = await self.review_repo.get_review(review_id, self.tenant_id)
         if not review:
             return None
@@ -161,6 +161,10 @@ class ReviewService:
             review_id, self.tenant_id, ReviewStatus(new_status),
             changed_by=self.user.id, reason=reason,
         )
+
+        # Refresh to load expired attributes (e.g. updated_at)
+        if review:
+            await self.review_repo.session.refresh(review)
 
         # Record audit trail
         await self.audit_trail.record_transition(

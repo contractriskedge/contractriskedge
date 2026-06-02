@@ -516,7 +516,7 @@ class TestPromptRegistry:
 
         template = PromptTemplate(
             key="test_prompt",
-            version="1.0.0",
+            semver="1.0.0",
             system_prompt="You are a test assistant.",
             template="Analyze: {{ text }}",
         )
@@ -524,32 +524,32 @@ class TestPromptRegistry:
 
         retrieved = registry.get("test_prompt")
         assert retrieved is not None
-        assert retrieved.version == "1.0.0"
+        assert retrieved.semver == "1.0.0"
         assert retrieved.system_prompt == "You are a test assistant."
 
     def test_version_sorting(self, registry) -> None:
         """Test that versions are sorted correctly (newest first)."""
         from app.domains.ai.prompts import PromptTemplate
 
-        v1 = PromptTemplate(key="test", version="1.0.0", system_prompt="v1")
-        v2 = PromptTemplate(key="test", version="2.0.0", system_prompt="v2")
-        v3 = PromptTemplate(key="test", version="1.5.0", system_prompt="v1.5")
+        v1 = PromptTemplate(key="test", semver="1.0.0", system_prompt="v1")
+        v2 = PromptTemplate(key="test", semver="2.0.0", system_prompt="v2")
+        v3 = PromptTemplate(key="test", semver="1.5.0", system_prompt="v1.5")
 
         registry.register(v1)
         registry.register(v2)
         registry.register(v3)
 
         versions = registry.list_versions("test")
-        assert versions[0].version == "2.0.0"
-        assert versions[1].version == "1.5.0"
-        assert versions[2].version == "1.0.0"
+        assert versions[0].semver == "2.0.0"
+        assert versions[1].semver == "1.5.0"
+        assert versions[2].semver == "1.0.0"
 
     def test_activate_version(self, registry) -> None:
         """Test activating a specific version."""
         from app.domains.ai.prompts import PromptTemplate
 
-        v1 = PromptTemplate(key="test", version="1.0.0", system_prompt="v1")
-        v2 = PromptTemplate(key="test", version="2.0.0", system_prompt="v2")
+        v1 = PromptTemplate(key="test", semver="1.0.0", system_prompt="v1")
+        v2 = PromptTemplate(key="test", semver="2.0.0", system_prompt="v2")
 
         registry.register(v1)
         registry.register(v2)
@@ -557,13 +557,13 @@ class TestPromptRegistry:
         registry.activate("test", "1.0.0")
         active = registry.get_active("test")
         assert active is not None
-        assert active.version == "1.0.0"
+        assert active.semver == "1.0.0"
 
     def test_tenant_override(self, registry) -> None:
         """Test tenant-specific prompt overrides."""
         from app.domains.ai.prompts import PromptTemplate, TenantPromptOverride
 
-        base = PromptTemplate(key="test", version="1.0.0", system_prompt="Default prompt")
+        base = PromptTemplate(key="test", semver="1.0.0", system_prompt="Default prompt")
         registry.register(base)
 
         override = TenantPromptOverride(

@@ -190,7 +190,9 @@ async def contract_kpis(
 
 
 @router.get("/views", response_model=None)
-async def list_saved_views():
+async def list_saved_views(
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
     """Placeholder for saved views — returns empty list until feature is backend-backed."""
     return []
 
@@ -210,9 +212,3 @@ async def get_contract(
     from types import SimpleNamespace
     obj = SimpleNamespace(**review)
     return {k: v for k, v in vars(ContractSummary(obj, review.get('original_filename', ''))).items() if not k.startswith('_')}
-
-
-@router.get("/views", response_model=None)
-async def list_saved_views():
-    """Placeholder for saved views — returns empty list until feature is backend-backed."""
-    return []

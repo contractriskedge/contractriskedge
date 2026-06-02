@@ -11,6 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.kernel.security.rbac import require_permission
+from app.kernel.security.permissions import Permissions
+
 from app.integration.models.integration import (
     ConnectorProvider,
     Integration,
@@ -39,7 +42,7 @@ from app.integration.services.governance_service import (
     PermissionEvaluator,
 )
 
-router = APIRouter(prefix="/integrations", tags=["Integrations"])
+router = APIRouter(prefix="/integrations", tags=["Integrations"], dependencies=[Depends(require_permission(Permissions.CONTRACTS_READ))])
 
 
 @router.post(

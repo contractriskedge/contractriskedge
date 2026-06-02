@@ -454,6 +454,7 @@ async def get_upload_status(
     upload_id: str,
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
 ):
     """Get the current ingestion pipeline status."""
     repo = IngestionRepository(db, tenant_id=tenant_id)

@@ -11,6 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.kernel.security.rbac import require_permission
+from app.kernel.security.permissions import Permissions
+
 from app.integration.models.permission import ConnectorPermission, PermissionAction, PermissionEffect
 from app.integration.routers.dependencies import (
     get_audit_service,
@@ -28,7 +31,7 @@ from app.integration.schemas.permission import (
 from app.integration.services.audit_service import IntegrationAuditService
 from app.integration.services.governance_service import PermissionEvaluator
 
-router = APIRouter(prefix="/permissions", tags=["Permissions"])
+router = APIRouter(prefix="/permissions", tags=["Permissions"], dependencies=[Depends(require_permission(Permissions.CONTRACTS_READ))])
 
 
 @router.post(

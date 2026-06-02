@@ -11,6 +11,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.kernel.security.rbac import require_permission
+from app.kernel.security.permissions import Permissions
+
 from app.integration.routers.dependencies import (
     get_audit_service,
     get_db,
@@ -25,7 +28,7 @@ from app.integration.schemas.credential import (
 from app.integration.services.audit_service import IntegrationAuditService
 from app.integration.services.oauth_service import OAuthService
 
-router = APIRouter(prefix="/oauth", tags=["OAuth2"])
+router = APIRouter(prefix="/oauth", tags=["OAuth2"], dependencies=[Depends(require_permission(Permissions.CONTRACTS_READ))])
 
 
 @router.get(

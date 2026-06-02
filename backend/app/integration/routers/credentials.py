@@ -11,6 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.kernel.security.rbac import require_permission
+from app.kernel.security.permissions import Permissions
+
 from app.integration.models.credential import (
     CredentialType,
     IntegrationCredential,
@@ -24,7 +27,7 @@ from app.integration.schemas.credential import CredentialCreate, CredentialRespo
 from app.integration.services.audit_service import IntegrationAuditService
 from app.integration.services.crypto import CredentialVault
 
-router = APIRouter(prefix="/credentials", tags=["Credentials"])
+router = APIRouter(prefix="/credentials", tags=["Credentials"], dependencies=[Depends(require_permission(Permissions.CONTRACTS_READ))])
 
 
 @router.post(

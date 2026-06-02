@@ -19,10 +19,10 @@ class TestReviewStateMachine:
         assert _can_transition("draft", "ai_analyzed")
     def test_uploaded_to_ai_analyzed(self):
         assert _can_transition("uploaded", "ai_analyzed")
-    def test_ai_analyzed_to_review_ready(self):
-        assert _can_transition("ai_analyzed", "review_ready")
-    def test_review_ready_to_in_review(self):
-        assert _can_transition("review_ready", "in_review")
+    def test_ai_analyzed_to_in_review(self):
+        assert _can_transition("ai_analyzed", "in_review")
+    def test_ai_reviewed_to_in_review(self):
+        assert _can_transition("ai_reviewed", "in_review")
     def test_in_review_to_approved(self):
         assert _can_transition("in_review", "approved")
     def test_in_review_to_escalated(self):

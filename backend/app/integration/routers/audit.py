@@ -11,11 +11,14 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.kernel.security.rbac import require_permission
+from app.kernel.security.permissions import Permissions
+
 from app.integration.models.audit import IntegrationAuditEvent
 from app.integration.routers.dependencies import get_db, get_tenant_id
 from app.integration.schemas.audit import AuditEventListResponse, AuditEventResponse
 
-router = APIRouter(prefix="/audit", tags=["Audit"])
+router = APIRouter(prefix="/audit", tags=["Audit"], dependencies=[Depends(require_permission(Permissions.CONTRACTS_READ))])
 
 
 @router.get(

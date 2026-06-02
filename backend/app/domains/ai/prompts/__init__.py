@@ -42,16 +42,12 @@ class PromptVariable:
 class PromptTemplate:
     """A versioned prompt template with full metadata and governance.
 
-    Usage::
-        template = PromptTemplate(
-            key="risk_analysis",
-            version="2.1.0",
-            system_prompt="You are a senior contract risk analyst...",
-            variables=[PromptVariable(name="chunks", description="Contract chunks", required=True)],
-        )
+    This class stores a semantic version string in `semver` (e.g. "2.1.0")
+    for internal resolution and exposes a backward-compatible `version`
+    property that returns the major version as an `int` for older callers.
     """
     key: str
-    version: str  # Semantic version string (e.g., "2.1.0")
+    semver: str  # Semantic version string (e.g., "2.1.0")
     system_prompt: str
     template: str = ""
     description: str = ""
@@ -89,6 +85,14 @@ class PromptTemplate:
         from jinja2 import Template
         jinja = Template(self.template)
         return jinja.render(**variables)
+
+    @property
+    def version(self) -> int:
+        """Backward-compatible numeric major version (e.g. '1' for '1.0.0')."""
+        try:
+            return int(self.semver.split(".")[0])
+        except Exception:
+            return 0
 
 
 @dataclass
@@ -128,19 +132,19 @@ class PromptRegistry:
         """Register a prompt template version."""
         if template.key not in self._templates:
             self._templates[template.key] = []
-        # Check for duplicate version
-        existing = [t for t in self._templates[template.key] if t.version == template.version]
+        # Check for duplicate semantic version
+        existing = [t for t in self._templates[template.key] if t.semver == template.semver]
         if existing:
             raise ValueError(
-                f"Prompt template '{template.key}' version '{template.version}' already registered"
+                f"Prompt template '{template.key}' version '{template.semver}' already registered"
             )
         self._templates[template.key].append(template)
         # Sort by version descending (newest first)
         self._templates[template.key].sort(
-            key=lambda t: [int(x) for x in t.version.split(".")],
+            key=lambda t: [int(x) for x in t.semver.split(".")],
             reverse=True,
         )
-        logger.info("Registered prompt '%s' version %s", template.key, template.version)
+        logger.info("Registered prompt '%s' version %s", template.key, template.semver)
 
     def activate(self, key: str, version: str) -> None:
         """Set a specific version as the active prompt for a key."""
@@ -149,7 +153,7 @@ class PromptRegistry:
             raise ValueError(f"Prompt '{key}' version '{version}' not found")
         # Deactivate all other versions
         for t in self._templates.get(key, []):
-            if t.version == version:
+            if t.semver == version:
                 t.status = PromptStatus.ACTIVE
             elif t.status == PromptStatus.ACTIVE:
                 t.status = PromptStatus.INACTIVE
@@ -161,7 +165,7 @@ class PromptRegistry:
     def get(
         self,
         key: str,
-        version: str | None = None,
+        version: str | int | None = None,
         tenant_id: str | None = None,
     ) -> PromptTemplate | None:
         """Get a prompt template, with optional version and tenant override.
@@ -184,10 +188,19 @@ class PromptRegistry:
                 if base:
                     return self._apply_override(base, override)
 
-        # Specific version requested
-        if version:
+        # Specific version requested. Accept either a semver string or an int
+        # representing the major version for backward compatibility.
+        if version is not None:
+            # numeric major version lookup
+            if isinstance(version, int):
+                for t in versions:
+                    if t.version == version:
+                        return t
+                return None
+            # semver string lookup
+            ver_str = str(version)
             for t in versions:
-                if t.version == version:
+                if t.semver == ver_str:
                     return t
             return None
 
@@ -195,7 +208,7 @@ class PromptRegistry:
         active_version = self._active_versions.get(key)
         if active_version:
             for t in versions:
-                if t.version == active_version:
+                if t.semver == active_version:
                     return t
 
         # Latest version
@@ -396,7 +409,7 @@ Respond in JSON format with keys: risk_score, summary, findings (array)
 
 prompt_registry.register(PromptTemplate(
     key="risk_analysis",
-    version="1.0.0",
+    semver="1.0.0",
     system_prompt="You are a senior contract risk analyst. Always respond in valid JSON.",
     template=_RISK_ANALYSIS_TEMPLATE,
     default_model="gpt-4o",
@@ -432,7 +445,7 @@ Respond in JSON format.
 
 prompt_registry.register(PromptTemplate(
     key="redline_generation",
-    version="4.0.0",
+    semver="4.0.0",
     system_prompt="You are a senior contract negotiation specialist. Always respond in valid JSON.",
     template=_REDLINE_V4_TEMPLATE,
     default_model="gpt-4o",

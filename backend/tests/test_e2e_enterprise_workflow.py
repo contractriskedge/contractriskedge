@@ -58,7 +58,7 @@ async def _create_upload_chain(
     tenant_id: str,
     user_id: str,
     filename: str = "test-contract.pdf",
-    state: IngestionState = IngestionState.ANALYSIS_COMPLETE,
+    state: IngestionState = IngestionState.REVIEW_READY,
 ) -> UploadSession:
     """Create an upload session at a specific pipeline state."""
     repo = IngestionRepository(session, tenant_id=tenant_id)
@@ -102,20 +102,16 @@ async def _create_review(
             INSERT INTO contract_reviews (
                 review_id, upload_id, tenant_id, status, created_by, priority,
                 finding_count, redline_count, comment_count, escalation_count,
-                sla_breached, risk_score, document_name, vendor, contract_type,
-                financial_value, workflow_stage, created_at, updated_at
+                sla_breached, workflow_stage, metadata, created_at, updated_at
             ) VALUES (
                 :review_id, :upload_id, CAST(:tenant_id AS UUID),
                 CAST(:status AS review_status),
-                :created_by, 'normal', 0, 0, 0, 0, false, 0.0,
-                :doc_name, :vendor, :contract_type, 0.0, 'review',
-                :created_at, :updated_at
+                :created_by, 'normal', 0, 0, 0, 0, false,
+                'review', CAST('{}' AS jsonb), :created_at, :updated_at
             )
         """).bindparams(
             review_id=review_id, upload_id=upload_id, tenant_id=tenant_id,
             status=status.value, created_by="e2e-test",
-            doc_name="E2E Test Contract", vendor="Test Vendor",
-            contract_type="MSA",
             created_at=datetime.utcnow() - timedelta(hours=1),
             updated_at=datetime.utcnow(),
         )
@@ -149,7 +145,7 @@ class TestEnterpriseHappyPath:
         )
         tenant = result.fetchone()
         assert tenant is not None, "Tenant must exist"
-        assert tenant.name == "Test Tenant A"
+        assert tenant.name == "Development Tenant"
         assert tenant.is_active is True
 
     async def test_2_contract_upload(self, tenant_a_session: AsyncSession, ensure_test_tenants, tenant_admin_user):
@@ -164,12 +160,12 @@ class TestEnterpriseHappyPath:
         assert upload.filename == "test-contract.pdf"
 
     async def test_3_ingestion_pipeline(self, tenant_a_session: AsyncSession, ensure_test_tenants, tenant_admin_user):
-        """Run ingestion through to ANALYSIS_COMPLETE."""
+        """Run ingestion through to REVIEW_READY."""
         upload = await _create_upload_chain(
             tenant_a_session, TENANT_A_ID_STR, tenant_admin_user.id,
-            state=IngestionState.ANALYSIS_COMPLETE,
+            state=IngestionState.REVIEW_READY,
         )
-        assert upload.ingestion_state == IngestionState.ANALYSIS_COMPLETE
+        assert upload.ingestion_state == IngestionState.REVIEW_READY
 
         # Verify state machine: must have passed through all required states
         assert upload.storage_key is not None, "Storage key must be set after ingestion"
@@ -178,7 +174,7 @@ class TestEnterpriseHappyPath:
         """Verify AI analysis produces findings and redlines."""
         upload = await _create_upload_chain(
             tenant_a_session, TENANT_A_ID_STR, tenant_admin_user.id,
-            state=IngestionState.ANALYSIS_COMPLETE,
+            state=IngestionState.REVIEW_READY,
         )
         review = await _create_review(
             tenant_a_session, TENANT_A_ID_STR, upload.upload_id,
@@ -191,7 +187,7 @@ class TestEnterpriseHappyPath:
         """Complete review lifecycle: assign → review → approve."""
         upload = await _create_upload_chain(
             tenant_a_session, TENANT_A_ID_STR, tenant_admin_user.id,
-            state=IngestionState.ANALYSIS_COMPLETE,
+            state=IngestionState.REVIEW_READY,
         )
         review = await _create_review(
             tenant_a_session, TENANT_A_ID_STR, upload.upload_id,
@@ -208,8 +204,9 @@ class TestEnterpriseHappyPath:
             tenant_id=TENANT_A_ID_STR,
         )
 
-        # Approve the review
-        result = await service.approve_review(str(review.review_id), {"notes": "E2E test approval"})
+        # Transition through valid states: ai_analyzed → in_review → approve
+        await service.update_status(str(review.review_id), "in_review")
+        result = await service.approve(str(review.review_id), "approved", comments="E2E test approval")
         assert result is not None
 
     async def test_6_executive_visibility(self, tenant_a_session: AsyncSession, ensure_test_tenants):
@@ -217,7 +214,7 @@ class TestEnterpriseHappyPath:
         exec_service = ExecutiveAnalyticsService(
             session=tenant_a_session, tenant_id=TENANT_A_ID_STR
         )
-        dashboard = await exec_service.get_dashboard(lookback_days=30)
+        dashboard = await exec_service.get_dashboard(period_days=30)
         assert dashboard is not None
         assert dashboard.portfolio_summary is not None
         assert hasattr(dashboard.portfolio_summary, "total_contracts")
@@ -275,7 +272,7 @@ class TestDegradedPaths:
         """Review can be escalated when SLA is at risk."""
         upload = await _create_upload_chain(
             tenant_a_session, TENANT_A_ID_STR, tenant_admin_user.id,
-            state=IngestionState.ANALYSIS_COMPLETE,
+            state=IngestionState.REVIEW_READY,
         )
         review = await _create_review(
             tenant_a_session, TENANT_A_ID_STR, upload.upload_id,
@@ -289,9 +286,13 @@ class TestDegradedPaths:
             user=tenant_admin_user,
             tenant_id=TENANT_A_ID_STR,
         )
-        result = await service.escalate_review(
+
+        # Transition through valid states: ai_analyzed → in_review → escalate
+        await service.update_status(str(review.review_id), "in_review")
+        result = await service.escalate(
             str(review.review_id),
-            {"reason": "SLA at risk", "escalate_to": "senior-reviewer"},
+            reason="SLA at risk",
+            escalated_to="senior-reviewer",
         )
         assert result is not None
 
@@ -308,17 +309,18 @@ class TestTenantIsolation:
         self, tenant_a_session, tenant_b_session, ensure_test_tenants, tenant_admin_user
     ):
         """Uploads from Tenant B should not appear in Tenant A queries."""
-        # Create upload in Tenant B
+        # Create upload in Tenant B using repository
         repo_b = IngestionRepository(tenant_b_session, tenant_id=TENANT_B_ID_STR)
-        upload_b = await _create_upload_chain(
-            tenant_b_session, TENANT_B_ID_STR, "user-b",
+        upload_b = await repo_b.create_upload(
+            tenant_id=TENANT_B_ID_STR, user_id="user-b",
             filename="tenant-b-doc.pdf",
-            state=IngestionState.UPLOADED,
+            content_type="application/pdf", file_size=2048,
         )
+        await tenant_b_session.commit()
 
         # Query from Tenant A — should not see Tenant B's upload
         repo_a = IngestionRepository(tenant_a_session, tenant_id=TENANT_A_ID_STR)
-        uploads_a, _ = await repo_a.list_by_tenant(TENANT_A_ID_STR, None, 100, 0)
+        uploads_a = await repo_a.list_by_tenant(TENANT_A_ID_STR, None, 100, 0)
         upload_ids_a = {str(u.upload_id) for u in uploads_a}
         assert str(upload_b.upload_id) not in upload_ids_a, (
             "Tenant A must not see Tenant B's uploads"
@@ -330,7 +332,7 @@ class TestTenantIsolation:
         """Reviews from Tenant A should not be accessible from Tenant B."""
         upload = await _create_upload_chain(
             tenant_a_session, TENANT_A_ID_STR, tenant_admin_user.id,
-            state=IngestionState.ANALYSIS_COMPLETE,
+            state=IngestionState.REVIEW_READY,
         )
         review = await _create_review(
             tenant_a_session, TENANT_A_ID_STR, upload.upload_id,
@@ -339,7 +341,7 @@ class TestTenantIsolation:
 
         # Try to access from Tenant B
         repo_b = ReviewRepository(tenant_b_session, tenant_id=TENANT_B_ID_STR)
-        result = await repo_b.get_by_id(str(review.review_id))
+        result = await repo_b.get_review(str(review.review_id), TENANT_B_ID_STR)
         assert result is None, "Tenant B must not access Tenant A's reviews"
 
 
@@ -362,7 +364,6 @@ class TestStateMachine:
         IngestionState.CHUNKING_PENDING,
         IngestionState.EMBEDDING_PENDING,
         IngestionState.ANALYSIS_PENDING,
-        IngestionState.ANALYSIS_COMPLETE,
         IngestionState.REVIEW_READY,
     ]
 
@@ -391,7 +392,7 @@ class TestStateMachine:
         )
         review = await _create_review(
             tenant_a_session, TENANT_A_ID_STR, upload.upload_id,
-            status=ReviewStatus.DRAFT,
+            status=ReviewStatus.AI_ANALYZED,
         )
 
         service = ReviewService(
@@ -402,6 +403,7 @@ class TestStateMachine:
             tenant_id=TENANT_A_ID_STR,
         )
 
-        # Progress through review states
-        result = await service.approve_review(str(review.review_id), {"notes": "Approved"})
+        # Progress through review states: ai_analyzed → in_review → approve
+        await service.update_status(str(review.review_id), "in_review")
+        result = await service.approve(str(review.review_id), "approved", comments="Approved")
         assert result is not None

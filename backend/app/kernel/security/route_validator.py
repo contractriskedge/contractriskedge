@@ -68,7 +68,9 @@ def _has_permission_dependency(route: APIRoute) -> bool:
 
     # Check endpoint parameter dependencies
     for param in route.dependant.dependencies:
-        dep_callable = getattr(param, "dependency", None)
+        # FastAPI stores the actual callable in param.call, while
+        # param.dependency is only set for nested sub-dependencies.
+        dep_callable = getattr(param, "dependency", None) or getattr(param, "call", None)
         if dep_callable:
             # The dependency might be a factory that returns _check
             # Check if the outer callable or its return value is a permission checker
@@ -80,6 +82,10 @@ def _has_permission_dependency(route: APIRoute) -> bool:
                 inner_name = getattr(dep_callable.func, "__name__", "")
                 if inner_name in PERMISSION_DEPENDENCIES:
                     return True
+            # Check qualname for closure factories like require_permission.<locals>._check
+            dep_qualname = getattr(dep_callable, "__qualname__", "")
+            if any(pname in dep_qualname for pname in PERMISSION_DEPENDENCIES):
+                return True
 
     return False
 

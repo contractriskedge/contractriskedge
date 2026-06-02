@@ -59,7 +59,7 @@ class WorkflowState(str, enum.Enum):
         return {
             cls.UPLOADED: {cls.ANALYZING, cls.ARCHIVED},
             cls.ANALYZING: {cls.AI_REVIEWED, cls.UPLOADED, cls.ARCHIVED},
-            cls.AI_REVIEWED: {cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.ARCHIVED},
+            cls.AI_REVIEWED: {cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.IN_REVIEW, cls.ARCHIVED},
             cls.PROCUREMENT_REVIEW: {
                 cls.LEGAL_REVIEW, cls.SECURITY_REVIEW,
                 cls.NEGOTIATION, cls.REJECTED, cls.ARCHIVED,
@@ -78,7 +78,7 @@ class WorkflowState(str, enum.Enum):
             },
             cls.IN_REVIEW: {
                 cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.SECURITY_REVIEW,
-                cls.ESCALATED, cls.REJECTED, cls.ARCHIVED,
+                cls.APPROVED, cls.ESCALATED, cls.REJECTED, cls.ARCHIVED,
             },
             cls.ESCALATED: {
                 cls.IN_REVIEW, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW,
@@ -235,6 +235,7 @@ LEGACY_STATUS_MAP = {
     "review_ready": WorkflowState.AI_REVIEWED,
     "in_review": WorkflowState.IN_REVIEW,
     "changes_requested": WorkflowState.IN_REVIEW,
+    "pending_approval": WorkflowState.IN_REVIEW,
     "procurement_review": WorkflowState.PROCUREMENT_REVIEW,
     "legal_review": WorkflowState.LEGAL_REVIEW,
     "legal_approval": WorkflowState.LEGAL_REVIEW,

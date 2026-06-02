@@ -90,6 +90,15 @@ class RuleEvaluationResult:
     matched_clause_category: Optional[str] = None
     matched_clause_text: Optional[str] = None
 
+    @property
+    def matched(self) -> bool:
+        """Alias for violation_triggered — backward compatibility."""
+        return self.violation_triggered
+
+    @matched.setter
+    def matched(self, value: bool) -> None:
+        self.violation_triggered = value
+
 
 @dataclass
 class DeviationResult:

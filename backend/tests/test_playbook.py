@@ -387,7 +387,7 @@ class TestDeviationDetector:
         rule_result = RuleEvaluationResult(
             rule_id="r1", rule_name="Missing Indemnification",
             rule_type="clause_required", effect="require_mandatory_clause",
-            matched=True, priority=100,
+            violation_triggered=True, priority=100,
             deviation_severity="high",
             matched_clause_category="indemnification",
         )
@@ -618,7 +618,7 @@ class TestRiskScorer:
         from app.domains.playbook.engine import RuleEvaluationResult
         results = [
             RuleEvaluationResult(rule_id="r1", rule_name="R1", rule_type="check",
-                                  effect="allow", matched=False, priority=100),
+                                  effect="allow", violation_triggered=False, priority=100),
         ]
         score, level = RiskScorer.calculate(results, [])
         assert level == "low"
@@ -629,7 +629,7 @@ class TestRiskScorer:
         from app.domains.playbook.engine import RuleEvaluationResult, DeviationResult
         results = [
             RuleEvaluationResult(rule_id="r1", rule_name="R1", rule_type="check",
-                                  effect="block", matched=True, priority=100,
+                                  effect="block", violation_triggered=True, priority=100,
                                   deviation_severity="critical"),
         ]
         deviations = [
@@ -647,7 +647,7 @@ class TestRiskScorer:
         from app.domains.playbook.engine import RuleEvaluationResult, DeviationResult
         results = [
             RuleEvaluationResult(rule_id="r1", rule_name="R1", rule_type="check",
-                                  effect="flag_for_review", matched=True, priority=100,
+                                  effect="flag_for_review", violation_triggered=True, priority=100,
                                   deviation_severity="high"),
         ]
         deviations = [

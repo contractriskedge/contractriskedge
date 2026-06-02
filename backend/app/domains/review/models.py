@@ -37,12 +37,14 @@ class ReviewStatus(str, PyEnum):
     ANALYZING = "analyzing"
     AI_ANALYZED = "ai_analyzed"
     AI_REVIEWED = "ai_reviewed"
+    REVIEW_READY = "review_ready"
     PROCUREMENT_REVIEW = "procurement_review"
     LEGAL_REVIEW = "legal_review"
     SECURITY_REVIEW = "security_review"
     NEGOTIATION = "negotiation"
     IN_REVIEW = "in_review"
     CHANGES_REQUESTED = "changes_requested"
+    PENDING_APPROVAL = "pending_approval"
     ESCALATED = "escalated"
     LEGAL_APPROVAL = "legal_approval"
     EXEC_APPROVAL = "exec_approval"
@@ -56,11 +58,11 @@ class ReviewStatus(str, PyEnum):
     @classmethod
     def valid_transitions(cls) -> dict[ReviewStatus, set[ReviewStatus]]:
         return {
-            cls.DRAFT: {cls.ANALYZING, cls.CLOSED},
-            cls.UPLOADED: {cls.ANALYZING, cls.ARCHIVED, cls.CLOSED},
+            cls.DRAFT: {cls.ANALYZING, cls.AI_ANALYZED, cls.CLOSED},
+            cls.UPLOADED: {cls.ANALYZING, cls.AI_ANALYZED, cls.ARCHIVED, cls.CLOSED},
             cls.ANALYZING: {cls.AI_ANALYZED, cls.AI_REVIEWED, cls.UPLOADED, cls.CLOSED},
-            cls.AI_ANALYZED: {cls.AI_REVIEWED, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.CLOSED},
-            cls.AI_REVIEWED: {cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.CLOSED},
+            cls.AI_ANALYZED: {cls.AI_REVIEWED, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.IN_REVIEW, cls.CLOSED},
+            cls.AI_REVIEWED: {cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.IN_REVIEW, cls.CLOSED},
             cls.PROCUREMENT_REVIEW: {
                 cls.LEGAL_REVIEW, cls.SECURITY_REVIEW, cls.NEGOTIATION,
                 cls.REJECTED, cls.CLOSED,
@@ -80,9 +82,12 @@ class ReviewStatus(str, PyEnum):
             cls.IN_REVIEW: {
                 cls.CHANGES_REQUESTED, cls.PROCUREMENT_REVIEW,
                 cls.LEGAL_REVIEW, cls.SECURITY_REVIEW,
+                cls.APPROVED, cls.LEGAL_APPROVAL,
+                cls.PENDING_APPROVAL,
                 cls.ESCALATED, cls.CLOSED,
             },
             cls.CHANGES_REQUESTED: {cls.IN_REVIEW, cls.ESCALATED, cls.CLOSED},
+            cls.PENDING_APPROVAL: {cls.APPROVED, cls.REJECTED, cls.IN_REVIEW, cls.CLOSED},
             cls.ESCALATED: {
                 cls.IN_REVIEW, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW,
                 cls.SECURITY_REVIEW, cls.LEGAL_APPROVAL,

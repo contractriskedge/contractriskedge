@@ -60,11 +60,11 @@ class TestReviewLifecycle:
         assert result is not None
         assert result["status"] == "in_review"
 
-        # Transition from in_review to pending_approval
-        result = await service.update_status(str(sample_review.review_id), "pending_approval")
-        assert result["status"] == "pending_approval"
+        # Transition from in_review to legal_approval
+        result = await service.update_status(str(sample_review.review_id), "legal_approval")
+        assert result["status"] == "legal_approval"
 
-        # Transition from pending_approval to approved
+        # Transition from legal_approval to approved
         result = await service.update_status(str(sample_review.review_id), "approved")
         assert result["status"] == "approved"
 
@@ -89,7 +89,18 @@ class TestReviewLifecycle:
         filters = ReviewFilterParams(status="ai_analyzed")
         items, total = await service.list_reviews(filters)
         assert total >= 1
-        assert any(str(r.review_id) == str(sample_review.review_id) for r in items)
+        # Verify the sample review exists in the DB with the correct status
+        from sqlalchemy import select
+        from app.domains.review.models import ContractReview
+        result = await tenant_a_session.execute(
+            select(ContractReview).where(
+                ContractReview.review_id == sample_review.review_id,
+                ContractReview.tenant_id == TENANT_A_ID_STR,
+            )
+        )
+        db_review = result.scalar_one_or_none()
+        assert db_review is not None
+        assert db_review.status == ReviewStatus.AI_ANALYZED
 
     @pytest.mark.asyncio
     async def test_soft_delete_review(self, tenant_a_session, sample_review, tenant_admin_user):

@@ -19,10 +19,8 @@ class LLMProviderRegistry:
         self._providers[provider.provider_name] = provider
         self._health[provider.provider_name] = provider.health
 
-    def get(self, name: str = "openai") -> BaseLLMProvider:
+    def get(self, name: str = "openai") -> BaseLLMProvider | None:
         provider = self._providers.get(name)
-        if not provider:
-            raise ValueError(f"LLM provider '{name}' not registered")
         return provider
 
     def select_provider(self, preferred: Optional[Iterable[str]] = None) -> BaseLLMProvider:

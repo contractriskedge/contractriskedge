@@ -87,12 +87,12 @@ class ExecutiveBriefingGenerator:
         anomaly_detector = AnomalyDetector(session=self.session, tenant_id=self.tenant_id)
 
         # 1. Gather all operational data in parallel
-        dashboard = await executive_service.get_dashboard(lookback_days=lookback_days)
+        dashboard = await executive_service.get_dashboard(period_days=lookback_days)
         digest = await digest_generator.generate_digest(
             style=style,
-            lookback_days=lookback_days,
+            period_days=lookback_days,
         )
-        narratives = await narrative_generator.generate_narratives(lookback_days=lookback_days)
+        narratives = await narrative_generator.generate_narratives(period_days=lookback_days)
         anomalies = await anomaly_detector.detect_anomalies(lookback_hours=lookback_days * 24)
 
         # 2. Build structured context for the LLM
@@ -136,7 +136,7 @@ class ExecutiveBriefingGenerator:
         """Generate a focused risk escalation briefing for urgent situations."""
         executive_service = ExecutiveAnalyticsService(session=self.session, tenant_id=self.tenant_id)
 
-        dashboard = await executive_service.get_dashboard(lookback_days=lookback_days)
+        dashboard = await executive_service.get_dashboard(period_days=lookback_days)
 
         if not anomaly:
             anomaly_detector = AnomalyDetector(session=self.session, tenant_id=self.tenant_id)
@@ -259,13 +259,13 @@ Context:
 
 Respond in JSON format with these fields:
 - executive_summary: string (2-3 sentence overview)
-- key_findings: array of {findings: string, severity: string, impact: string} objects
-- recommendations: array of {action: string, priority: string, expected_impact: string} objects
-- risk_escalations: array of {risk: string, severity: string, timeframe: string, mitigation: string} objects"""
+- key_findings: array of {{findings: string, severity: string, impact: string}} objects
+- recommendations: array of {{action: string, priority: string, expected_impact: string}} objects
+- risk_escalations: array of {{risk: string, severity: string, timeframe: string, mitigation: string}} objects"""
 
         request = LLMRequest(
             system_prompt=BRIEFING_SYSTEM_PROMPT,
-            user_prompt=user_prompt,
+            prompt=user_prompt,
             model="gpt-4o",
             temperature=0.3,
             max_tokens=2000,

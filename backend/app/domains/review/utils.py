@@ -1,5 +1,7 @@
 """Shared helpers for the review domain."""
 
+from typing import Optional
+
 from app.domains.review.redline_ops import prepare_redline_display
 from app.domains.review.schemas import (
     ConfidenceLabel, LocatorResponse, RedlineItem, RiskTraceabilityItem, WordDiffSegment,
@@ -13,7 +15,7 @@ def enum_value(v):
     return v.value if hasattr(v, "value") else str(v)
 
 
-def _build_confidence_label(confidence: float | None) -> ConfidenceLabel | None:
+def _build_confidence_label(confidence: Optional[float]) -> Optional[ConfidenceLabel]:
     """Convert a numeric confidence score to a human-readable semantic label.
 
     Tiers are calibrated to match our deterministic confidence scoring in service.py:
@@ -37,7 +39,7 @@ def _build_confidence_label(confidence: float | None) -> ConfidenceLabel | None:
     return ConfidenceLabel(label="Uncertain", tier="uncertain", numeric=c)
 
 
-def _extract_traceability(redline) -> RiskTraceabilityItem | None:
+def _extract_traceability(redline) -> Optional[RiskTraceabilityItem]:
     """Pull risk traceability chain out of the redline's JSONB metadata.
 
     Supports both:
@@ -67,8 +69,8 @@ def _extract_traceability(redline) -> RiskTraceabilityItem | None:
     )
 
 
-def redline_to_item(redline, *, chunk_ids: list[str] | None = None,
-                    locator_result: dict | None = None) -> RedlineItem:
+def redline_to_item(redline, *, chunk_ids: Optional[list[str]] = None,
+                    locator_result: Optional[dict] = None) -> RedlineItem:
     """Build API redline DTO with operation-aware display fields, locator,
     calibrated confidence label, and risk traceability chain."""
     proposed = redline.reviewer_modified_text or redline.proposed_text

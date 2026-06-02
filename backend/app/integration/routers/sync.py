@@ -11,6 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.kernel.security.rbac import require_permission
+from app.kernel.security.permissions import Permissions
+
 from app.integration.connectors.base import ConnectorAuth
 from app.integration.models.integration import Integration
 from app.integration.models.sync_job import (
@@ -37,7 +40,7 @@ from app.integration.services.connector_registry import get_connector_registry
 from app.integration.services.crypto import CredentialVault
 from app.integration.services.sync_service import SyncOrchestrator
 
-router = APIRouter(prefix="/sync", tags=["Sync"])
+router = APIRouter(prefix="/sync", tags=["Sync"], dependencies=[Depends(require_permission(Permissions.CONTRACTS_READ))])
 
 
 @router.post(

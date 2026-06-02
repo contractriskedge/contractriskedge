@@ -168,15 +168,21 @@ async def get_negotiation_history(
 
 
 @router.get("/usage-trends", response_model=None)
-async def get_usage_trends():
+async def get_usage_trends(
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
     return []
 
 
 @router.get("/market-comparison", response_model=None)
-async def get_market_comparison():
+async def get_market_comparison(
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
     return []
 
 
 @router.get("/rejection-patterns", response_model=None)
-async def get_rejection_patterns():
+async def get_rejection_patterns(
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
     return []

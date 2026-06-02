@@ -12,6 +12,9 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, s
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.kernel.security.rbac import require_permission
+from app.kernel.security.permissions import Permissions
+
 from app.integration.models.webhook import IntegrationWebhook, WebhookEvent, WebhookStatus
 from app.integration.routers.dependencies import (
     get_audit_service,
@@ -29,7 +32,7 @@ from app.integration.schemas.webhook import (
 from app.integration.services.audit_service import IntegrationAuditService
 from app.integration.services.webhook_service import WebhookService
 
-router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
+router = APIRouter(prefix="/webhooks", tags=["Webhooks"], dependencies=[Depends(require_permission(Permissions.CONTRACTS_READ))])
 
 
 @router.post(

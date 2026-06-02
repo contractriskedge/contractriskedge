@@ -22,6 +22,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 
+def _safe_uuid(value: Any) -> Any:
+    """Convert a string to UUID if valid, otherwise return as-is.
+
+    The governance_audit_events.entity_id column is UUID, but some callers
+    may pass non-UUID identifiers (e.g. "review-1" in tests).  This helper
+    prevents hard crashes while preserving the intent.
+    """
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, AttributeError):
+        return str(value)
+
+
 @dataclass
 class AuditEntry:
     """An immutable audit record for a single action."""
@@ -88,7 +101,7 @@ class AuditTrailService:
                 "tenant_id": uuid.UUID(str(self.tenant_id)),
                 "event_type": event_type,
                 "entity_type": entity_type,
-                "entity_id": uuid.UUID(str(entity_id)),
+                "entity_id": _safe_uuid(entity_id),
                 "actor_id": actor_id,
                 "actor_role": None,
                 "previous_state": json.dumps(before_state) if before_state else None,

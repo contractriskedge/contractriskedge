@@ -35,8 +35,10 @@ from app.domains.ingestion.security import (
     validate_filename_safety,
 )
 from app.kernel.security.auth import UserContext
+from app.kernel.security.rbac import require_permission
+from app.kernel.security.permissions import Permissions
 
-router = APIRouter(prefix="/uploads", tags=["Batch Uploads"])
+router = APIRouter(prefix="/uploads", tags=["Batch Uploads"], dependencies=[Depends(require_permission(Permissions.CONTRACTS_WRITE))])
 
 
 def _batch_to_response(batch) -> BatchUploadResponse:

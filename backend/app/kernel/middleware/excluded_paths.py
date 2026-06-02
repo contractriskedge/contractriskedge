@@ -29,6 +29,8 @@ EXCLUDED_PATHS: frozenset[str] = frozenset(
             "/redoc",
             "/openapi.json",
             "/api/v1/auth/token",
+            "/api/v1/ws/health",
+            "/metrics",
         )
     }
 )
