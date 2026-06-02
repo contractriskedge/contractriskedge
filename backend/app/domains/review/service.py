@@ -134,7 +134,26 @@ class ReviewService:
 
     async def get_review(self, review_id: str) -> Optional[dict]:
         review = await self.review_repo.get_review(review_id, self.tenant_id)
-        return self._review_to_detail(review) if review else None
+        if not review:
+            return None
+        # Recompute counts from actual DB records to avoid stale counters
+        from sqlalchemy import select, func as sa_func
+        from app.domains.review.models import ReviewFinding, ReviewRedline
+        cnt = await self.review_repo.session.execute(
+            select(sa_func.count()).select_from(ReviewFinding).where(
+                ReviewFinding.review_id == review_id,
+                ReviewFinding.tenant_id == self.tenant_id,
+            )
+        )
+        review.finding_count = cnt.scalar() or 0
+        cnt = await self.review_repo.session.execute(
+            select(sa_func.count()).select_from(ReviewRedline).where(
+                ReviewRedline.review_id == review_id,
+                ReviewRedline.tenant_id == self.tenant_id,
+            )
+        )
+        review.redline_count = cnt.scalar() or 0
+        return self._review_to_detail(review)
 
     async def list_reviews(self, filters: ReviewFilterParams) -> tuple[list, int]:
         return await self.review_repo.list_reviews(self.tenant_id, filters, filters)
