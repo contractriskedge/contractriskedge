@@ -14,7 +14,7 @@ from app.domains.admin.schemas import (
     AdminUserCreate, AdminUserUpdate, AdminUserResponse,
     AdminRoleCreate, AdminRoleUpdate, AdminRoleResponse,
     TenantSettingsUpdate, TenantSettingsResponse,
-    SystemHealthResponse,
+    SystemHealthResponse, DashboardResponse, DashboardKpi,
 )
 from app.domains.admin.heartbeat_models import WorkerHeartbeat
 from app.kernel.events.realtime import EventTypes, emit_event
@@ -155,6 +155,82 @@ class AdminService:
         settings = await self.repo.upsert_settings(self.tenant_id, **kwargs)
         return self._settings_to_response(settings)
 
+    # ── Dashboard ───────────────────────────────────────────────
+
+    async def get_dashboard(self) -> DashboardResponse:
+        """Aggregate admin dashboard KPIs and counts."""
+        from sqlalchemy import text
+
+        total_users = 0
+        active_users_30d = 0
+        total_uploads = 0
+        total_reviews = 0
+        audit_events_24h = 0
+
+        try:
+            result = await self.repo.session.execute(
+                text("SELECT COUNT(*)::int FROM admin_users WHERE tenant_id = :tid"),
+                {"tid": self.tenant_id},
+            )
+            total_users = result.scalar() or 0
+        except Exception:
+            pass
+
+        try:
+            result = await self.repo.session.execute(
+                text("SELECT COUNT(*)::int FROM admin_users WHERE tenant_id = :tid AND last_login_at >= NOW() - INTERVAL '30 days'"),
+                {"tid": self.tenant_id},
+            )
+            active_users_30d = result.scalar() or 0
+        except Exception:
+            pass
+
+        try:
+            result = await self.repo.session.execute(
+                text("SELECT COUNT(*)::int FROM upload_sessions WHERE tenant_id = :tid"),
+                {"tid": self.tenant_id},
+            )
+            total_uploads = result.scalar() or 0
+        except Exception:
+            pass
+
+        try:
+            result = await self.repo.session.execute(
+                text("SELECT COUNT(*)::int FROM contract_reviews WHERE tenant_id = :tid"),
+                {"tid": self.tenant_id},
+            )
+            total_reviews = result.scalar() or 0
+        except Exception:
+            pass
+
+        try:
+            result = await self.repo.session.execute(
+                text("SELECT COUNT(*)::int FROM governance_audit_events WHERE tenant_id = :tid AND created_at >= NOW() - INTERVAL '24 hours'"),
+                {"tid": self.tenant_id},
+            )
+            audit_events_24h = result.scalar() or 0
+        except Exception:
+            pass
+
+        kpis = [
+            DashboardKpi(label="Total Users", value=total_users, change=0.0, trend="neutral"),
+            DashboardKpi(label="Active Users (30d)", value=active_users_30d, change=0.0, trend="neutral"),
+            DashboardKpi(label="Total Uploads", value=total_uploads, change=0.0, trend="neutral"),
+            DashboardKpi(label="Total Reviews", value=total_reviews, change=0.0, trend="neutral"),
+            DashboardKpi(label="Audit Events (24h)", value=audit_events_24h, change=0.0, trend="neutral"),
+        ]
+
+        return DashboardResponse(
+            kpis=kpis,
+            total_users=total_users,
+            active_users_30d=active_users_30d,
+            total_tenants=1,
+            total_uploads=total_uploads,
+            total_reviews=total_reviews,
+            audit_events_24h=audit_events_24h,
+            system_health="healthy",
+        )
+
     # ── System Health ─────────────────────────────────────────────
 
     async def get_system_health(self) -> SystemHealthResponse:
@@ -273,6 +349,8 @@ class AdminService:
             sla_medium_hours=settings.sla_medium_hours or 72,
             sla_low_hours=settings.sla_low_hours or 168,
             default_notification_channel=settings.default_notification_channel or "in_app",
+            email_redirect_enabled=bool(getattr(settings, "email_redirect_enabled", False)),
+            email_redirect_to=getattr(settings, "email_redirect_to", None),
             features_enabled=settings.features_enabled or {},
             created_at=settings.created_at,
             updated_at=settings.updated_at,

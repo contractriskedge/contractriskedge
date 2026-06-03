@@ -272,26 +272,55 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
 
         <div className="h-5 w-px bg-gray-200 dark:bg-gray-700" />
 
-        {/* Decision actions */}
-        <button
-          onClick={() => { setApproveDecision("approved"); setActiveModal("approve"); }}
-          disabled={!actions.canApprove || !canApproveReject}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-green-100 px-3 py-2 text-xs font-medium text-green-700 transition-colors hover:bg-green-200 disabled:opacity-40 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-800"
-          title={!actions.canApprove ? `Cannot approve in '${review.status}' state` : !canApproveReject ? "You don't have permission to approve" : "Approve review"}
-        >
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          Approve
-        </button>
+        {/* Decision actions — show actual status when in terminal/completed state */}
+        {review.status === "approved" ? (
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-green-100 px-3 py-2 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-300">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Approved
+          </span>
+        ) : review.status === "rejected" ? (
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-red-100 px-3 py-2 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300">
+            <XCircle className="h-3.5 w-3.5" />
+            Rejected
+          </span>
+        ) : review.status === "closed" ? (
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-gray-100 px-3 py-2 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-400">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Closed
+          </span>
+        ) : review.status === "finalized" ? (
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-100 px-3 py-2 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Finalized
+          </span>
+        ) : review.status === "executed" ? (
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-100 px-3 py-2 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Executed
+          </span>
+        ) : (
+          <>
+            <button
+              onClick={() => { setApproveDecision("approved"); setActiveModal("approve"); }}
+              disabled={!actions.canApprove || !canApproveReject}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-green-100 px-3 py-2 text-xs font-medium text-green-700 transition-colors hover:bg-green-200 disabled:opacity-40 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-800"
+              title={!actions.canApprove ? `Cannot approve in '${review.status}' state` : !canApproveReject ? "You don't have permission to approve" : "Approve review"}
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Approve
+            </button>
 
-        <button
-          onClick={() => { setApproveDecision("rejected"); setActiveModal("approve"); }}
-          disabled={!actions.canReject || !canApproveReject}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-red-100 px-3 py-2 text-xs font-medium text-red-700 transition-colors hover:bg-red-200 disabled:opacity-40 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-800"
-          title={!actions.canReject ? `Cannot reject in '${review.status}' state` : !canApproveReject ? "You don't have permission to reject" : "Reject review"}
-        >
-          <XCircle className="h-3.5 w-3.5" />
-          Reject
-        </button>
+            <button
+              onClick={() => { setApproveDecision("rejected"); setActiveModal("approve"); }}
+              disabled={!actions.canReject || !canApproveReject}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-red-100 px-3 py-2 text-xs font-medium text-red-700 transition-colors hover:bg-red-200 disabled:opacity-40 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-800"
+              title={!actions.canReject ? `Cannot reject in '${review.status}' state` : !canApproveReject ? "You don't have permission to reject" : "Reject review"}
+            >
+              <XCircle className="h-3.5 w-3.5" />
+              Reject
+            </button>
+          </>
+        )}
 
         <div className="h-5 w-px bg-gray-200 dark:bg-gray-700" />
 

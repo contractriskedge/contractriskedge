@@ -14,7 +14,7 @@
 
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Activity, Upload, Cpu, User, MessageSquare, AlertTriangle,
   CheckCircle2, XCircle, RefreshCw, UserCheck, ArrowUpRight,
@@ -22,6 +22,7 @@ import {
   ChevronDown, ChevronUp, Search, Download, Filter,
 } from "lucide-react";
 import { useReviewContext } from "./ReviewContext";
+import { useAuditTrailEvents } from "./hooks";
 
 const EVENT_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; label: string }> = {
   review_created: { icon: PlusCircle, color: "text-blue-500", bg: "bg-blue-100 dark:bg-blue-900/20", label: "Created" },
@@ -54,13 +55,20 @@ const STATUS_FILTERS = [
 ] as const;
 
 export function AuditTrailSection() {
-  const ctx = useReviewContext();
-  const { activity } = ctx;
+  const { selectedReviewId, findings } = useReviewContext();
+  const { events, isLoading: isActivityLoading, dataSource, hadSampleFallback } = useAuditTrailEvents(
+    selectedReviewId ?? "",
+    findings,
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [actorFilter, setActorFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
 
-  const events = activity ?? [];
+  useEffect(() => {
+    setSearchQuery("");
+    setActorFilter("");
+    setStatusFilter("");
+  }, [selectedReviewId]);
 
   // ── Unique actors for filter dropdown ───────────────────────────────
 
@@ -77,8 +85,9 @@ export function AuditTrailSection() {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(e =>
-        e.action.toLowerCase().includes(q) ||
-        (e.details && e.details.toLowerCase().includes(q))
+        (e.action || "").toLowerCase().includes(q) ||
+        (e.details && e.details.toLowerCase().includes(q)) ||
+        e.type.toLowerCase().includes(q)
       );
     }
 
@@ -132,6 +141,19 @@ export function AuditTrailSection() {
 
   return (
     <div className="p-4">
+      {hadSampleFallback && (
+        <div className="mb-3 px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 text-[10px] text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+          <span className="font-semibold">Demo audit data is off.</span>{" "}
+          Placeholders like Legal Reviewer A / find-009 are mock seed data (not your resolves).
+          Your actions are stored on findings and will show here when the audit API returns them.
+        </div>
+      )}
+      {!hadSampleFallback && dataSource === "finding-derived" && (
+        <div className="mb-3 px-3 py-2 rounded-lg border border-blue-200 bg-blue-50 text-[10px] text-blue-900 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-100">
+          <span className="font-semibold">From your review.</span>{" "}
+          Showing resolve/dismiss actions from findings. The server audit API returned no events yet.
+        </div>
+      )}
       {/* ── Toolbar: Search + Filters + Export ─────────────────────────── */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <div className="relative flex-1 min-w-[160px]">
@@ -163,10 +185,26 @@ export function AuditTrailSection() {
       {/* ── Timeline ──────────────────────────────────────────────────── */}
       <div className="relative">
         <div className="absolute left-4 top-2 bottom-2 w-px bg-gray-200 dark:bg-navy-700" />
-        {filtered.length === 0 ? (
+        {isActivityLoading && events.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 text-center">
+            <Activity className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2 animate-pulse" />
+            <p className="text-xs text-gray-500">Loading activity…</p>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <Activity className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2" />
-            <p className="text-xs text-gray-500">No activity recorded</p>
+            <p className="text-xs text-gray-500">
+              {events.length > 0 ? "No events match the current filters" : "No activity recorded"}
+            </p>
+            {events.length > 0 && (searchQuery || actorFilter || statusFilter) && (
+              <button
+                type="button"
+                onClick={() => { setSearchQuery(""); setActorFilter(""); setStatusFilter(""); }}
+                className="mt-2 text-[9px] text-navy-600 hover:underline dark:text-navy-300"
+              >
+                Clear filters
+              </button>
+            )}
           </div>
         ) : (
           <div className="space-y-0">

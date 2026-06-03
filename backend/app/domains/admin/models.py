@@ -78,6 +78,10 @@ class TenantSettings(Base):
     default_notification_channel = Column(Text, nullable=True, default="in_app")
     digest_frequency = Column(Text, nullable=True, default="instant")
 
+    # Email redirect (dev/test — route all notification mail to one inbox)
+    email_redirect_enabled = Column(Boolean, nullable=False, default=False)
+    email_redirect_to = Column(Text, nullable=True)
+
     # Data Retention
     retention_days = Column(Integer, nullable=True, default=365)
     audit_retention_days = Column(Integer, nullable=True, default=730)

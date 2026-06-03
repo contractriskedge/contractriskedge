@@ -468,7 +468,7 @@ export function RedlineWorkspace() {
     accepted: redlines.filter(r => r.status === "accepted").length,
     rejected: redlines.filter(r => r.status === "rejected").length,
     modified: redlines.filter(r => r.status === "modified").length,
-    escalated: 0, // Would come from backend
+    escalated: redlines.filter(r => r.status === "needs_legal_review" || r.status === "escalated").length,
     assigned: redlines.filter(r => r.status === "under_review").length,
   }), [redlines]);
 

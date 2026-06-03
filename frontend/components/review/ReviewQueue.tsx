@@ -35,13 +35,27 @@ import type { ReviewDetail, WorkloadMetrics } from "@/services/api/client";
 import { ApprovalModal } from "./ApprovalModal";
 import { EscalationModal } from "./EscalationModal";
 import { getAllowedActions, isImmutable, getStatusLabel } from "@/lib/workflow";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 // ── Hooks ───────────────────────────────────────────────────────
 
-function useReviewsList() {
+function useReviewsList(assignedTo?: string) {
+  const params: Record<string, unknown> = { page_size: 100 };
+  if (assignedTo) {
+    params.assigned_to = assignedTo;
+  }
   return useQuery({
-    queryKey: ["reviews", "queue"],
-    queryFn: () => reviewService.list({ page_size: 100 }),
+    queryKey: ["reviews", "queue", assignedTo || "all"],
+    queryFn: () => reviewService.list(params as any),
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+  });
+}
+
+function useMyReviews() {
+  return useQuery({
+    queryKey: ["reviews", "my-work"],
+    queryFn: () => reviewService.getMyWork(),
     staleTime: 15_000,
     refetchInterval: 30_000,
   });
@@ -51,8 +65,9 @@ function useWorkloadMetrics() {
   return useQuery({
     queryKey: ["reviews", "workload"],
     queryFn: () => reviewService.getWorkloadMetrics(),
-    staleTime: 15_000,
-    refetchInterval: 30_000,
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -356,14 +371,17 @@ interface ReviewQueueProps {
 
 export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const [queueFilter, setQueueFilter] = useState<string>("all");
+  const isMyReviews = queueFilter === "my";
+
   const { data, isLoading } = useReviewsList();
   const { data: metrics } = useWorkloadMetrics();
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [stageFilter, setStageFilter] = useState<string>("");
-  const [queueFilter, setQueueFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortField, setSortField] = useState<"risk_score" | "created_at" | "status" | "priority">("created_at");
+  const [sortField, setSortField] = useState<"risk_score" | "created_at" | "updated_at" | "status" | "priority">("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [assignTarget, setAssignTarget] = useState<string | null>(null);
@@ -485,7 +503,11 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
 
     // Queue filter (role-based)
     if (queueFilter === "my") {
-      list = list.filter((r) => r.assigned_to && r.assigned_to !== "Unassigned");
+      if (user?.email) {
+        list = list.filter((r) => r.assigned_to?.toLowerCase() === user.email.toLowerCase());
+      } else {
+        list = list.filter((r) => r.assigned_to && r.assigned_to !== "Unassigned");
+      }
     } else if (queueFilter === "legal") {
       list = list.filter((r) => r.status === "legal_approval" || r.workflow_stage === "legal_approval");
     } else if (queueFilter === "executive") {
@@ -493,7 +515,7 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
     } else if (queueFilter === "compliance") {
       list = list.filter((r) => r.workflow_stage === "compliance");
     } else if (queueFilter === "escalated") {
-      list = list.filter((r) => r.status === "escalated" || r.status === "legal_approval" || r.status === "exec_approval");
+      list = list.filter((r) => r.status === "escalated");
     } else if (queueFilter === "overdue") {
       list = list.filter((r) => r.sla_status === "overdue" || r.sla_status === "critical_overdue");
     }
@@ -521,12 +543,13 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
       if (sortField === "risk_score") cmp = (a.risk_score ?? 0) - (b.risk_score ?? 0);
       else if (sortField === "priority") cmp = (a.priority || "normal").localeCompare(b.priority || "normal");
       else if (sortField === "created_at") cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      else if (sortField === "updated_at") cmp = new Date(a.updated_at || a.created_at).getTime() - new Date(b.updated_at || b.created_at).getTime();
       else if (sortField === "status") cmp = a.status.localeCompare(b.status);
       return sortDir === "desc" ? -cmp : cmp;
     });
     if (maxItems) list = list.slice(0, maxItems);
     return list;
-  }, [reviews, queueFilter, stageFilter, statusFilter, searchQuery, sortField, sortDir, maxItems]);
+  }, [reviews, queueFilter, stageFilter, statusFilter, searchQuery, sortField, sortDir, maxItems, user]);
 
   const toggleSort = (field: typeof sortField) => {
     if (sortField === field) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -616,7 +639,7 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
         {[
           { id: "all", label: "All Reviews" },
           { id: "my", label: "My Reviews" },
-          { id: "legal", label: "Legal Queue", stage: "legal_approval" },
+          { id: "legal", label: "Legal Queue", stage: "legal_ops" },
           { id: "executive", label: "Executive Queue", stage: "executive" },
           { id: "compliance", label: "Compliance Queue", stage: "compliance" },
           { id: "escalated", label: "Escalated" },
@@ -725,16 +748,18 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                     }
                   </button>
                 </th>
-                <th className="text-left px-3 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[40%]">Contract</th>
-                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-navy-700 dark:hover:text-gray-200 w-[9%]" onClick={() => toggleSort("risk_score")}>
+                <th className="text-left px-3 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[28%]">Contract</th>
+                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-navy-700 dark:hover:text-gray-200 w-[7%]" onClick={() => toggleSort("risk_score")}>
                   <span className="inline-flex items-center gap-1">Risk <ArrowUpDown className="w-3 h-3" /></span>
                 </th>
-                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-navy-700 dark:hover:text-gray-200 w-[11%]" onClick={() => toggleSort("status")}>
+                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-navy-700 dark:hover:text-gray-200 w-[9%]" onClick={() => toggleSort("status")}>
                   <span className="inline-flex items-center gap-1">Status <ArrowUpDown className="w-3 h-3" /></span>
                 </th>
-                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[11%]">Assigned</th>
-                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[9%]">SLA</th>
-                <th className="text-right px-3 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[20%]">Actions</th>
+                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[9%]">Assigned</th>
+                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[9%]">Created</th>
+                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[9%]">Updated</th>
+                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[7%]">SLA</th>
+                <th className="text-right px-3 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[18%]">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-navy-700">
@@ -882,13 +907,32 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                         </span>
                       </div>
                     </td>
-                    {/* ── SLA ── */}
+                    {/* ── Created Date ── */}
                     <td className="px-2 py-3 align-top pt-3.5">
-                      <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium ${slaColor(sla.status)}`}>
-                        {sla.status === "overdue" && <AlertTriangle className="w-3 h-3" />}
-                        {sla.status === "warning" && <Clock className="w-3 h-3" />}
-                        {sla.label}
+                      <span className="text-[10px] text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                        {review.created_at ? new Date(review.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
                       </span>
+                    </td>
+                    {/* ── Updated Date ── */}
+                    <td className="px-2 py-3 align-top pt-3.5">
+                      <span className="text-[10px] text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                        {review.updated_at ? new Date(review.updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
+                      </span>
+                    </td>
+                    {/* ── SLA / Due Date ── */}
+                    <td className="px-2 py-3 align-top pt-3.5">
+                      <div className="flex flex-col gap-0.5">
+                        <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium ${slaColor(sla.status)}`}>
+                          {sla.status === "overdue" && <AlertTriangle className="w-3 h-3" />}
+                          {sla.status === "warning" && <Clock className="w-3 h-3" />}
+                          {sla.label}
+                        </span>
+                        {review.sla_deadline && (
+                          <span className="text-[8px] text-gray-400 dark:text-gray-500 whitespace-nowrap">
+                            Due: {new Date(review.sla_deadline).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     {/* ── Actions ── */}
                     <td className="px-3 py-3 text-right align-top pt-3">

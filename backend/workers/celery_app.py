@@ -43,6 +43,7 @@ celery_app.conf.update(
         Queue("ingestion"),
         Queue("ai"),
         Queue("notifications"),
+        Queue("email"),
         Queue("default"),
         Queue("celery"),  # drain legacy backlog from before routes were fixed
     ],
@@ -63,6 +64,7 @@ celery_app.conf.update(
         "analyze_contract": {"queue": "ai"},
         "deliver_notification": {"queue": "notifications"},
         "process_workflow_timers": {"queue": "notifications"},
+        "send_email": {"queue": "email"},
         "check_sla_overdue": {"queue": "default"},
     },
     beat_schedule={
@@ -120,6 +122,14 @@ celery_app.conf.update(
             "args": (),
             "options": {"queue": "default"},
         },
+
+        # Email queue processing — every minute
+        "process-email-queue": {
+            "task": "send_email",
+            "schedule": crontab(minute="*"),  # Every minute
+            "args": (),
+            "options": {"queue": "email"},
+        },
     },
     timezone="UTC",
 )
@@ -139,4 +149,5 @@ celery_app.conf.imports = (
     "app.workers.sla_check",
     "app.workers.recovery",
     "app.workers.benchmark",
+    "app.workers.email_worker",
 )

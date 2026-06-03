@@ -16,6 +16,7 @@ from app.domains.obligations.schemas import (
     RiskAnalysisResponse, ObligationEscalationResponse, AnomalyResponse,
     AiReviewRequest, ObligationReminderCreate, ObligationReminderResponse,
     ObligationEscalationCreate, NotificationHistoryResponse,
+    SlaMetricResponse, SlaBreachResponse, VendorRiskResponse, SlaPredictionResponse,
 )
 from app.domains.obligations.service import ObligationService
 from app.dependencies import get_db, get_tenant_id
@@ -213,9 +214,43 @@ async def create_escalation(
     return (await service.create_escalation(data)).model_dump()
 
 
-@router.get("/notifications/history", response_model=None)
+@router.get("/notification-history", response_model=None)
 async def get_notification_history(
     service: ObligationService = Depends(get_obligation_service),
     _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
 ):
     return [n.model_dump() for n in await service.get_notification_history()]
+
+
+# ── SLA Performance / Breaches / Vendor Risk / Predictions ────────────
+
+@router.get("/sla-performance", response_model=None)
+async def get_sla_performance(
+    service: ObligationService = Depends(get_obligation_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    return [m.model_dump() for m in await service.get_sla_performance()]
+
+
+@router.get("/sla-breaches", response_model=None)
+async def get_sla_breaches(
+    service: ObligationService = Depends(get_obligation_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    return [m.model_dump() for m in await service.get_sla_breaches()]
+
+
+@router.get("/vendor-risk", response_model=None)
+async def get_vendor_risk(
+    service: ObligationService = Depends(get_obligation_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    return [m.model_dump() for m in await service.get_vendor_risk()]
+
+
+@router.get("/sla-predictions", response_model=None)
+async def get_sla_predictions(
+    service: ObligationService = Depends(get_obligation_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    return [m.model_dump() for m in await service.get_sla_predictions()]

@@ -43,11 +43,17 @@ import { ExplainabilitySection } from "./ExplainabilitySection";
 import { VersionsSection } from "./VersionsSection";
 import { RiskReductionSection } from "./RiskReductionSection";
 import { ReviewMoreActionsMenu } from "./ReviewMoreActionsMenu";
+import { useReviewRedlinesData, useVersions, useAuditTrailEvents } from "./hooks";
 import type { ReviewSection, ReviewSummary } from "./types";
 import {
   onLocateClauseSuccess,
   REVIEW_SHOW_DOCUMENT_PANEL_EVENT,
 } from "@/lib/highlightClause";
+import {
+  formatReviewStatusLabel,
+  isReviewDecisionLocked,
+  reviewStatusBadgeClass,
+} from "./reviewDecision";
 
 // ── Section Configuration ───────────────────────────────────────────────────
 
@@ -64,7 +70,7 @@ interface SectionConfig {
 function EnterpriseReviewPlatformInner() {
   const ctx = useReviewContext();
   const {
-    selectedReviewId, selectReview, reviews, selectedReview,
+    selectedReviewId, selectReview, reviews, selectedReview, workflow,
     findings, policyViolations, recommendations,
     activeSection, setActiveSection,
     selectedFindingId, setSelectedFindingId,
@@ -77,6 +83,14 @@ function EnterpriseReviewPlatformInner() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showReviewList, setShowReviewList] = useState(false);
   const [locateToast, setLocateToast] = useState<string | null>(null);
+
+  // Fetch redline count for the tab badge
+  const { data: apiRedlines = [] } = useReviewRedlinesData(selectedReviewId ?? "");
+  // Fetch versions count for the tab badge
+  const { data: docVersions = [] } = useVersions(selectedReviewId ?? "");
+  // Audit tab — shared with AuditTrailSection via the same query (React Query dedupes)
+  const auditTrail = useAuditTrailEvents(selectedReviewId ?? "", findings);
+  const auditBadgeCount = auditTrail.events.length;
 
   useEffect(() => {
     const openDocPanel = () => setShowLeftPanel(true);
@@ -103,9 +117,10 @@ function EnterpriseReviewPlatformInner() {
     { id: "summary", label: "Summary", icon: LayoutDashboard, shortcut: "S" },
     { id: "findings", label: "Findings", icon: Brain, shortcut: "1",
       badge: (c) => { const n = c.findings.filter(f => (f.status || "open") === "open").length; return n > 0 ? `(${n})` : undefined; } },
-    { id: "redline", label: "Redline", icon: Edit3, shortcut: "2" },
+    { id: "redline", label: "Redline", icon: Edit3, shortcut: "2",
+      badge: () => apiRedlines.length > 0 ? `(${apiRedlines.length})` : undefined },
     { id: "versions", label: "Versions", icon: GitCompare, shortcut: "V",
-      badge: (c) => c.activity?.length ? `(${c.activity.length})` : undefined },
+      badge: () => docVersions.length > 0 ? `(${docVersions.length})` : undefined },
     { id: "policy", label: "Policy", icon: Shield, shortcut: "3",
       badge: (c) => { const n = c.policyViolations?.filter(v => (v.status || "open") === "open").length; return n && n > 0 ? `(${n})` : undefined; } },
     { id: "recommendations", label: "Recs", icon: Lightbulb, shortcut: "4",
@@ -114,9 +129,8 @@ function EnterpriseReviewPlatformInner() {
     { id: "workflow", label: "Workflow", icon: Workflow, shortcut: "5",
       badge: (c) => c.workflow?.stages?.length ? `(${c.workflow.stages.length})` : undefined },
     { id: "explainability", label: "Explain", icon: BarChart3, shortcut: "6" },
-    { id: "audit", label: "Audit", icon: Activity, shortcut: "7",
-      badge: (c) => c.activity?.length ? `(${c.activity.length})` : undefined },
-  ], []);
+    { id: "audit", label: "Audit", icon: Activity, shortcut: "" },
+  ], [apiRedlines, docVersions]);
 
   // ── Filtered Reviews ─────────────────────────────────────────────────
 
@@ -204,7 +218,7 @@ function EnterpriseReviewPlatformInner() {
     const map: Record<string, string | number | undefined> = {};
     sections.forEach(s => { if (s.badge) { const b = s.badge(ctx); if (b !== undefined) map[s.id] = b; } });
     return map;
-  }, [sections, ctx]);
+  }, [sections, ctx, apiRedlines, docVersions]);
 
   // ── Open findings count for header ──────────────────────────────────
 
@@ -289,15 +303,40 @@ function EnterpriseReviewPlatformInner() {
           </button>
           <div className="w-px h-4 bg-gray-200 dark:bg-navy-700 mx-0.5" />
 
-          {/* Quick Actions — compact */}
+          {/* Quick Actions — approve/reject only while review is active */}
           {selectedReview && (
             <>
-              <button className="flex items-center gap-1 px-1.5 py-1 text-[9px] font-medium rounded hover:bg-green-50 text-green-700 transition-colors">
-                <CheckCircle2 className="w-3 h-3" /> Approve
-              </button>
-              <button className="flex items-center gap-1 px-1.5 py-1 text-[9px] font-medium rounded hover:bg-red-50 text-red-600 transition-colors">
-                <XCircle className="w-3 h-3" /> Reject
-              </button>
+              {isReviewDecisionLocked(selectedReview, workflow) ? (
+                <div className="flex items-center gap-1">
+                  {([
+                    { key: "status", value: selectedReview.status },
+                    ...(workflow?.current_stage &&
+                    workflow.current_stage !== selectedReview.status
+                      ? [{ key: "stage", value: workflow.current_stage }]
+                      : []),
+                  ] as { key: string; value: string }[]).map(({ key, value }) => {
+                    const Icon = value === "rejected" ? XCircle : CheckCircle2;
+                    return (
+                      <span
+                        key={key}
+                        className={`inline-flex items-center gap-1 px-1.5 py-1 text-[9px] font-semibold rounded ${reviewStatusBadgeClass(value)}`}
+                      >
+                        <Icon className="w-3 h-3" />
+                        {formatReviewStatusLabel(value)}
+                      </span>
+                    );
+                  })}
+                </div>
+              ) : (
+                <>
+                  <button className="flex items-center gap-1 px-1.5 py-1 text-[9px] font-medium rounded hover:bg-green-50 text-green-700 transition-colors">
+                    <CheckCircle2 className="w-3 h-3" /> Approve
+                  </button>
+                  <button className="flex items-center gap-1 px-1.5 py-1 text-[9px] font-medium rounded hover:bg-red-50 text-red-600 transition-colors">
+                    <XCircle className="w-3 h-3" /> Reject
+                  </button>
+                </>
+              )}
               <ReviewMoreActionsMenu
                 review={selectedReview}
                 selectedFindingId={selectedFindingId}
@@ -337,7 +376,10 @@ function EnterpriseReviewPlatformInner() {
         {sections.map(s => {
           const Icon = s.icon;
           const isActive = activeSection === s.id || (s.id === "redline" && activeSection === "findings" && false);
-          const badge = activeBadges[s.id];
+          const badge =
+            s.id === "audit"
+              ? (auditBadgeCount > 0 ? `(${auditBadgeCount})` : undefined)
+              : activeBadges[s.id];
           return (
             <button key={s.id} onClick={() => setActiveSection(s.id as ReviewSection)}
               className={`flex items-center gap-1 px-2.5 py-2 text-[10px] font-medium border-b-2 transition-all ${

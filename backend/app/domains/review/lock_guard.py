@@ -76,6 +76,7 @@ def assert_can_approve_or_reject(review_status: str, review_id: str) -> None:
         WorkflowState.PROCUREMENT_REVIEW, WorkflowState.LEGAL_REVIEW,
         WorkflowState.SECURITY_REVIEW, WorkflowState.NEGOTIATION,
         WorkflowState.IN_REVIEW, WorkflowState.ESCALATED,
+        WorkflowState.EXEC_APPROVAL, WorkflowState.APPROVED,
     }
     if state not in allowed:
         raise ImmutableReviewError(

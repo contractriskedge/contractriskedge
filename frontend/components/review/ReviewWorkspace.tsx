@@ -79,6 +79,24 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
     enabled: Boolean(reviewId),
     staleTime: 10_000,
   });
+
+  // Fetch actual redline count from API for accurate badge display
+  const redlinesQuery = useQuery({
+    queryKey: ["reviews", reviewId, "redlines", "all"],
+    queryFn: () => reviewService.listRedlines(reviewId),
+    enabled: Boolean(reviewId),
+    staleTime: 10_000,
+  });
+  const actualRedlineCount = redlinesQuery.data?.redlines?.length ?? review?.redline_count ?? 0;
+
+  // Fetch actual findings count from API
+  const findingsQuery = useQuery({
+    queryKey: ["reviews", reviewId, "findings", "count"],
+    queryFn: () => reviewService.listFindings(reviewId, { page_size: 1 }),
+    enabled: Boolean(reviewId),
+    staleTime: 10_000,
+  });
+  const actualFindingCount = findingsQuery.data?.total ?? review?.finding_count ?? 0;
   const currentDocVersion = versionsQuery.data?.find((v) => v.status === "current")
     ?? versionsQuery.data?.slice().sort((a, b) => b.version_number - a.version_number)[0];
 
@@ -177,8 +195,8 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
   );
 
   const tabs = [
-    { id: "findings" as const, label: "Findings", count: review?.finding_count },
-    { id: "redlines" as const, label: "Redlines", count: review?.redline_count },
+    { id: "findings" as const, label: "Findings", count: actualFindingCount },
+    { id: "redlines" as const, label: "Redlines", count: actualRedlineCount },
     { id: "evidence" as const, label: "Evidence" },
     { id: "versions" as const, label: "Versions" },
     { id: "activity" as const, label: "Activity" },

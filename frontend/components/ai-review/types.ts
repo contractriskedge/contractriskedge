@@ -106,6 +106,7 @@ export interface Finding {
   alternative_interpretations: string[];
   // Feedback
   feedback: AiFeedback | null;
+  feedback_type: string | null;
 }
 
 export type FindingStatus = "open" | "acknowledged" | "resolved" | "dismissed" | "false_positive";

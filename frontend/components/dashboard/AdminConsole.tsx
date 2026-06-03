@@ -61,6 +61,8 @@ interface TenantSettings {
   risk_threshold_critical: number;
   sla_critical_hours: number;
   features_enabled: Record<string, boolean>;
+  email_redirect_enabled: boolean;
+  email_redirect_to: string | null;
 }
 
 // ── Hooks ────────────────────────────────────────────────────────
@@ -79,6 +81,10 @@ function useSystemHealth() {
 
 function useTenantSettings() {
   return useQuery({ queryKey: ["admin", "settings"], queryFn: () => api.get<TenantSettings>("/admin/settings"), staleTime: 60_000 });
+}
+
+function useEmailQueueStats() {
+  return useQuery({ queryKey: ["admin", "email-queue"], queryFn: () => api.get<{pending: number; sent: number; failed: number}>("/email/queue/stats"), staleTime: 15_000, refetchInterval: 30_000 });
 }
 
 // ── Stat Card ────────────────────────────────────────────────────
@@ -128,6 +134,35 @@ export function AdminConsole() {
   const { data: roles } = useAdminRoles();
   const { data: health, isLoading: healthLoading } = useSystemHealth();
   const { data: settings } = useTenantSettings();
+  const { data: emailStats } = useEmailQueueStats();
+  const queryClient = useQueryClient();
+  const [emailRedirectEnabled, setEmailRedirectEnabled] = useState(false);
+  const [emailRedirectTo, setEmailRedirectTo] = useState("");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  // Sync state when settings load
+  React.useEffect(() => {
+    if (settings) {
+      setEmailRedirectEnabled(settings.email_redirect_enabled);
+      setEmailRedirectTo(settings.email_redirect_to || "");
+    }
+  }, [settings]);
+
+  const saveEmailRedirect = async () => {
+    setSaveStatus("saving");
+    try {
+      await api.put("/admin/settings", {
+        email_redirect_enabled: emailRedirectEnabled,
+        email_redirect_to: emailRedirectTo || null,
+      });
+      setSaveStatus("saved");
+      queryClient.invalidateQueries({ queryKey: ["admin", "settings"] });
+      setTimeout(() => setSaveStatus("idle"), 2000);
+    } catch {
+      setSaveStatus("error");
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    }
+  };
 
   const tabs: { id: AdminTab; label: string; icon: React.ReactNode }[] = [
     { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard className="w-4 h-4" /> },
@@ -186,6 +221,35 @@ export function AdminConsole() {
             <StatCard icon={<Activity className="w-4 h-4" />} label="WS Connections" value={health?.websocket.active_connections ?? 0} sub={`${health?.websocket.messages_sent ?? 0} msgs sent`} color="from-purple-500 to-violet-600" />
             <StatCard icon={<Brain className="w-4 h-4" />} label="AI Latency" value={`${health?.ai.avg_latency_ms ?? 0}ms`} sub={`${health?.ai.failures_24h ?? 0} failures`} color="from-pink-500 to-rose-600" />
           </div>
+
+          {/* Email Queue Stats */}
+          {emailStats && (
+            <div>
+              <h3 className="text-xs font-semibold text-navy-900 mb-2 flex items-center gap-1.5"><Bell className="w-3.5 h-3.5" /> Email Queue</h3>
+              <div className="grid grid-cols-4 gap-3">
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-3">
+                  <p className="text-2xl font-bold text-amber-600 tabular-nums">{emailStats.pending}</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">Pending</p>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-3">
+                  <p className="text-2xl font-bold text-green-600 tabular-nums">{emailStats.sent}</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">Sent</p>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-3">
+                  <p className="text-2xl font-bold text-red-600 tabular-nums">{emailStats.failed}</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">Failed</p>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-3">
+                  <p className="text-2xl font-bold text-navy-900 tabular-nums">
+                    {emailStats.pending + emailStats.sent + emailStats.failed > 0
+                      ? Math.round((emailStats.sent / (emailStats.pending + emailStats.sent + emailStats.failed)) * 100)
+                      : 0}%
+                  </p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">Success Rate</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Queue depths */}
           {health?.celery.queue_sizes && Object.keys(health.celery.queue_sizes).length > 0 && (
@@ -374,6 +438,34 @@ export function AdminConsole() {
                       <span className={`font-medium ${enabled ? "text-green-600" : "text-gray-400"}`}>{enabled ? "Enabled" : "Disabled"}</span>
                     </div>
                   ))}
+                </div>
+              </div>
+              {/* Email Redirect Settings */}
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 lg:col-span-2">
+                <h3 className="text-xs font-semibold text-navy-900 mb-3 flex items-center gap-2"><Bell className="w-4 h-4 text-purple-500" /> Email Redirect (Testing)</h3>
+                <p className="text-[10px] text-gray-500 mb-3">When enabled, all outgoing notification emails are redirected to the specified address. Useful for test/demo environments.</p>
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <div className={`relative w-10 h-5 rounded-full transition-colors ${emailRedirectEnabled ? 'bg-purple-600' : 'bg-gray-300'}`}
+                      onClick={() => setEmailRedirectEnabled(!emailRedirectEnabled)}>
+                      <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${emailRedirectEnabled ? 'translate-x-5' : ''}`} />
+                    </div>
+                    <span className="text-xs font-medium text-gray-700">Redirect all emails</span>
+                  </label>
+                  {emailRedirectEnabled && (
+                    <input type="email" value={emailRedirectTo} onChange={e => setEmailRedirectTo(e.target.value)}
+                      placeholder="pgskannan@gmail.com"
+                      className="flex-1 px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    />
+                  )}
+                  <button onClick={saveEmailRedirect} disabled={saveStatus === "saving"}
+                    className={`px-3 py-1.5 text-[10px] font-medium rounded-lg transition-colors ${
+                      saveStatus === "saved" ? "bg-green-100 text-green-700" :
+                      saveStatus === "error" ? "bg-red-100 text-red-700" :
+                      'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                    }`}>
+                    {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : saveStatus === "error" ? "Error" : "Save"}
+                  </button>
                 </div>
               </div>
             </div>

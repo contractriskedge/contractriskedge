@@ -144,6 +144,17 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from_email: str = "noreply@contractriskedge.com"
     smtp_tls: bool = True
+
+    # ── Resend ────────────────────────────────────────────────────
+    resend_api_key: str = ""
+    """Resend API key. Leave empty to disable email sending."""
+    resend_from_email: str = "notifications@resend.dev"
+    """Sender email address. Use resend.dev for development."""
+    resend_from_name: str = "Contract Risk Edge"
+    email_worker_enabled: bool = True
+    email_retry_interval_minutes: int = 15
+    email_max_attempts: int = 3
+
     app_url: str = "http://localhost:3000"
 
     # ── OpenAI / Embeddings ────────────────────────────────────────

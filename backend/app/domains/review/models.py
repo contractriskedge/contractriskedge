@@ -55,14 +55,47 @@ class ReviewStatus(str, PyEnum):
     ARCHIVED = "archived"
     CLOSED = "closed"
 
+    def derive_workflow_stage(self) -> str:
+        """Map a ReviewStatus to its corresponding workflow stage.
+
+        The workflow stage drives queue routing (Legal Queue, Executive Queue,
+        Compliance Queue, etc.) and must be kept in sync with status.
+        """
+        mapping = {
+            self.DRAFT: "intake",
+            self.UPLOADED: "intake",
+            self.ANALYZING: "ai_review",
+            self.AI_ANALYZED: "ai_review",
+            self.AI_REVIEWED: "ai_review",
+            self.REVIEW_READY: "ai_review",
+            self.PROCUREMENT_REVIEW: "procurement",
+            self.LEGAL_REVIEW: "legal_ops",
+            self.SECURITY_REVIEW: "security",
+            self.NEGOTIATION: "negotiation",
+            self.IN_REVIEW: "reviewer",
+            self.CHANGES_REQUESTED: "reviewer",
+            self.PENDING_APPROVAL: "pending_approval",
+            self.ESCALATED: "escalated",
+            self.LEGAL_APPROVAL: "legal_ops",
+            self.EXEC_APPROVAL: "executive",
+            self.APPROVED: "completed",
+            self.REJECTED: "completed",
+            self.FINALIZED: "completed",
+            self.EXECUTED: "completed",
+            self.ARCHIVED: "archived",
+            self.CLOSED: "archived",
+        }
+        return mapping.get(self, "reviewer")
+
     @classmethod
     def valid_transitions(cls) -> dict[ReviewStatus, set[ReviewStatus]]:
         return {
             cls.DRAFT: {cls.ANALYZING, cls.AI_ANALYZED, cls.CLOSED},
             cls.UPLOADED: {cls.ANALYZING, cls.AI_ANALYZED, cls.ARCHIVED, cls.CLOSED},
             cls.ANALYZING: {cls.AI_ANALYZED, cls.AI_REVIEWED, cls.UPLOADED, cls.CLOSED},
-            cls.AI_ANALYZED: {cls.AI_REVIEWED, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.IN_REVIEW, cls.CLOSED},
+            cls.AI_ANALYZED: {cls.AI_REVIEWED, cls.REVIEW_READY, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.IN_REVIEW, cls.CLOSED},
             cls.AI_REVIEWED: {cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.IN_REVIEW, cls.CLOSED},
+            cls.REVIEW_READY: {cls.IN_REVIEW, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.CLOSED},
             cls.PROCUREMENT_REVIEW: {
                 cls.LEGAL_REVIEW, cls.SECURITY_REVIEW, cls.NEGOTIATION,
                 cls.REJECTED, cls.CLOSED,
@@ -91,10 +124,10 @@ class ReviewStatus(str, PyEnum):
             cls.ESCALATED: {
                 cls.IN_REVIEW, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW,
                 cls.SECURITY_REVIEW, cls.LEGAL_APPROVAL,
-                cls.EXEC_APPROVAL, cls.CLOSED,
+                cls.EXEC_APPROVAL, cls.APPROVED, cls.CLOSED,
             },
-            cls.LEGAL_APPROVAL: {cls.EXEC_APPROVAL, cls.APPROVED, cls.REJECTED, cls.IN_REVIEW, cls.CLOSED},
-            cls.EXEC_APPROVAL: {cls.APPROVED, cls.REJECTED, cls.IN_REVIEW, cls.CLOSED},
+            cls.LEGAL_APPROVAL: {cls.EXEC_APPROVAL, cls.APPROVED, cls.REJECTED, cls.IN_REVIEW, cls.ESCALATED, cls.CLOSED},
+            cls.EXEC_APPROVAL: {cls.APPROVED, cls.REJECTED, cls.IN_REVIEW, cls.ESCALATED, cls.CLOSED},
             cls.APPROVED: {cls.FINALIZED, cls.EXECUTED, cls.ARCHIVED, cls.CLOSED},
             cls.REJECTED: {cls.ARCHIVED, cls.CLOSED},
             cls.FINALIZED: {cls.EXECUTED, cls.ARCHIVED, cls.CLOSED},
@@ -212,6 +245,11 @@ class ReviewFinding(Base):
     resolution_note = Column(Text, nullable=True)
     resolved_by = Column(Text, nullable=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
+
+    feedback_type = Column(Text, nullable=True)  # "correct", "incorrect", "partial", "unsure"
+    feedback_note = Column(Text, nullable=True)
+    feedback_priority = Column(Text, nullable=True)  # "low", "medium", "high"
+    feedback_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

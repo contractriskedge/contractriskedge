@@ -43,6 +43,7 @@ class WorkflowState(str, enum.Enum):
     NEGOTIATION = "negotiation"
     IN_REVIEW = "in_review"
     ESCALATED = "escalated"
+    EXEC_APPROVAL = "exec_approval"
     APPROVED = "approved"
     REJECTED = "rejected"
     FINALIZED = "finalized"
@@ -65,7 +66,7 @@ class WorkflowState(str, enum.Enum):
                 cls.NEGOTIATION, cls.REJECTED, cls.ARCHIVED,
             },
             cls.LEGAL_REVIEW: {
-                cls.APPROVED, cls.NEGOTIATION, cls.REJECTED,
+                cls.EXEC_APPROVAL, cls.APPROVED, cls.NEGOTIATION, cls.REJECTED,
                 cls.PROCUREMENT_REVIEW, cls.ESCALATED, cls.ARCHIVED,
             },
             cls.SECURITY_REVIEW: {
@@ -78,12 +79,15 @@ class WorkflowState(str, enum.Enum):
             },
             cls.IN_REVIEW: {
                 cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.SECURITY_REVIEW,
+                cls.LEGAL_REVIEW, cls.EXEC_APPROVAL,
                 cls.APPROVED, cls.ESCALATED, cls.REJECTED, cls.ARCHIVED,
             },
             cls.ESCALATED: {
                 cls.IN_REVIEW, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW,
-                cls.SECURITY_REVIEW, cls.APPROVED, cls.REJECTED, cls.ARCHIVED,
+                cls.SECURITY_REVIEW, cls.EXEC_APPROVAL,
+                cls.APPROVED, cls.REJECTED, cls.ARCHIVED,
             },
+            cls.EXEC_APPROVAL: {cls.APPROVED, cls.LEGAL_REVIEW, cls.IN_REVIEW, cls.REJECTED, cls.ARCHIVED},
             cls.APPROVED: {cls.FINALIZED, cls.EXECUTED, cls.ARCHIVED},
             cls.REJECTED: {cls.ARCHIVED},
             cls.FINALIZED: {cls.EXECUTED, cls.ARCHIVED},
@@ -242,7 +246,7 @@ LEGACY_STATUS_MAP = {
     "security_review": WorkflowState.SECURITY_REVIEW,
     "negotiation": WorkflowState.NEGOTIATION,
     "escalated": WorkflowState.ESCALATED,
-    "exec_approval": WorkflowState.APPROVED,
+    "exec_approval": WorkflowState.EXEC_APPROVAL,
     "approved": WorkflowState.APPROVED,
     "rejected": WorkflowState.REJECTED,
     "finalized": WorkflowState.FINALIZED,

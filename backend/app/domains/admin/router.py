@@ -16,13 +16,15 @@ from app.domains.admin.schemas import (
     AdminUserCreate, AdminUserUpdate, AdminUserResponse,
     AdminRoleCreate, AdminRoleUpdate, AdminRoleResponse,
     TenantSettingsUpdate, TenantSettingsResponse,
-    SystemHealthResponse,
+    SystemHealthResponse, DashboardResponse,
     DiagnosticsResponse,
     EventChainResponse,
     OutboxDiagnosticsResponse,
     WorkerDiagnosticsResponse,
 )
 from app.kernel.telemetry.diagnostics import diagnostics_service
+from app.domains.audit.schemas import AuditQueryParams, AuditQueryResponse
+from app.domains.audit.service import AuditService
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -201,6 +203,18 @@ async def get_settings(
 )
 
 
+# ── Dashboard ───────────────────────────────────────────────────
+
+
+@router.get("/dashboard", response_model=DashboardResponse)
+async def get_dashboard(
+    service: AdminService = Depends(get_admin_service),
+    _: None = Depends(require_permission(Permissions.ADMIN_TENANT)),
+):
+    """Get aggregate admin dashboard KPIs and counts."""
+    return await service.get_dashboard()
+
+
 @router.put("/settings", response_model=TenantSettingsResponse
 )
 async def update_settings(
@@ -294,6 +308,44 @@ async def get_worker_diagnostics(
     recent stuck job counts, and worker heartbeat freshness.
     """
     return await diagnostics_service.get_worker_diagnostics(db)
+
+
+# ── Audit Logs ─────────────────────────────────────────────────
+
+
+@router.get("/audit-logs", response_model=AuditQueryResponse)
+async def get_audit_logs(
+    event_type: Optional[str] = Query(None, description="Filter by event type"),
+    resource_type: Optional[str] = Query(None, description="Filter by resource type"),
+    resource_id: Optional[str] = Query(None, description="Filter by resource ID"),
+    actor_id: Optional[str] = Query(None, description="Filter by actor ID"),
+    action: Optional[str] = Query(None, description="Filter by action"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _: None = Depends(require_permission(Permissions.AUDIT_READ)),
+):
+    """Get paginated audit log entries for the admin console.
+
+    Delegates to the AuditService which queries governance_audit_events
+    and review_status_history tables. All queries are tenant-isolated.
+    """
+    from datetime import datetime
+
+    params = AuditQueryParams(
+        event_type=event_type,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        actor_id=actor_id,
+        action=action,
+        from_date=None,
+        to_date=None,
+        page=page,
+        page_size=page_size,
+    )
+    service = AuditService(session=db, tenant_id=tenant_id)
+    return await service.query_events(params)
 
 
 # ── Worker Heartbeat ────────────────────────────────────────────

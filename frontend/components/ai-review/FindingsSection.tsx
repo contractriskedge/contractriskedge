@@ -583,20 +583,44 @@ export function FindingsSection() {
                         </div>
                       </div>
 
+                      {/* ── Reviewer Assessment (shown when feedback exists) ── */}
+                      {finding.feedback_type && (
+                        <div className="pt-1">
+                          <div className="rounded border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/10 px-2 py-1.5">
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                              {finding.feedback_type === "correct" && <ThumbsUp className="w-3 h-3 text-green-600" />}
+                              {finding.feedback_type === "incorrect" && <ThumbsDown className="w-3 h-3 text-red-600" />}
+                              {finding.feedback_type === "partial" && <HelpCircle className="w-3 h-3 text-amber-600" />}
+                              <span className="text-[9px] font-semibold text-gray-700 dark:text-gray-200">Reviewer Assessment</span>
+                            </div>
+                            <div className="text-[8px] text-gray-500 dark:text-gray-400">
+                              <span className="font-medium capitalize text-gray-600 dark:text-gray-300">{finding.feedback_type}</span>
+                              <span className="mx-1">·</span>
+                              <span>Reviewed by: {finding.resolved_by || "Current user"}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* ── AI Feedback Loop ──────────────────────────────── */}
                       {(finding.status || "open") === "open" && (
                         <div className="flex items-center gap-2 pt-1">
                           <span className="text-[8px] font-semibold text-gray-500 uppercase">AI Feedback:</span>
                           {[
-                            { type: "correct" as const, icon: ThumbsUp, label: "Correct", color: "text-green-600 bg-green-50 border-green-200 hover:bg-green-100" },
-                            { type: "incorrect" as const, icon: ThumbsDown, label: "Incorrect", color: "text-red-600 bg-red-50 border-red-200 hover:bg-red-100" },
-                            { type: "partial" as const, icon: HelpCircle, label: "Partial", color: "text-amber-600 bg-amber-50 border-amber-200 hover:bg-amber-100" },
-                          ].map(btn => (
-                            <button key={btn.type} onClick={() => handleFeedback(finding.finding_id, btn.type)}
-                              className={`flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-medium rounded border ${btn.color} transition-colors`}>
-                              <btn.icon className="w-2.5 h-2.5" /> {btn.label}
-                            </button>
-                          ))}
+                            { type: "correct" as const, icon: ThumbsUp, label: "Correct", color: "text-green-600 bg-green-50 border-green-200 hover:bg-green-100", activeColor: "bg-green-600 text-white border-green-600" },
+                            { type: "incorrect" as const, icon: ThumbsDown, label: "Incorrect", color: "text-red-600 bg-red-50 border-red-200 hover:bg-red-100", activeColor: "bg-red-600 text-white border-red-600" },
+                            { type: "partial" as const, icon: HelpCircle, label: "Partial", color: "text-amber-600 bg-amber-50 border-amber-200 hover:bg-amber-100", activeColor: "bg-amber-600 text-white border-amber-600" },
+                          ].map(btn => {
+                            const isActive = finding.feedback_type === btn.type;
+                            return (
+                              <button key={btn.type} onClick={() => handleFeedback(finding.finding_id, btn.type)}
+                                className={`flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-medium rounded border transition-colors ${
+                                  isActive ? btn.activeColor : btn.color
+                                }`}>
+                                <btn.icon className="w-2.5 h-2.5" /> {btn.label}
+                              </button>
+                            );
+                          })}
                         </div>
                       )}
 

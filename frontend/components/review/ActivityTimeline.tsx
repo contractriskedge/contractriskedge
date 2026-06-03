@@ -22,9 +22,10 @@ import {
   Upload, Cpu, User, MessageSquare, AlertTriangle,
   CheckCircle2, XCircle, RefreshCw, Archive, Clock,
   UserCheck, ArrowUpRight, ThumbsUp, ThumbsDown, Activity,
-  FileText, Loader2, Shield,
+  FileText, Loader2, Shield, FileEdit,
 } from "lucide-react";
 import { useReviewHistory, useReviewComments } from "@/services/hooks";
+import { useActivity } from "@/components/ai-review/hooks";
 import { AsyncBoundary } from "@/components/shared/AsyncBoundary";
 import { CardSkeleton } from "@/components/shared/LoadingSkeleton";
 
@@ -46,6 +47,15 @@ const EVENT_ICONS: Record<string, React.ReactNode> = {
   archived: <Archive className="h-4 w-4" />,
   comment: <MessageSquare className="h-4 w-4" />,
   re_analysis: <RefreshCw className="h-4 w-4" />,
+  // Governance event types
+  finding_resolved: <CheckCircle2 className="h-4 w-4" />,
+  redline_accepted: <ThumbsUp className="h-4 w-4" />,
+  redline_rejected: <XCircle className="h-4 w-4" />,
+  redline_modified: <FileText className="h-4 w-4" />,
+  redline_updated: <FileEdit className="h-4 w-4" />,
+  version_created: <FileText className="h-4 w-4" />,
+  recommendation_applied: <Activity className="h-4 w-4" />,
+  status_change: <Activity className="h-4 w-4" />,
 };
 
 const EVENT_COLORS: Record<string, string> = {
@@ -62,6 +72,15 @@ const EVENT_COLORS: Record<string, string> = {
   archived: "bg-gray-500",
   comment: "bg-teal-500",
   re_analysis: "bg-amber-500",
+  // Governance event types
+  finding_resolved: "bg-green-500",
+  redline_accepted: "bg-emerald-500",
+  redline_rejected: "bg-red-500",
+  redline_modified: "bg-amber-500",
+  redline_updated: "bg-amber-500",
+  version_created: "bg-blue-500",
+  recommendation_applied: "bg-purple-500",
+  status_change: "bg-gray-500",
 };
 
 const EVENT_BADGE_COLORS: Record<string, string> = {
@@ -78,6 +97,15 @@ const EVENT_BADGE_COLORS: Record<string, string> = {
   archived: "bg-gray-100 text-gray-600",
   comment: "bg-teal-100 text-teal-700",
   re_analysis: "bg-amber-100 text-amber-700",
+  // Governance event types
+  finding_resolved: "bg-green-100 text-green-700",
+  redline_accepted: "bg-emerald-100 text-emerald-700",
+  redline_rejected: "bg-red-100 text-red-700",
+  redline_modified: "bg-amber-100 text-amber-700",
+  redline_updated: "bg-amber-100 text-amber-700",
+  version_created: "bg-blue-100 text-blue-700",
+  recommendation_applied: "bg-purple-100 text-purple-700",
+  status_change: "bg-gray-100 text-gray-600",
 };
 
 const DEFAULT_COLOR = "bg-gray-400";
@@ -146,12 +174,32 @@ function eventLabel(type: string): string {
   return labels[type] || formatStatusLabel(type);
 }
 
+/** Map governance audit event types to display types. */
+function mapGovEventType(eventType: string): string {
+  if (eventType.includes("finding") || eventType.includes("feedback")) return "finding_resolved";
+  if (eventType.includes("redline.accepted")) return "redline_accepted";
+  if (eventType.includes("redline.rejected")) return "redline_rejected";
+  if (eventType.includes("redline.modified")) return "redline_modified";
+  if (eventType.includes("redline")) return "redline_updated";
+  if (eventType.includes("review.approved")) return "approved";
+  if (eventType.includes("review.rejected")) return "rejected";
+  if (eventType.includes("review.escalated")) return "escalated";
+  if (eventType.includes("review.status")) return eventType.split(".").pop() || "status_change";
+  if (eventType.includes("review.deleted")) return "archived";
+  if (eventType.includes("version")) return "version_created";
+  if (eventType.includes("recommendation")) return "recommendation_applied";
+  if (eventType.includes("ai.copilot")) return "ai_analyzed";
+  return "status_change";
+}
+
 export function ActivityTimeline({ reviewId }: ActivityTimelineProps) {
   const historyQuery = useReviewHistory(reviewId);
   const commentsQuery = useReviewComments(reviewId);
 
+  const activityQuery = useActivity(reviewId);
   const history = historyQuery.data?.history ?? [];
   const comments = commentsQuery.data?.comments ?? [];
+  const activityEvents = activityQuery.data ?? [];
 
   // Merge and sort events
   const events: Array<{
@@ -165,7 +213,7 @@ export function ActivityTimeline({ reviewId }: ActivityTimelineProps) {
     toStatus?: string;
   }> = [];
 
-  // Add history events
+  // Add history events (status transitions)
   for (const h of history) {
     events.push({
       id: `history-${h.created_at}-${h.to_status}`,
@@ -176,6 +224,19 @@ export function ActivityTimeline({ reviewId }: ActivityTimelineProps) {
       details: h.reason || undefined,
       fromStatus: h.from_status,
       toStatus: h.to_status,
+    });
+  }
+
+  // Add governance activity events (finding resolutions, redline actions, feedback, etc.)
+  for (const ae of activityEvents) {
+    const eventType = ae.type || "unknown";
+    events.push({
+      id: `gov-${ae.id || Math.random()}`,
+      type: mapGovEventType(eventType),
+      description: ae.details || ae.action || `${eventType}`,
+      actor: ae.actor || null,
+      timestamp: ae.timestamp || new Date().toISOString(),
+      details: ae.action || undefined,
     });
   }
 
@@ -193,6 +254,7 @@ export function ActivityTimeline({ reviewId }: ActivityTimelineProps) {
   // Sort by timestamp descending
   events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
+  // Show spinner only when history (the primary data source) is still loading
   const isLoading = historyQuery.isLoading;
 
   if (isLoading) {

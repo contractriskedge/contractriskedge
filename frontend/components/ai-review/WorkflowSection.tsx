@@ -13,14 +13,15 @@
 
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Workflow, CheckCircle2, Clock, AlertTriangle, User,
   ArrowRight, Send, XCircle, SkipForward, ShieldAlert,
-  BarChart3, TrendingUp, Users, ChevronDown,
+  BarChart3, TrendingUp, Users, ChevronDown, X, MessageSquare, Calendar, CheckCircle,
 } from "lucide-react";
 import { useReviewContext } from "./ReviewContext";
 import { useReviewerWorkloads, useQueueMetrics, useAdvanceWorkflow } from "./hooks";
+import { reviewService } from "@/services/api/reviews";
 
 export function WorkflowSection() {
   const ctx = useReviewContext();
@@ -30,6 +31,62 @@ export function WorkflowSection() {
   const advanceMutation = useAdvanceWorkflow();
 
   const [showActions, setShowActions] = useState(false);
+  const [advanceModal, setAdvanceModal] = useState<{ action: string } | null>(null);
+  const [advanceAssignee, setAdvanceAssignee] = useState("");
+  const [advanceNote, setAdvanceNote] = useState("");
+  const [reassignModal, setReassignModal] = useState(false);
+  const [reassignTarget, setReassignTarget] = useState("");
+  const [dueDateModal, setDueDateModal] = useState(false);
+  const [dueDateValue, setDueDateValue] = useState("");
+  const [toast, setToast] = useState<{ message: string; type: "success" | "info" } | null>(null);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  const showToast = (message: string, type: "success" | "info" = "success") => {
+    setToast({ message, type });
+  };
+
+  const handleAdvance = async () => {
+    if (!selectedReviewId || !advanceModal) return;
+    await advanceMutation.mutateAsync({
+      reviewId: selectedReviewId,
+      action: advanceModal.action,
+      assignee_id: advanceAssignee || undefined,
+      note: advanceNote || undefined,
+    });
+    const queueName = advanceModal.action.replace(/_/g, " ");
+    const assigneeMsg = advanceAssignee ? ` → assigned to ${advanceAssignee}` : "";
+    showToast(`Moved to ${queueName}${assigneeMsg}`);
+    setAdvanceModal(null);
+    setAdvanceAssignee("");
+    setAdvanceNote("");
+  };
+
+  const handleReassign = async () => {
+    if (!selectedReviewId || !reassignTarget) return;
+    try {
+      await reviewService.assign(selectedReviewId, { assignee_id: reassignTarget, role: "reviewer" });
+      showToast(`Reassigned to ${reassignTarget}`);
+      setReassignModal(false);
+      setReassignTarget("");
+    } catch { /* handled by UI */ }
+  };
+
+  const handleSetDueDate = async () => {
+    if (!selectedReviewId || !dueDateValue) return;
+    try {
+      await reviewService.assign(selectedReviewId, { assignee_id: "", role: "reviewer", due_date: dueDateValue });
+      const d = new Date(dueDateValue).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+      showToast(`Due date set to ${d}`);
+      setDueDateModal(false);
+      setDueDateValue("");
+    } catch { /* handled by UI */ }
+  };
 
   if (!workflow || !selectedReview) {
     return (
@@ -241,18 +298,20 @@ export function WorkflowSection() {
               {showActions && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setShowActions(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-20 bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-700 rounded-lg shadow-lg py-1 w-40">
+                  <div className="absolute right-0 top-full mt-1 z-20 bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-700 rounded-lg shadow-lg py-1 w-44">
                     {workflow.available_actions.map(action => (
-                      <button key={action} onClick={() => { if (selectedReviewId) advanceMutation.mutate({ reviewId: selectedReviewId, action }); setShowActions(false); }}
+                      <button key={action} onClick={() => { setShowActions(false); setAdvanceModal({ action }); }}
                         className="w-full text-left px-3 py-1.5 text-[9px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-700 flex items-center gap-1.5">
                         <Send className="w-2.5 h-2.5" /> {action.replace(/_/g, " ")}
                       </button>
                     ))}
                     <div className="border-t border-gray-100 dark:border-navy-700 my-1" />
-                    <button className="w-full text-left px-3 py-1.5 text-[9px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-700 flex items-center gap-1.5">
+                    <button onClick={() => { setShowActions(false); setReassignModal(true); }}
+                      className="w-full text-left px-3 py-1.5 text-[9px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-700 flex items-center gap-1.5">
                       <User className="w-2.5 h-2.5" /> Reassign
                     </button>
-                    <button className="w-full text-left px-3 py-1.5 text-[9px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-700 flex items-center gap-1.5">
+                    <button onClick={() => { setShowActions(false); setDueDateModal(true); }}
+                      className="w-full text-left px-3 py-1.5 text-[9px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-700 flex items-center gap-1.5">
                       <Clock className="w-2.5 h-2.5" /> Set Due Date
                     </button>
                   </div>
@@ -293,6 +352,113 @@ export function WorkflowSection() {
         </div>
       </div>
 
+      {/* ── Advance Action Modal ──────────────────────────────────────────── */}
+      {advanceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setAdvanceModal(null)}>
+          <div className="bg-white dark:bg-navy-800 rounded-xl shadow-xl border border-gray-200 dark:border-navy-700 p-4 w-80 max-w-full mx-2" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-xs font-bold text-navy-900 dark:text-white capitalize">Send to {advanceModal.action.replace(/_/g, " ")}</h4>
+              <button onClick={() => setAdvanceModal(null)} className="p-1 rounded hover:bg-gray-100"><X className="w-3.5 h-3.5" /></button>
+            </div>
+            <div className="space-y-2.5">
+              <div>
+                <label className="text-[9px] font-semibold text-gray-500 uppercase">Assignee</label>
+                <select value={advanceAssignee} onChange={e => setAdvanceAssignee(e.target.value)}
+                  className="w-full mt-0.5 px-2 py-1.5 text-[11px] border border-gray-200 rounded-lg bg-white dark:bg-navy-700 dark:border-navy-600">
+                  <option value="">Auto-assign (no specific assignee)</option>
+                  {reviewers?.map(r => (
+                    <option key={r.user_id} value={r.user_id}>{r.name} ({r.active_reviews} active)</option>
+                  ))}
+                  <option value="legal@test.com">Legal Reviewer</option>
+                  <option value="exec@test.com">Executive Reviewer</option>
+                  <option value="compliance@test.com">Compliance Reviewer</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[9px] font-semibold text-gray-500 uppercase">Handoff Note</label>
+                <textarea value={advanceNote} onChange={e => setAdvanceNote(e.target.value)}
+                  placeholder="Reason for this transition..."
+                  className="w-full mt-0.5 px-2 py-1.5 text-[11px] border border-gray-200 rounded-lg bg-white dark:bg-navy-700 dark:border-navy-600 resize-none"
+                  rows={2} />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setAdvanceModal(null)}
+                  className="flex-1 px-3 py-1.5 text-[10px] font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
+                  Cancel
+                </button>
+                <button onClick={handleAdvance} disabled={advanceMutation.isPending}
+                  className="flex-1 px-3 py-1.5 text-[10px] font-medium rounded-lg bg-navy-700 text-white hover:bg-navy-800 disabled:opacity-50">
+                  {advanceMutation.isPending ? "Advancing..." : "Advance"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Reassign Modal ────────────────────────────────────────────────── */}
+      {reassignModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setReassignModal(false)}>
+          <div className="bg-white dark:bg-navy-800 rounded-xl shadow-xl border border-gray-200 dark:border-navy-700 p-4 w-72 max-w-full mx-2" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-xs font-bold text-navy-900 dark:text-white">Reassign Reviewer</h4>
+              <button onClick={() => setReassignModal(false)} className="p-1 rounded hover:bg-gray-100"><X className="w-3.5 h-3.5" /></button>
+            </div>
+            <div className="space-y-2.5">
+              <div>
+                <label className="text-[9px] font-semibold text-gray-500 uppercase">New Assignee</label>
+                <select value={reassignTarget} onChange={e => setReassignTarget(e.target.value)}
+                  className="w-full mt-0.5 px-2 py-1.5 text-[11px] border border-gray-200 rounded-lg bg-white dark:bg-navy-700 dark:border-navy-600">
+                  <option value="">Select reviewer...</option>
+                  {reviewers?.map(r => (
+                    <option key={r.user_id} value={r.user_id}>{r.name} ({r.active_reviews} active)</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setReassignModal(false)}
+                  className="flex-1 px-3 py-1.5 text-[10px] font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
+                  Cancel
+                </button>
+                <button onClick={handleReassign} disabled={!reassignTarget}
+                  className="flex-1 px-3 py-1.5 text-[10px] font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
+                  Reassign
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Set Due Date Modal ────────────────────────────────────────────── */}
+      {dueDateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setDueDateModal(false)}>
+          <div className="bg-white dark:bg-navy-800 rounded-xl shadow-xl border border-gray-200 dark:border-navy-700 p-4 w-72 max-w-full mx-2" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-xs font-bold text-navy-900 dark:text-white">Set Due Date</h4>
+              <button onClick={() => setDueDateModal(false)} className="p-1 rounded hover:bg-gray-100"><X className="w-3.5 h-3.5" /></button>
+            </div>
+            <div className="space-y-2.5">
+              <div>
+                <label className="text-[9px] font-semibold text-gray-500 uppercase">Due Date</label>
+                <input type="datetime-local" value={dueDateValue} onChange={e => setDueDateValue(e.target.value)}
+                  className="w-full mt-0.5 px-2 py-1.5 text-[11px] border border-gray-200 rounded-lg bg-white dark:bg-navy-700 dark:border-navy-600" />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setDueDateModal(false)}
+                  className="flex-1 px-3 py-1.5 text-[10px] font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
+                  Cancel
+                </button>
+                <button onClick={handleSetDueDate} disabled={!dueDateValue}
+                  className="flex-1 px-3 py-1.5 text-[10px] font-medium rounded-lg bg-navy-700 text-white hover:bg-navy-800 disabled:opacity-50">
+                  Set
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Reviewer Workload ────────────────────────────────────────────── */}
       <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-3">
         <div className="flex items-center gap-1.5 mb-2">
@@ -331,6 +497,24 @@ export function WorkflowSection() {
           </div>
         )}
       </div>
+
+      {/* ── Toast Notification ───────────────────────────────────────────── */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 animate-slide-up">
+          <div className={`flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl border text-sm font-medium ${
+            toast.type === "success"
+              ? "bg-green-50 border-green-200 text-green-800"
+              : "bg-blue-50 border-blue-200 text-blue-800"
+          }`}>
+            {toast.type === "success" ? (
+              <CheckCircle className="w-4 h-4 text-green-500" />
+            ) : (
+              <Clock className="w-4 h-4 text-blue-500" />
+            )}
+            {toast.message}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

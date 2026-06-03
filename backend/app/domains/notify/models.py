@@ -142,6 +142,29 @@ class WorkflowEvent(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class EmailQueue(Base):
+    """Async email queue for transactional emails sent via Resend."""
+    __tablename__ = "email_queue"
+
+    email_id = Column(UUID, primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID, ForeignKey("tenants.tenant_id", ondelete="CASCADE"), nullable=False, index=True)
+    notification_id = Column(UUID, ForeignKey("notifications.notification_id", ondelete="SET NULL"), nullable=True)
+
+    recipient_email = Column(Text, nullable=False, index=True)
+    subject = Column(Text, nullable=False)
+    template_name = Column(Text, nullable=False)
+    template_data = Column(JSONB, nullable=False, default=dict)
+
+    provider_message_id = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, default="pending")  # pending, sent, failed
+    attempt_count = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=3)
+    last_error = Column(Text, nullable=True)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True)
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class WorkflowTimer(Base):
     """Scheduled timer for workflow actions (reminders, SLA checks, escalations)."""
     __tablename__ = "workflow_timers"

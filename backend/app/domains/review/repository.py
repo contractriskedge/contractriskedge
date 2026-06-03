@@ -211,6 +211,7 @@ class ReviewRepository(BaseRepository):
         status_value = new_status.value if isinstance(new_status, ReviewStatus) else str(new_status)
         review_values: dict = {
             "status": status_value,
+            "workflow_stage": new_status.derive_workflow_stage(),
             "updated_at": func.now(),
         }
         if new_status in (ReviewStatus.APPROVED, ReviewStatus.REJECTED, ReviewStatus.CLOSED):
@@ -252,6 +253,17 @@ class ReviewRepository(BaseRepository):
     async def resolve_finding(self, finding_id: str, tenant_id: str,
                                resolution: FindingResolution, note: Optional[str] = None,
                                resolved_by: Optional[str] = None) -> Optional[ReviewFinding]:
+        # Get the finding first to know which review it belongs to
+        finding_result = await self.session.execute(
+            select(ReviewFinding).where(
+                ReviewFinding.finding_id == finding_id,
+                ReviewFinding.tenant_id == tenant_id,
+            )
+        )
+        finding = finding_result.scalar_one_or_none()
+        if not finding:
+            return None
+
         stmt = update(ReviewFinding).where(
             ReviewFinding.finding_id == finding_id, ReviewFinding.tenant_id == tenant_id,
         ).values(
@@ -262,6 +274,24 @@ class ReviewRepository(BaseRepository):
         )
         await self.session.execute(stmt)
         await self.session.flush()
+
+        # Recompute finding_count from actual DB to keep counters in sync
+        from app.domains.review.models import ContractReview
+        count_result = await self.session.execute(
+            select(func.count()).select_from(ReviewFinding).where(
+                ReviewFinding.review_id == finding.review_id,
+                ReviewFinding.tenant_id == tenant_id,
+            )
+        )
+        new_count = count_result.scalar() or 0
+        await self.session.execute(
+            update(ContractReview).where(
+                ContractReview.review_id == finding.review_id,
+                ContractReview.tenant_id == tenant_id,
+            ).values(finding_count=new_count)
+        )
+        await self.session.flush()
+
         result = await self.session.execute(
             select(ReviewFinding)
             .where(
@@ -333,10 +363,20 @@ class ReviewRepository(BaseRepository):
         self.session.add(comment)
         await self.session.flush()
 
-        # Update comment count
+        # Update comment count using actual DB count for accuracy
+        from sqlalchemy import select, func as sa_func
+        from app.domains.review.models import ReviewComment as RC
+        count_result = await self.session.execute(
+            select(sa_func.count()).select_from(RC).where(
+                RC.review_id == review_id,
+                RC.tenant_id == tenant_id,
+                RC.deleted_at.is_(None),
+            )
+        )
+        new_count = count_result.scalar() or 0
         await self.session.execute(
             update(ContractReview).where(ContractReview.review_id == review_id)
-            .values(comment_count=ContractReview.comment_count + 1)
+            .values(comment_count=new_count)
         )
         return comment
 
@@ -376,10 +416,18 @@ class ReviewRepository(BaseRepository):
         self.session.add(redline)
         await self.session.flush()
 
-        # Update redline count
+        # Update redline count using actual DB count for accuracy
+        from sqlalchemy import select, func as sa_func
+        count_result = await self.session.execute(
+            select(sa_func.count()).select_from(RRModel).where(
+                RRModel.review_id == review_id,
+                RRModel.tenant_id == tenant_id,
+            )
+        )
+        new_count = count_result.scalar() or 0
         await self.session.execute(
             update(ContractReview).where(ContractReview.review_id == review_id)
-            .values(redline_count=ContractReview.redline_count + 1)
+            .values(redline_count=new_count)
         )
         await self.session.flush()
 
@@ -417,20 +465,26 @@ class ReviewRepository(BaseRepository):
 
     async def escalate(self, review_id: str, tenant_id: str, escalated_by: str,
                         reason: str, escalated_to: Optional[str] = None) -> ReviewEscalation:
-        # Get current escalation count
-        stmt = select(func.count()).select_from(ReviewEscalation).where(
-            ReviewEscalation.review_id == review_id, ReviewEscalation.tenant_id == tenant_id,
-        )
-        count = await self.scalar(stmt) or 0
-
         escalation = ReviewEscalation(
-            review_id=review_id, tenant_id=tenant_id, level=count + 1,
+            review_id=review_id, tenant_id=tenant_id,
             escalated_by=escalated_by, escalated_to=escalated_to, reason=reason,
         )
         self.session.add(escalation)
+        await self.session.flush()
+
+        # Update escalation count using actual DB count for accuracy
+        from sqlalchemy import select, func as sa_func
+        from app.domains.review.models import ReviewEscalation as RE
+        count_result = await self.session.execute(
+            select(sa_func.count()).select_from(RE).where(
+                RE.review_id == review_id,
+                RE.tenant_id == tenant_id,
+            )
+        )
+        new_count = count_result.scalar() or 0
         await self.session.execute(
             update(ContractReview).where(ContractReview.review_id == review_id)
-            .values(escalation_count=ContractReview.escalation_count + 1)
+            .values(escalation_count=new_count)
         )
         await self.session.flush()
         return escalation
@@ -509,20 +563,20 @@ class ReviewRepository(BaseRepository):
         sql = sa_text("""
             SELECT
                 COUNT(DISTINCT r.review_id)::int AS total_reviews,
-                COALESCE(SUM(r.finding_count)::int, 0) AS total_findings,
-                COALESCE(SUM(r.redline_count)::int, 0) AS total_redlines,
+                COALESCE((SELECT COUNT(*)::int FROM review_findings f WHERE f.tenant_id = :tenant_id AND EXISTS (SELECT 1 FROM contract_reviews cr WHERE cr.review_id = f.review_id AND cr.tenant_id = f.tenant_id AND cr.is_deleted = FALSE)), 0) AS total_findings,
+                COALESCE((SELECT COUNT(*)::int FROM review_redlines rl WHERE rl.tenant_id = :tenant_id2 AND EXISTS (SELECT 1 FROM contract_reviews cr WHERE cr.review_id = rl.review_id AND cr.tenant_id = rl.tenant_id AND cr.is_deleted = FALSE)), 0) AS total_redlines,
                 AVG(f.confidence)::float AS average_confidence,
                 COUNT(DISTINCT r.review_id) FILTER (WHERE r.sla_breached = TRUE)::int AS sla_breach_count,
                 COUNT(DISTINCT r.review_id) FILTER (WHERE r.status IN ('draft', 'ai_analyzed', 'in_review', 'pending_approval'))::int AS pending_reviews,
                 COUNT(DISTINCT r.review_id) FILTER (WHERE r.status IN ('approved', 'rejected', 'closed'))::int AS completed_reviews,
                 COUNT(DISTINCT r.review_id) FILTER (WHERE r.status = 'escalated')::int AS escalated_count,
                 COUNT(DISTINCT r.review_id) FILTER (WHERE r.sla_deadline IS NOT NULL AND r.sla_deadline < NOW() AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS sla_at_risk,
-                (SELECT COUNT(*)::int FROM review_escalations e WHERE e.tenant_id = :tenant_id) AS total_escalation_events,
+                (SELECT COUNT(*)::int FROM review_escalations e WHERE e.tenant_id = :tenant_id3) AS total_escalation_events,
                 (
                     SELECT COUNT(*)::int
                     FROM review_escalations e
                     JOIN contract_reviews cr ON cr.review_id = e.review_id AND cr.tenant_id = e.tenant_id
-                    WHERE e.tenant_id = :tenant_id2 AND cr.status != 'escalated'
+                    WHERE e.tenant_id = :tenant_id4 AND cr.status != 'escalated'
                 ) AS resolved_escalations,
                 COUNT(DISTINCT r.review_id) FILTER (WHERE r.assigned_to IS NULL AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS unassigned_count,
                 COUNT(DISTINCT r.review_id) FILTER (WHERE r.sla_status = 'overdue')::int AS overdue_count,
@@ -530,9 +584,9 @@ class ReviewRepository(BaseRepository):
                 COALESCE(ROUND(AVG(CASE WHEN r.status NOT IN ('approved', 'rejected', 'closed') THEN EXTRACT(EPOCH FROM (NOW() - r.created_at))/3600 ELSE NULL END)::numeric, 1), 0)::float AS avg_review_age_hours
             FROM contract_reviews r
             LEFT JOIN review_findings f ON f.review_id = r.review_id AND f.tenant_id = r.tenant_id
-            WHERE r.tenant_id = :tenant_id3 AND r.is_deleted = FALSE
+            WHERE r.tenant_id = :tenant_id5 AND r.is_deleted = FALSE
         """)
-        result = await self.session.execute(sql, {"tenant_id": tenant_id, "tenant_id2": tenant_id, "tenant_id3": tenant_id})
+        result = await self.session.execute(sql, {"tenant_id": tenant_id, "tenant_id2": tenant_id, "tenant_id3": tenant_id, "tenant_id4": tenant_id, "tenant_id5": tenant_id})
         row = result.fetchone()
         data = dict(row._mapping) if row else {}
 

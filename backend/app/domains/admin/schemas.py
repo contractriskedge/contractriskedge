@@ -79,6 +79,8 @@ class TenantSettingsUpdate(BaseModel):
     sla_medium_hours: Optional[int] = Field(None, ge=1)
     sla_low_hours: Optional[int] = Field(None, ge=1)
     features_enabled: Optional[dict] = None
+    email_redirect_enabled: Optional[bool] = None
+    email_redirect_to: Optional[str] = None
 
 
 class TenantSettingsResponse(BaseModel):
@@ -100,6 +102,8 @@ class TenantSettingsResponse(BaseModel):
     sla_medium_hours: int = 72
     sla_low_hours: int = 168
     default_notification_channel: str = "in_app"
+    email_redirect_enabled: bool = False
+    email_redirect_to: Optional[str] = None
     features_enabled: dict = Field(default_factory=lambda: {
         "ai_analysis": True,
         "redlines": True,
@@ -111,6 +115,28 @@ class TenantSettingsResponse(BaseModel):
     })
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+# ── Dashboard ────────────────────────────────────────────────────
+
+class DashboardKpi(BaseModel):
+    """A single KPI card for the admin dashboard."""
+    label: str
+    value: int
+    change: float
+    trend: str  # "up" | "down" | "neutral"
+
+
+class DashboardResponse(BaseModel):
+    """Aggregate admin dashboard data — KPIs, counts, system health."""
+    kpis: list[DashboardKpi] = Field(default_factory=list)
+    total_users: int = 0
+    active_users_30d: int = 0
+    total_tenants: int = 1
+    total_uploads: int = 0
+    total_reviews: int = 0
+    audit_events_24h: int = 0
+    system_health: str = "healthy"
 
 
 # ── System Health ────────────────────────────────────────────────

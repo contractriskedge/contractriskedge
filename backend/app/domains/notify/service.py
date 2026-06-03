@@ -12,6 +12,7 @@ from app.domains.notify.models import (
     Notification, NotificationDelivery, NotificationPreference,
     DeliveryStatus,
 )
+from app.config import settings
 from app.domains.notify.repository import NotificationRepository
 from app.kernel.events.bus import EventBus
 from app.kernel.security.auth import UserContext
@@ -97,7 +98,120 @@ class NotificationService:
                     exc,
                 )
 
+        # Always enqueue email for action notifications (in-app is separate).
+        await self._enqueue_email(notif, user_id)
+
         return notif
+
+    async def _resolve_recipient_email(self, user_id: str) -> Optional[str]:
+        """Resolve delivery address: redirect inbox when enabled, else user email."""
+        redirect_enabled, redirect_to = await self.repo.get_email_redirect(self.tenant_id)
+        if redirect_enabled and redirect_to:
+            logger.info(
+                "Email redirected: user=%s -> %s (tenant redirect enabled)",
+                user_id,
+                redirect_to,
+            )
+            return redirect_to
+
+        recipient = await self.repo.get_user_email(self.tenant_id, user_id)
+        if not recipient:
+            logger.warning("No email address for user %s — cannot send notification email", user_id)
+        return recipient
+
+    async def _enqueue_email(self, notif: Notification, user_id: str) -> None:
+        """Enqueue an email notification for async delivery via Resend."""
+        try:
+            recipient_email = await self._resolve_recipient_email(user_id)
+            if not recipient_email:
+                return
+
+            user_email = await self.repo.get_user_email(self.tenant_id, user_id)
+            display_name = (user_email or user_id).split("@")[0].replace(".", " ").replace("-", " ").title()
+
+            # Fetch real contract data from the review if entity_id is a review
+            contract_name = notif.title
+            risk_score = None
+            reviewer = None
+            current_stage = None
+            due_date = None
+            priority = None
+
+            if notif.entity_id and notif.entity_type == "review":
+                try:
+                    from sqlalchemy import select, text as sa_text
+                    from app.domains.review.models import ContractReview
+
+                    review_result = await self.repo.session.execute(
+                        select(ContractReview).where(
+                            ContractReview.review_id == notif.entity_id,
+                            ContractReview.tenant_id == self.tenant_id,
+                        )
+                    )
+                    review = review_result.scalar_one_or_none()
+                    if review:
+                        # Use document filename as contract name if available
+                        if hasattr(review, '_document_filename') and review._document_filename:
+                            contract_name = review._document_filename
+                        elif review.document_metadata:
+                            contract_name = review.document_metadata.get("filename") or review.document_metadata.get("original_filename") or contract_name
+
+                        risk_score = review.document_metadata.get("risk_score") if review.document_metadata else None
+                        reviewer = review.assigned_to
+                        current_stage = review.workflow_stage or review.status.value if hasattr(review.status, 'value') else str(review.status)
+                        due_date = str(review.sla_deadline) if review.sla_deadline else None
+                        priority = review.priority.upper() if review.priority else None
+                except Exception:
+                    logger.warning("Failed to fetch review data for email enrichment", exc_info=True)
+
+            template_data = {
+                "recipient_name": display_name,
+                "contract_name": contract_name,
+                "review_id": str(notif.entity_id) if notif.entity_id else "",
+                "subject": notif.title,
+                "body": notif.body or "",
+                "risk_score": risk_score,
+                "reviewer": reviewer,
+                "current_stage": current_stage,
+                "due_date": due_date,
+                "priority": priority,
+                "app_url": settings.app_url,
+            }
+
+            # For escalation notifications, pass the reason explicitly to the template
+            if notif.type == "review.escalated" and notif.body:
+                template_data["reason"] = notif.body
+                template_data["escalated_by"] = user_id
+
+            await self.repo.enqueue_email(
+                tenant_id=self.tenant_id,
+                notification_id=notif.notification_id,
+                recipient_email=recipient_email,
+                subject=notif.title,
+                template_name=notif.type,
+                template_data=template_data,
+            )
+            logger.info(
+                "Email enqueued: type=%s to=%s notification=%s",
+                notif.type,
+                recipient_email,
+                notif.notification_id,
+            )
+
+            # In development, process the queue inline so Celery beat is not required.
+            if settings.environment == "development":
+                await self._process_email_queue_inline()
+        except Exception as exc:
+            logger.warning("Failed to enqueue email for %s: %s", user_id, exc)
+
+    async def _process_email_queue_inline(self) -> None:
+        """Process pending emails using the current DB session (post-flush)."""
+        try:
+            from app.workers.email_worker import process_email_queue
+
+            await process_email_queue(batch_size=10, session=self.repo.session)
+        except Exception as exc:
+            logger.warning("Inline email queue processing failed: %s", exc)
 
     async def send_review_assigned(self, review_id: str, assignee_id: str, assigned_by: str):
         await self.send_notification(

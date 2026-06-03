@@ -21,6 +21,7 @@
 
 "use client";
 
+import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiRequestError } from "@/services/api/client";
 
@@ -54,6 +55,7 @@ import type {
   Recommendation,
   WorkflowState,
   ActivityEvent,
+  ActivityType,
   Comment,
   ReviewerWorkload,
   QueueMetrics,
@@ -166,6 +168,7 @@ export function mapApiFinding(raw: ApiRecord): Finding {
     supporting_evidence: [],
     alternative_interpretations: [],
     feedback: null,
+    feedback_type: raw.feedback_type ? String(raw.feedback_type) : null,
   };
 }
 
@@ -184,9 +187,9 @@ function isNotFoundError(err: unknown): boolean {
 export const REVIEW_SUBRESOURCE_API = {
   policyViolations: false,
   missingClauses: false,
-  recommendations: false,
-  workflow: false,
-  activity: false,
+  recommendations: true,
+  workflow: true,
+  activity: true,
   document: false,
   reviewersWorkload: false,
   metrics: false,
@@ -364,10 +367,10 @@ export function useRecommendations(reviewId: string) {
       fetchReviewSubresource(
         "recommendations",
         async () => {
-          const res = await api.get<{ recommendations: Recommendation[] }>(
+          const res = await api.get<{ recommendations: ApiRecord[] }>(
             `/reviews/${reviewId}/recommendations`,
           );
-          return res.recommendations ?? [];
+          return (res.recommendations ?? []).map(mapApiRecommendation);
         },
         MOCK_RECOMMENDATIONS,
       ),
@@ -375,6 +378,31 @@ export function useRecommendations(reviewId: string) {
     staleTime: 30_000,
     retry: optionalSubresourceRetry,
   });
+}
+
+function mapApiRecommendation(raw: ApiRecord): Recommendation {
+  const severity = String(raw.severity ?? "medium");
+  const impactMap: Record<string, "high" | "medium" | "low"> = {
+    critical: "high", high: "high", medium: "medium", low: "low", info: "low",
+  };
+  const confidence = Number(raw.confidence ?? 0);
+  const isResolved = raw.status === "resolved" || raw.resolution != null;
+
+  return {
+    recommendation_id: String(raw.recommendation_id ?? `rec-${String(raw.finding_id ?? "").slice(0, 8)}`),
+    type: "remediation",
+    clause_type: String(raw.clause_type ?? "other"),
+    title: String(raw.title ?? "Recommendation"),
+    description: String(raw.description ?? ""),
+    suggested_text: String(raw.recommendation ?? null),
+    rationale: String(raw.recommendation ?? ""),
+    confidence: confidence,
+    impact: impactMap[severity] ?? "medium",
+    effort: confidence >= 0.8 ? "low" : confidence >= 0.5 ? "medium" : "high",
+    priority: severity === "critical" ? 1 : severity === "high" ? 2 : severity === "medium" ? 3 : 4,
+    status: isResolved ? "applied" : "pending",
+    finding_id: String(raw.finding_id ?? null),
+  };
 }
 
 /** Fetch workflow state for a review. */
@@ -393,6 +421,133 @@ export function useWorkflow(reviewId: string) {
   });
 }
 
+function extractRawActivityList(data: unknown): ApiRecord[] {
+  if (!data) return [];
+  if (Array.isArray(data)) return data as ApiRecord[];
+  if (typeof data !== "object" || data === null) return [];
+
+  const record = data as ApiRecord;
+  if (Array.isArray(record.events)) return record.events as ApiRecord[];
+
+  const nested = record.data;
+  if (nested && typeof nested === "object") {
+    const inner = nested as ApiRecord;
+    if (Array.isArray(inner.events)) return inner.events as ApiRecord[];
+    if (Array.isArray(inner)) return inner as ApiRecord[];
+  }
+  return [];
+}
+
+function isMappedActivityEvent(item: ApiRecord): boolean {
+  return (
+    typeof item.id === "string" &&
+    item.id.length > 0 &&
+    typeof item.action === "string" &&
+    typeof item.type === "string" &&
+    typeof item.timestamp === "string" &&
+    !("event_type" in item)
+  );
+}
+
+/** Build audit rows from resolved/dismissed findings when the server audit log is empty. */
+function findingsToActivityEvents(findings: Finding[]): ActivityEvent[] {
+  return findings
+    .filter((f) => f.status === "resolved" || f.status === "dismissed")
+    .map((f, index) => {
+      const actor = f.resolved_by || "Reviewer";
+      const dismissed = f.status === "dismissed";
+      return {
+        id: `finding-${f.finding_id || index}-${f.status}`,
+        type: dismissed ? "finding_dismissed" : "finding_resolved",
+        actor,
+        actor_initials: actor.charAt(0).toUpperCase() || "?",
+        action: dismissed
+          ? `Dismissed finding: ${f.title}`
+          : `Resolved finding: ${f.title}`,
+        details: f.resolution_type
+          ? `Resolution: ${f.resolution_type.replace(/_/g, " ")}`
+          : f.description || null,
+        timestamp: f.resolved_at || f.updated_at || f.created_at || new Date().toISOString(),
+        object_type: "finding",
+        object_id: f.finding_id,
+      };
+    })
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+}
+
+const MOCK_ACTIVITY_IDS = new Set(MOCK_ACTIVITY.map((e) => e.id));
+
+function isSampleActivityList(events: ActivityEvent[]): boolean {
+  return events.length > 0 && events.every((e) => MOCK_ACTIVITY_IDS.has(e.id));
+}
+
+export type AuditTrailDataSource = "api" | "finding-derived" | "sample" | "none";
+
+/** Normalize activity from API, query cache, or mock (array or `{ events: [] }`). */
+export function normalizeActivityEvents(data: unknown): ActivityEvent[] {
+  const rawList = extractRawActivityList(data);
+  if (rawList.length === 0) return [];
+
+  return rawList.map((raw, index) => {
+    if (isMappedActivityEvent(raw)) {
+      return raw as unknown as ActivityEvent;
+    }
+    return mapApiActivityEvent(raw, index);
+  });
+}
+
+function mapHistoryToActivity(raw: {
+  from_status: string;
+  to_status: string;
+  changed_by: string;
+  reason: string | null;
+  created_at: string;
+}): ActivityEvent {
+  const actor = raw.changed_by || "System";
+  return {
+    id: `hist-${raw.created_at}-${raw.to_status}`,
+    type: "status_changed",
+    actor,
+    actor_initials: actor.charAt(0).toUpperCase() || "?",
+    action: `Status changed to ${raw.to_status.replace(/_/g, " ")}`,
+    details: raw.reason || `From ${raw.from_status} to ${raw.to_status}`,
+    timestamp: raw.created_at,
+    before_state: raw.from_status,
+    after_state: raw.to_status,
+  };
+}
+
+function mergeActivityEvents(primary: ActivityEvent[], supplemental: ActivityEvent[]): ActivityEvent[] {
+  const seen = new Set(primary.map((e) => e.id));
+  const merged = [...primary];
+  for (const event of supplemental) {
+    if (!seen.has(event.id)) {
+      merged.push(event);
+      seen.add(event.id);
+    }
+  }
+  return merged.sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  );
+}
+
+async function fetchActivityForReview(reviewId: string): Promise<ActivityEvent[]> {
+  try {
+    const res = await api.get<ApiRecord>(`/reviews/${reviewId}/activity`);
+    return normalizeActivityFromApiResponse(res);
+  } catch (err) {
+    if (isNotFoundError(err)) {
+      return [];
+    }
+    if (!USE_MOCK_DATA) throw err;
+    return MOCK_ACTIVITY;
+  }
+}
+
+function normalizeActivityFromApiResponse(res: ApiRecord): ActivityEvent[] {
+  return normalizeActivityEvents(res);
+}
+
 /** Fetch activity events for a review. */
 export function useActivity(reviewId: string) {
   return useQuery({
@@ -400,10 +555,7 @@ export function useActivity(reviewId: string) {
     queryFn: () =>
       fetchReviewSubresource(
         "activity",
-        async () => {
-          const res = await api.get<{ events: ActivityEvent[] }>(`/reviews/${reviewId}/activity`);
-          return res.events ?? [];
-        },
+        () => fetchActivityForReview(reviewId),
         MOCK_ACTIVITY,
       ),
     enabled: !!reviewId,
@@ -411,6 +563,133 @@ export function useActivity(reviewId: string) {
     refetchInterval: REVIEW_SUBRESOURCE_API.activity ? 60_000 : false,
     retry: optionalSubresourceRetry,
   });
+}
+
+function mapCommentToActivity(comment: Comment, index: number): ActivityEvent {
+  return {
+    id: `comment-${comment.comment_id || index}`,
+    type: "comment_added",
+    actor: comment.author,
+    actor_initials: comment.author_initials,
+    action: comment.finding_id ? "Comment on finding" : "Review comment",
+    details: comment.content,
+    timestamp: comment.created_at,
+    object_type: comment.finding_id ? "finding" : "review",
+    object_id: comment.finding_id,
+  };
+}
+
+/** Single source of truth for audit tab badge + timeline (activity + history + comments). */
+export function useAuditTrailEvents(reviewId: string, findings: Finding[] = []) {
+  const activityQuery = useActivity(reviewId);
+  const { data: comments = [], isLoading: commentsLoading } = useComments(reviewId);
+
+  const historyQuery = useQuery({
+    queryKey: [...platformKeys.all, "audit-history", reviewId] as const,
+    queryFn: async () => {
+      try {
+        return await api.get<{
+          history: Array<{
+            from_status: string;
+            to_status: string;
+            changed_by: string;
+            reason: string | null;
+            created_at: string;
+          }>;
+        }>(`/reviews/${reviewId}/history`);
+      } catch (err) {
+        if (isNotFoundError(err)) return { history: [] };
+        throw err;
+      }
+    },
+    enabled: !!reviewId,
+    staleTime: 15_000,
+    retry: optionalSubresourceRetry,
+  });
+
+  const { events, dataSource, hadSampleFallback } = useMemo(() => {
+    const rawApi = normalizeActivityEvents(activityQuery.data);
+    const hadSample = isSampleActivityList(rawApi);
+    let merged = hadSample ? [] : rawApi;
+    let source: AuditTrailDataSource = merged.length > 0 ? "api" : "none";
+
+    const histEvents = (historyQuery.data?.history ?? []).map(mapHistoryToActivity);
+    merged = mergeActivityEvents(merged, histEvents);
+    if (merged.length > 0 && source === "none") source = "api";
+
+    const commentEvents = comments.map(mapCommentToActivity);
+    merged = mergeActivityEvents(merged, commentEvents);
+
+    const beforeFindings = merged.length;
+    const fromFindings = findingsToActivityEvents(findings);
+    if (fromFindings.length > 0) {
+      merged = mergeActivityEvents(merged, fromFindings);
+      if (beforeFindings === 0) {
+        source = "finding-derived";
+      }
+    }
+
+    if (merged.length === 0) {
+      source = "none";
+    } else if (hadSample && source === "finding-derived") {
+      source = "finding-derived";
+    } else if (hadSample && merged.length > 0) {
+      source = "api";
+    }
+
+    return { events: merged, dataSource: source, hadSampleFallback: hadSample };
+  }, [activityQuery.data, historyQuery.data, comments, findings]);
+
+  return {
+    events,
+    dataSource,
+    hadSampleFallback,
+    isSampleData: hadSampleFallback && events.length === 0,
+    isLoading: activityQuery.isLoading || historyQuery.isLoading || commentsLoading,
+    isFetching: activityQuery.isFetching || historyQuery.isFetching,
+    error: activityQuery.error ?? historyQuery.error,
+  };
+}
+
+function mapApiActivityEvent(raw: ApiRecord, index = 0): ActivityEvent {
+  const eventType = String(raw.event_type ?? "unknown");
+  const createdAt = String(raw.created_at ?? "");
+  const eventId = raw.event_id != null && String(raw.event_id).trim() !== ""
+    ? String(raw.event_id)
+    : `${eventType}-${createdAt || "t"}-${index}`;
+  return {
+    id: eventId,
+    type: mapActivityType(eventType),
+    actor: String(raw.actor_id ?? "System"),
+    actor_initials: String(raw.actor_id ?? "S").charAt(0).toUpperCase() || "?",
+    action: String(raw.action ?? eventType),
+    details: String(raw.description ?? ""),
+    timestamp: createdAt || new Date().toISOString(),
+    before_state: raw.before_state != null ? String(raw.before_state) : null,
+    after_state: raw.after_state != null ? String(raw.after_state) : null,
+  };
+}
+
+function mapActivityType(eventType: string): ActivityType {
+  const t = eventType.toLowerCase();
+  if (t.includes("review_created") || t.endsWith(".created")) return "review_created";
+  if (t.includes("ai_analysis") || t.includes("ai.copilot") || t.includes("analyzed")) {
+    return "ai_analysis_completed";
+  }
+  if (t.includes("dismissed")) return "finding_dismissed";
+  if (t.includes("feedback")) return "finding_feedback";
+  if (t.includes("finding")) return "finding_resolved";
+  if (t.includes("comment")) return "comment_added";
+  if (t.includes("assign")) return "review_assigned";
+  if (t.includes("approv")) return "review_approved";
+  if (t.includes("reject")) return "review_rejected";
+  if (t.includes("escalat")) return "review_escalated";
+  if (t.includes("re_analysis") || t.includes("reanalysis")) return "re_analysis";
+  if (t.includes("version") || t.includes("document")) return "version_created";
+  if (t.includes("recommendation")) return "recommendation_applied";
+  if (t.includes("waiv")) return "policy_waived";
+  if (t.includes("status") || t.includes("review.")) return "status_changed";
+  return "status_changed";
 }
 
 /** Fetch comments for a review. */
@@ -568,7 +847,11 @@ export function useSubmitFeedback() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ reviewId, findingId, feedback }: { reviewId: string; findingId: string; feedback: Partial<AiFeedback> }) =>
-      api.post(`/reviews/${reviewId}/feedback`, { finding_id: findingId, ...feedback }),
+      api.post(`/reviews/${reviewId}/findings/${findingId}/feedback`, {
+        type: feedback.type,
+        reviewer_note: feedback.reviewer_note || "",
+        retraining_priority: feedback.retraining_priority || "medium",
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: platformKeys.all });
     },
@@ -584,6 +867,9 @@ export function useResolveFinding() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: platformKeys.findings(variables.reviewId) });
       queryClient.invalidateQueries({ queryKey: platformKeys.activity(variables.reviewId) });
+      queryClient.invalidateQueries({
+        queryKey: [...platformKeys.all, "audit-history", variables.reviewId],
+      });
     },
   });
 }
@@ -629,8 +915,8 @@ export function useAddComment() {
 export function useAdvanceWorkflow() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ reviewId, action }: { reviewId: string; action: string }) =>
-      api.post(`/reviews/${reviewId}/workflow/advance`, { action }),
+    mutationFn: ({ reviewId, action, assignee_id, note }: { reviewId: string; action: string; assignee_id?: string; note?: string }) =>
+      api.post(`/reviews/${reviewId}/workflow/advance`, { action, assignee_id, note }),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: platformKeys.workflow(variables.reviewId) });
       queryClient.invalidateQueries({ queryKey: platformKeys.reviews() });

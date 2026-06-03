@@ -17,7 +17,7 @@ from app.kernel.security.permissions import Permissions
 from app.kernel.web.pagination import PaginatedResponse, PaginationMeta
 from app.domains.review.schemas import (
     ReviewDetail, ReviewFilterParams, FindingItem, RedlineItem,
-    CommentItem, CommentCreate, AssignRequest, EscalateRequest,
+    CommentItem, CommentCreate, AssignRequest, RedlineAssignRequest, EscalateRequest,
     ApproveRequest, FindingResolveRequest, RedlineUpdateRequest,
     GenerateMitigationRedlineRequest, GenerateMitigationRedlineResponse,
     ReviewDashboardResponse, DashboardStats, FindingsBySeverity,
@@ -27,6 +27,7 @@ from app.domains.review.schemas import (
     BulkAssignRequest, BulkEscalateRequest, BulkApproveRequest, BulkExportRequest,
     BulkRedlineIdsRequest,
     DocumentVersionItem, CreateDocumentVersionRequest,
+    FindingFeedbackRequest, FindingFeedbackResponse,
 )
 from app.domains.review.service import ReviewService
 from app.domains.review.utils import enum_value as _enum_value, redline_to_item
@@ -35,6 +36,7 @@ from app.domains.ai.repository import AIRepository
 from app.domains.notify.repository import NotificationRepository
 from app.domains.notify.service import NotificationService
 from app.kernel.events.bus import EventBus
+from app.kernel.web.exceptions import ConflictError
 
 router = APIRouter(prefix="/reviews", tags=["Contract Review"])
 
@@ -821,7 +823,10 @@ async def update_review_status(
     _: None = Depends(require_any_permission(Permissions.WORKFLOWS_WRITE, Permissions.CONTRACTS_APPROVE)),
 ):
     """Update review status with transition validation."""
-    result = await service.update_status(review_id, status, reason)
+    try:
+        result = await service.update_status(review_id, status, reason)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not result:
         raise HTTPException(status_code=404, detail="Review not found")
     return result
@@ -851,6 +856,9 @@ async def list_findings(
             resolved_by=f.resolved_by,
             resolved_at=f.resolved_at.isoformat() if f.resolved_at else None,
             created_at=f.created_at,
+            feedback_type=f.feedback_type,
+            feedback_note=f.feedback_note,
+            feedback_at=f.feedback_at.isoformat() if f.feedback_at else None,
         )
         for f in items
     ]
@@ -985,6 +993,24 @@ async def resolve_finding(
 ):
     """Resolve an AI finding with a resolution type and optional note."""
     result = await service.resolve_finding(finding_id, body.resolution, body.note)
+    if not result:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    return result
+
+
+@router.post("/{review_id}/findings/{finding_id}/feedback", response_model=FindingFeedbackResponse)
+async def submit_finding_feedback(
+    review_id: str, finding_id: str,
+    body: FindingFeedbackRequest,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Submit AI feedback (correct/incorrect/partial) for a finding."""
+    result = await service.submit_finding_feedback(
+        finding_id, body.type,
+        reviewer_note=body.reviewer_note,
+        retraining_priority=body.retraining_priority,
+    )
     if not result:
         raise HTTPException(status_code=404, detail="Finding not found")
     return result
@@ -1170,6 +1196,41 @@ async def update_redline(
     return result
 
 
+@router.post("/{review_id}/redlines/{redline_id}/escalate")
+async def escalate_redline(
+    review_id: str, redline_id: str,
+    body: dict,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.WORKFLOWS_ESCALATE)),
+):
+    """Escalate a redline to legal review.
+
+    Marks the redline as needs_legal_review and records the escalation
+    reason in the review notes.
+    """
+    reason = body.get("reason", "Escalated for legal review")
+    result = await service.update_redline(
+        redline_id,
+        status="needs_legal_review",
+        review_notes=f"Escalated: {reason}",
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Redline not found")
+
+    # Record audit trail for the escalation
+    await service.audit_trail.record_redline_action(
+        redline_id=redline_id,
+        review_id=review_id,
+        actor_id=service.user.id,
+        action="escalated",
+        before_status="proposed",
+        after_status="needs_legal_review",
+        description=f"Redline escalated for legal review: {reason}",
+    )
+
+    return result
+
+
 @router.post("/{review_id}/generate-mitigation-redline", response_model=GenerateMitigationRedlineResponse)
 async def generate_mitigation_redline(
     review_id: str,
@@ -1299,7 +1360,12 @@ async def approve_review(
     _: None = Depends(require_permission(Permissions.CONTRACTS_APPROVE)),
 ):
     """Approve, reject, or conditionally approve a review."""
-    return await service.approve(review_id, body.decision, body.comments, body.conditions)
+    try:
+        return await service.approve(review_id, body.decision, body.comments, body.conditions)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.post("/{review_id}/finalize")
@@ -1550,12 +1616,13 @@ async def bulk_reject_redlines_by_ids(
 async def assign_redline(
     review_id: str,
     redline_id: str,
-    body: AssignRequest,
+    body: RedlineAssignRequest,
     service: ReviewService = Depends(get_review_service),
     _: None = Depends(require_permission(Permissions.WORKFLOWS_WRITE)),
 ):
     """Assign a redline to a specific reviewer or team."""
-    result = await service.update_redline(redline_id, status=None, review_notes=f"Assigned to {body.assignee_id} ({body.role or 'reviewer'})")
+    from app.domains.review.models import RedlineStatus
+    result = await service.update_redline(redline_id, status=RedlineStatus.NEEDS_LEGAL_REVIEW, review_notes=f"Assigned to {body.assignee_id} ({body.role or 'reviewer'})")
     if not result:
         raise HTTPException(status_code=404, detail="Redline not found")
     return {**result, "assigned_to": body.assignee_id, "role": body.role or "reviewer"}
@@ -2144,6 +2211,167 @@ async def list_recommendations(
         return {"recommendations": []}
 
 
+@router.post("/{review_id}/recommendations/{recommendation_id}/apply")
+async def apply_recommendation(
+    review_id: str,
+    recommendation_id: str,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.WORKFLOWS_WRITE)),
+):
+    """Apply a recommendation — generates a mitigation redline from the recommendation.
+
+    The recommendation_id is derived from the finding_id (format: rec-{finding_id_prefix}).
+    This endpoint resolves the finding, then delegates to generate_mitigation_redline.
+    """
+    # Resolve finding_id from recommendation_id (format: rec-{first8ofFindingId})
+    from app.domains.review.models import ReviewFinding
+    from sqlalchemy import select
+
+    finding_prefix = recommendation_id.replace("rec-", "", 1)
+
+    # Find the finding by matching the prefix
+    stmt = (
+        select(ReviewFinding)
+        .where(
+            ReviewFinding.review_id == review_id,
+            ReviewFinding.tenant_id == service.tenant_id,
+            ReviewFinding.recommendation.isnot(None),
+            ReviewFinding.recommendation != "",
+        )
+        .order_by(ReviewFinding.created_at.desc())
+    )
+    result = await service.review_repo.session.execute(stmt)
+    findings = result.scalars().all()
+
+    target_finding = None
+    for f in findings:
+        if str(f.finding_id).startswith(finding_prefix):
+            target_finding = f
+            break
+
+    if not target_finding:
+        raise HTTPException(status_code=404, detail=f"Recommendation {recommendation_id} not found")
+
+    # Generate a mitigation redline from this finding's recommendation
+    clause_category = target_finding.clause_type or "other"
+    mitigation_type = f"applying_recommendation_{clause_category}"
+
+    redline_result = await service.generate_mitigation_redline(
+        review_id=review_id,
+        mitigation_type=mitigation_type,
+        clause_category=clause_category,
+        finding_ids=[str(target_finding.finding_id)],
+    )
+
+    if not redline_result:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to generate redline from recommendation. The recommendation may not have a valid mitigation template.",
+        )
+
+    # Auto-resolve the finding since the recommendation was applied
+    try:
+        from app.domains.review.models import FindingResolution
+        await service.resolve_finding(
+            finding_id=str(target_finding.finding_id),
+            resolution="resolved",
+            note=f"Recommendation applied: mitigation redline generated",
+        )
+    except Exception:
+        pass  # Non-blocking — redline was created even if auto-resolve fails
+
+    # Record audit trail for the apply action
+    await service.audit_trail.record(
+        event_type="recommendation.applied",
+        entity_type="finding",
+        entity_id=str(target_finding.finding_id),
+        actor_id=service.user.id,
+        action="apply",
+        before_state={"status": "pending"},
+        after_state={"status": "applied", "redline_id": redline_result.get("redline_id")},
+        description=f"Recommendation applied: generated mitigation redline for {target_finding.title}",
+        metadata={
+            "review_id": review_id,
+            "recommendation_id": recommendation_id,
+            "finding_id": str(target_finding.finding_id),
+            "redline_id": redline_result.get("redline_id"),
+            "mitigation_type": mitigation_type,
+        },
+    )
+
+    return {
+        "status": "applied",
+        "finding_id": str(target_finding.finding_id),
+        "redline_id": redline_result.get("redline_id"),
+        "message": f"Recommendation applied — mitigation redline generated for '{target_finding.title}'",
+    }
+
+
+@router.post("/{review_id}/recommendations/{recommendation_id}/dismiss")
+async def dismiss_recommendation(
+    review_id: str,
+    recommendation_id: str,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.WORKFLOWS_WRITE)),
+):
+    """Dismiss a recommendation — marks the associated finding as dismissed."""
+    from app.domains.review.models import ReviewFinding
+    from sqlalchemy import select
+
+    finding_prefix = recommendation_id.replace("rec-", "", 1)
+
+    stmt = (
+        select(ReviewFinding)
+        .where(
+            ReviewFinding.review_id == review_id,
+            ReviewFinding.tenant_id == service.tenant_id,
+        )
+        .order_by(ReviewFinding.created_at.desc())
+    )
+    result = await service.review_repo.session.execute(stmt)
+    findings = result.scalars().all()
+
+    target_finding = None
+    for f in findings:
+        if str(f.finding_id).startswith(finding_prefix):
+            target_finding = f
+            break
+
+    if not target_finding:
+        raise HTTPException(status_code=404, detail=f"Recommendation {recommendation_id} not found")
+
+    # Dismiss the finding
+    from app.domains.review.models import FindingResolution
+    await service.resolve_finding(
+        finding_id=str(target_finding.finding_id),
+        resolution="dismissed",
+        note="Recommendation dismissed by reviewer",
+    )
+
+    # Record audit trail
+    await service.audit_trail.record(
+        event_type="recommendation.dismissed",
+        entity_type="finding",
+        entity_id=str(target_finding.finding_id),
+        actor_id=service.user.id,
+        action="dismiss",
+        before_state={"status": "pending"},
+        after_state={"status": "dismissed"},
+        description=f"Recommendation dismissed: {target_finding.title}",
+        metadata={
+            "review_id": review_id,
+            "recommendation_id": recommendation_id,
+            "finding_id": str(target_finding.finding_id),
+        },
+    )
+
+    return {
+        "status": "dismissed",
+        "finding_id": str(target_finding.finding_id),
+        "message": f"Recommendation dismissed: '{target_finding.title}'",
+    }
+
+
 # ── Workflow ──────────────────────────────────────────────────────
 
 @router.get("/{review_id}/workflow")
@@ -2153,20 +2381,127 @@ async def get_workflow(
     _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
 ):
     """Get workflow state for a review."""
-    try:
-        return await service.get_workflow(review_id)
-    except Exception:
-        return {
-            "current_stage": "ai_review",
-            "available_actions": [],
-            "stages": [],
-            "sla_remaining_hours": 0,
-            "escalation_level": 0,
-            "reviewers": [],
-            "queue_position": 0,
-            "queue_total": 0,
-            "workload_score": 0,
-        }
+    return await service.get_workflow(review_id)
+
+
+@router.post("/{review_id}/workflow/advance")
+async def advance_workflow(
+    review_id: str,
+    body: dict,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.WORKFLOWS_WRITE)),
+):
+    """Advance workflow by performing an action from available_actions.
+
+    Maps WorkflowState action names to ReviewStatus values and transitions
+    the review through the standard update_status flow.
+
+    Optionally assigns to a specific user and records a handoff note.
+
+    Request body:
+        { "action": "legal_review" }
+        { "action": "exec_approval", "assignee_id": "user@example.com", "note": "Please review" }
+    """
+    action = body.get("action", "")
+    if not action:
+        raise HTTPException(status_code=400, detail="Action is required")
+
+    assignee_id = body.get("assignee_id")
+    note = body.get("note")
+
+    # Map WorkflowState action names to ReviewStatus values
+    action_to_status = {
+        "legal_review": "legal_approval",
+        "procurement_review": "procurement_review",
+        "security_review": "security_review",
+        "approved": "approved",
+        "rejected": "rejected",
+        "archived": "archived",
+        "in_review": "in_review",
+        "escalated": "escalated",
+        "finalized": "finalized",
+        "exec_approval": "exec_approval",
+        "executed": "executed",
+    }
+
+    target_status = action_to_status.get(action)
+    if not target_status:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown workflow action: '{action}'. "
+                   f"Valid actions: {list(action_to_status.keys())}",
+        )
+
+    # If review is unassigned (ai_analyzed), auto-assign to current user first
+    # so the status transition can proceed through the ReviewStatus matrix.
+    from app.domains.review.models import ContractReview
+    from sqlalchemy import select
+    review_row = await service.review_repo.session.execute(
+        select(ContractReview).where(
+            ContractReview.review_id == review_id,
+            ContractReview.tenant_id == service.tenant_id,
+        )
+    )
+    review = review_row.scalar_one_or_none()
+    if review:
+        raw = review.status
+        current_status_str = raw.value if hasattr(raw, 'value') else str(raw)
+        if current_status_str == "ai_analyzed":
+            # Auto-assign to the acting user so the review can be advanced
+            effective_assignee = assignee_id or service.user.id
+            try:
+                await service.assign_reviewer(
+                    review_id=review_id,
+                    assignee_id=effective_assignee,
+                    role="reviewer",
+                    due_date=None,
+                )
+            except Exception:
+                pass  # If assign fails, still try the transition
+
+        # Skip transition if already in the target status
+        if current_status_str == target_status:
+            # Still return the current state
+            result = await service.get_review(review_id)
+            if not result:
+                raise HTTPException(status_code=404, detail="Review not found")
+            return result
+
+    # Perform status transition
+    result = await service.update_status(review_id, target_status, reason=note or f"Workflow action: {action}")
+    if not result:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    # If assignee provided, assign the review
+    if assignee_id:
+        try:
+            await service.assign_reviewer(
+                review_id=review_id,
+                assignee_id=assignee_id,
+                role="reviewer",
+                due_date=None,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    # Send notification if note provided
+    if note and service.notify_service:
+        try:
+            await service.notify_service.send_notification(
+                user_id=assignee_id or review_id,
+                notif_type="workflow.transition",
+                title=f"Review moved to {target_status.replace('_', ' ')}",
+                body=note,
+                severity="medium",
+                entity_type="review",
+                entity_id=review_id,
+                action_url=f"/reviews/{review_id}",
+                dedup_key=f"advance:{review_id}:{action}",
+            )
+        except Exception:
+            pass
+
+    return result
 
 
 # ── Activity ──────────────────────────────────────────────────────

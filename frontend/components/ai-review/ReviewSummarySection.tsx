@@ -19,7 +19,7 @@ import {
   ArrowUp, ArrowDown, BarChart3,
 } from "lucide-react";
 import { useReviewContext } from "./ReviewContext";
-import { useReviewerWorkloads, useQueueMetrics } from "./hooks";
+import { useReviewerWorkloads, useQueueMetrics, normalizeActivityEvents } from "./hooks";
 
 export function ReviewSummarySection() {
   const ctx = useReviewContext();
@@ -32,7 +32,10 @@ export function ReviewSummarySection() {
   const resolvedFindings = useMemo(() => findings.filter(f => f.status === "resolved" || f.status === "dismissed"), [findings]);
   const pendingRecs = useMemo(() => recommendations?.filter(r => r.status === "pending") ?? [], [recommendations]);
   const openViolations = useMemo(() => policyViolations?.filter(v => v.status === "open") ?? [], [policyViolations]);
-  const recentActivity = useMemo(() => (activity ?? []).slice(0, 5), [activity]);
+  const recentActivity = useMemo(
+    () => normalizeActivityEvents(activity).slice(0, 5),
+    [activity],
+  );
 
   if (!selectedReview) {
     return (

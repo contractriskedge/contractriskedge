@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# MinIO on Mac — document data stored on Synology NAS mount.
+# MinIO on Mac — document data stored on external drive at /Volumes/ContractEdge.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/../.env"
-NAS_DATA_DIR="/Volumes/home/contractriskstorage/minio-data"
+NAS_DATA_DIR="/Volumes/ContractEdge/minio-data"
 
 if [[ -f "$ENV_FILE" ]]; then
   set -a

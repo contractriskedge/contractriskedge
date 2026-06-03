@@ -76,3 +76,15 @@ server.pid
 
 # Test artifacts
 test_report_*.xlsx
+
+# Virtual environments
+.venv_py311/
+*.txt
+*.sql
+
+# Generated reports
+e2e_*
+tests/e2e_*
+sprint16_*
+*.tsbuildinfo
+backend/scripts/start-minio.sh

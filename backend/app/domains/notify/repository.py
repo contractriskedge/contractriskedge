@@ -13,6 +13,7 @@ from app.kernel.repository.base import BaseRepository
 from app.domains.notify.models import (
     Notification, NotificationDelivery, NotificationPreference,
     WorkflowEvent, WorkflowTimer, EscalationRule, EscalationEvent, SLAPolicy,
+    EmailQueue,
 )
 
 
@@ -129,6 +130,93 @@ class NotificationRepository(BaseRepository):
         )
         result = await self.session.execute(stmt)
         return result.scalars().all()
+
+    # ── Email Queue ───────────────────────────────────────────────
+
+    async def get_user_email(self, tenant_id: str, user_id: str) -> Optional[str]:
+        """Resolve a platform user_id to an email address."""
+        from sqlalchemy import text as sa_text
+
+        if "@" in user_id:
+            return user_id
+        result = await self.session.execute(
+            sa_text("""
+                SELECT email FROM admin_users
+                WHERE tenant_id = :tid AND user_id = :uid AND is_active = true
+                LIMIT 1
+            """),
+            {"tid": tenant_id, "uid": user_id},
+        )
+        row = result.fetchone()
+        return row.email if row else None
+
+    async def get_email_redirect(self, tenant_id: str) -> tuple[bool, Optional[str]]:
+        """Return tenant email redirect settings."""
+        from sqlalchemy import text as sa_text
+
+        result = await self.session.execute(
+            sa_text("""
+                SELECT email_redirect_enabled, email_redirect_to
+                FROM tenant_settings
+                WHERE tenant_id = :tid
+            """),
+            {"tid": tenant_id},
+        )
+        row = result.fetchone()
+        if not row:
+            return False, None
+        enabled = bool(row.email_redirect_enabled)
+        redirect_to = row.email_redirect_to if enabled and row.email_redirect_to else None
+        return enabled, redirect_to
+
+    async def enqueue_email(self, **kwargs) -> EmailQueue:
+        entry = EmailQueue(**kwargs)
+        self.session.add(entry)
+        await self.session.flush()
+        return entry
+
+    async def get_pending_emails(self, limit: int = 20) -> list[EmailQueue]:
+        stmt = select(EmailQueue).where(
+            EmailQueue.status == "pending",
+            or_(EmailQueue.next_retry_at.is_(None), EmailQueue.next_retry_at <= func.now()),
+        ).order_by(EmailQueue.created_at.asc()).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def mark_email_sent(self, email_id: str, provider_message_id: str) -> None:
+        stmt = update(EmailQueue).where(EmailQueue.email_id == email_id).values(
+            status="sent",
+            provider_message_id=provider_message_id,
+            sent_at=func.now(),
+            attempt_count=EmailQueue.attempt_count + 1,
+        )
+        await self.session.execute(stmt)
+
+    async def mark_email_failed(self, email_id: str, error: str, retry_at: Optional[datetime] = None) -> None:
+        values = {
+            "status": "failed",
+            "last_error": error,
+            "attempt_count": EmailQueue.attempt_count + 1,
+        }
+        if retry_at:
+            values["next_retry_at"] = retry_at
+            values["status"] = "pending"  # Re-queue for retry
+        stmt = update(EmailQueue).where(EmailQueue.email_id == email_id).values(**values)
+        await self.session.execute(stmt)
+
+    async def get_email_queue_stats(self, tenant_id: str) -> dict:
+        stmt = select(
+            func.count().filter(EmailQueue.status == "pending").label("pending"),
+            func.count().filter(EmailQueue.status == "sent").label("sent"),
+            func.count().filter(EmailQueue.status == "failed").label("failed"),
+        ).where(EmailQueue.tenant_id == tenant_id)
+        result = await self.session.execute(stmt)
+        row = result.fetchone()
+        return {
+            "pending": row.pending if row else 0,
+            "sent": row.sent if row else 0,
+            "failed": row.failed if row else 0,
+        }
 
 
 @dataclass

@@ -77,11 +77,28 @@ class FindingItem(BaseModel):
     resolved_by: Optional[str] = None
     resolved_at: Optional[datetime] = None
     created_at: datetime
+    feedback_type: Optional[str] = None
+    feedback_note: Optional[str] = None
+    feedback_at: Optional[datetime] = None
 
 
 class FindingResolveRequest(BaseModel):
     resolution: str = Field(..., pattern="^(acknowledged|resolved|dismissed|false_positive|escalated)$")
     note: Optional[str] = Field(None, max_length=2000)
+
+
+class FindingFeedbackRequest(BaseModel):
+    type: str = Field(..., pattern="^(correct|incorrect|partial|unsure)$")
+    reviewer_note: Optional[str] = Field(None, max_length=2000)
+    retraining_priority: Optional[str] = Field("medium", pattern="^(low|medium|high)$")
+
+
+class FindingFeedbackResponse(BaseModel):
+    finding_id: str
+    feedback_type: str
+    reviewer_note: Optional[str] = None
+    retraining_priority: str = "medium"
+    created_at: datetime
 
 
 class LocatorResponse(BaseModel):
@@ -209,6 +226,11 @@ class AssignRequest(BaseModel):
     role: str = Field(default="reviewer", pattern="^(reviewer|approver|observer)$")
     due_date: Optional[datetime] = None
     notes: Optional[str] = None
+
+
+class RedlineAssignRequest(BaseModel):
+    assignee_id: str
+    role: str = Field(default="legal_review", pattern="^(legal_review|procurement_review|security_review|business_review|reviewer|approver|observer)$")
 
 
 class EscalateRequest(BaseModel):

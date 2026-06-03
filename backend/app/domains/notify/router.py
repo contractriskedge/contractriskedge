@@ -165,6 +165,29 @@ async def update_preference(
     return {"status": "updated"}
 
 
+# ── Email Queue ────────────────────────────────────────────────────
+
+@router.get("/email/queue/stats")
+async def get_email_queue_stats(
+    service: NotificationService = Depends(get_notif_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Get email queue statistics (pending, sent, failed counts)."""
+    stats = await service.repo.get_email_queue_stats(service.tenant_id)
+    return stats
+
+
+@router.post("/email/queue/process")
+async def process_email_queue(
+    _: None = Depends(require_permission(Permissions.ADMIN_SYSTEM)),
+):
+    """Manually trigger email queue processing. Admin only."""
+    from app.workers.email_worker import process_email_queue as process
+    import asyncio
+    count = await process(batch_size=20)
+    return {"processed": count}
+
+
 # ── SLA Policies ───────────────────────────────────────────────────
 
 @router.get("/sla-policies"

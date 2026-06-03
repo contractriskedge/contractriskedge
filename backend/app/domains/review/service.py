@@ -173,7 +173,10 @@ class ReviewService:
         current_state = map_legacy_status(current_status)
 
         # Validate transition through the state machine
-        validate_transition(current_state, target_state, review_id=review_id)
+        try:
+            validate_transition(current_state, target_state, review_id=review_id)
+        except TransitionError as e:
+            raise ValueError(str(e))
 
         # Perform the transition
         review = await self.review_repo.update_status(
@@ -320,6 +323,60 @@ class ReviewService:
             "resolution_note": finding.resolution_note,
             "resolved_by": finding.resolved_by,
             "resolved_at": finding.resolved_at.isoformat() if finding.resolved_at else None,
+        }
+
+    async def submit_finding_feedback(
+        self, finding_id: str, feedback_type: str,
+        reviewer_note: Optional[str] = None,
+        retraining_priority: str = "medium",
+    ) -> Optional[dict]:
+        """Record AI feedback (correct/incorrect/partial) for a finding and persist to DB."""
+        from app.domains.review.models import ReviewFinding as RFModel
+        from sqlalchemy import update
+
+        # Verify finding exists
+        finding_result = await self.review_repo.session.execute(
+            select(RFModel).where(
+                RFModel.finding_id == finding_id,
+                RFModel.tenant_id == self.tenant_id,
+            )
+        )
+        finding_row = finding_result.scalar_one_or_none()
+        if not finding_row:
+            return None
+
+        # Persist feedback to the finding record
+        stmt = (
+            update(RFModel)
+            .where(RFModel.finding_id == finding_id, RFModel.tenant_id == self.tenant_id)
+            .values(
+                feedback_type=feedback_type,
+                feedback_note=reviewer_note,
+                feedback_priority=retraining_priority,
+                feedback_at=func.now(),
+            )
+        )
+        await self.review_repo.session.execute(stmt)
+        await self.review_repo.session.flush()
+
+        # Record feedback as an audit trail entry
+        await self.audit_trail.record_finding_action(
+            finding_id=finding_id,
+            review_id=str(finding_row.review_id),
+            actor_id=self.user.id,
+            resolution=feedback_type,
+            description=(
+                f"AI feedback: {feedback_type}"
+                f"{' — ' + reviewer_note if reviewer_note else ''}"
+            ),
+        )
+
+        return {
+            "finding_id": str(finding_id),
+            "feedback_type": feedback_type,
+            "reviewer_note": reviewer_note,
+            "retraining_priority": retraining_priority,
+            "created_at": datetime.utcnow().isoformat(),
         }
 
     async def get_redlines(self, review_id: str, status: Optional[str] = None):
@@ -762,7 +819,6 @@ class ReviewService:
                 assigned_by=self.user.id,
                 assigned_at=func.now(),
                 started_at=func.now(),
-                workflow_stage=role if role in ("reviewer", "legal_ops", "compliance", "executive") else "reviewer",
                 priority=priority,
                 sla_deadline=due_date,
                 sla_status="on_track",
@@ -770,11 +826,6 @@ class ReviewService:
             )
         )
         await self.review_repo.session.execute(stmt)
-
-        if current == ReviewStatus.ESCALATED and role == "legal_ops":
-            await self.review_repo.session.execute(
-                stmt.values(workflow_stage="legal_ops")
-            )
 
         updated_review = await self.review_repo.get_review(review_id, self.tenant_id)
         result = {
@@ -975,7 +1026,10 @@ class ReviewService:
         # Lock guard: verify we can approve/reject from current state
         raw_status = review.status
         status_str = raw_status.value if hasattr(raw_status, 'value') else str(raw_status)
-        assert_can_approve_or_reject(status_str, review_id)
+        try:
+            assert_can_approve_or_reject(status_str, review_id)
+        except ImmutableReviewError as e:
+            raise ValueError(str(e))
 
         # Guard: if approving, check for unresolved critical/high findings
         if decision == "approved":
@@ -1006,14 +1060,6 @@ class ReviewService:
         current = review.status
         if isinstance(current, str):
             current = ReviewStatus(current)
-
-        # Use workflow state machine for transition validation
-        current_wf = map_legacy_status(status_str)
-        target_wf = WorkflowState.APPROVED if new_status == ReviewStatus.APPROVED else WorkflowState.REJECTED
-        try:
-            validate_transition(current_wf, target_wf, review_id=review_id)
-        except TransitionError as e:
-            raise ConflictError(message=str(e))
 
         approval = await self.review_repo.approve(
             review_id, self.tenant_id, self.user.id, decision, comments, conditions,
@@ -1676,10 +1722,10 @@ class ReviewService:
                     COUNT(*)::int AS total,
                     COUNT(*) FILTER (WHERE r.assigned_to IS NULL AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS unassigned,
                     COUNT(*) FILTER (WHERE r.status = 'in_review')::int AS in_review,
-                    COUNT(*) FILTER (WHERE r.sla_status = 'overdue' AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS overdue,
+                    COUNT(*) FILTER (WHERE r.sla_status IN ('overdue', 'critical_overdue') AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS overdue,
                     COUNT(*) FILTER (WHERE r.status = 'escalated')::int AS escalated,
-                    COUNT(*) FILTER (WHERE r.priority = 'urgent' AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS critical,
-                    COUNT(*) FILTER (WHERE r.sla_status IN ('warning', 'overdue') AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS sla_at_risk,
+                    COUNT(*) FILTER (WHERE r.priority IN ('urgent', 'critical') AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS critical,
+                    COUNT(*) FILTER (WHERE r.sla_status IN ('warning', 'overdue', 'critical_overdue') AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS sla_at_risk,
                     COUNT(*) FILTER (WHERE r.completed_at IS NOT NULL AND r.completed_at::date = CURRENT_DATE)::int AS completed_today
                 FROM contract_reviews r
                 WHERE r.tenant_id = :tenant_id AND r.is_deleted = FALSE
@@ -1906,7 +1952,11 @@ class ReviewService:
 
     @staticmethod
     def _compute_sla(review) -> dict:
-        """Compute SLA status and overdue hours for a review."""
+        """Compute SLA status and overdue hours for a review.
+
+        Uses DB-stored values as base, then recomputes from sla_deadline
+        if present for real-time accuracy.
+        """
         now = utc_now()
         sla_deadline = ensure_utc(review.sla_deadline)
         sla_breached = review.sla_breached or False
@@ -1923,6 +1973,8 @@ class ReviewService:
                 sla_status = "warning"
             else:
                 sla_status = "on_track"
+        # else: keep DB-stored sla_status and overdue_hours when no deadline set
+
         return {
             "sla_deadline": sla_deadline.isoformat() if sla_deadline else None,
             "sla_due_at": sla_deadline.isoformat() if sla_deadline else None,
@@ -1962,7 +2014,7 @@ class ReviewService:
             **sla,
             "created_by": review.created_by,
             "created_at": review.created_at.isoformat(),
-            "updated_at": review.updated_at.isoformat(),
+            "updated_at": review.updated_at.isoformat() if review.updated_at else review.created_at.isoformat(),
             "completed_at": review.completed_at.isoformat() if review.completed_at else None,
             # Rejection metadata
             "rejection_reason": review.rejection_reason,
@@ -2589,23 +2641,218 @@ class ReviewService:
         return {"missing_clauses": []}
 
     async def get_recommendations(self, review_id: str) -> dict:
-        return {"recommendations": []}
+        """Get actionable recommendations from findings for a review.
+
+        Returns findings that have recommendations as actionable recommendation items.
+        """
+        from app.domains.review.models import ReviewFinding
+        from sqlalchemy import select
+
+        stmt = (
+            select(ReviewFinding)
+            .where(
+                ReviewFinding.review_id == review_id,
+                ReviewFinding.tenant_id == self.tenant_id,
+                ReviewFinding.recommendation.isnot(None),
+                ReviewFinding.recommendation != "",
+            )
+            .order_by(ReviewFinding.confidence.desc(), ReviewFinding.created_at.desc())
+        )
+        result = await self.review_repo.session.execute(stmt)
+        findings = result.scalars().all()
+
+        recommendations = []
+        for f in findings:
+            recommendations.append({
+                "recommendation_id": f"rec-{str(f.finding_id)[:8]}",
+                "finding_id": str(f.finding_id),
+                "review_id": review_id,
+                "clause_type": f.clause_type,
+                "severity": f.severity,
+                "title": f.title,
+                "description": f.description,
+                "recommendation": f.recommendation,
+                "confidence": f.confidence,
+                "risk_score": f.risk_score,
+                "status": "resolved" if f.resolution is not None else "pending",
+                "resolution": f.resolution.value if hasattr(f.resolution, "value") else f.resolution,
+                "created_at": f.created_at.isoformat() if hasattr(f.created_at, "isoformat") else str(f.created_at),
+            })
+
+        return {"recommendations": recommendations}
 
     async def get_workflow(self, review_id: str) -> dict:
+        """Get workflow state for a review, derived from actual review data."""
+        from app.domains.review.models import ContractReview, ReviewStatus
+        from sqlalchemy import select
+
+        review = await self.review_repo.get_review(review_id, self.tenant_id)
+        if not review:
+            return {
+                "current_stage": "unknown",
+                "available_actions": [],
+                "stages": [],
+                "sla_remaining_hours": 0,
+                "escalation_level": 0,
+                "reviewers": [],
+                "queue_position": 0,
+                "queue_total": 0,
+                "workload_score": 0,
+            }
+
+        # Derive current_stage from workflow_stage or status
+        raw_status = review.status
+        status_str = raw_status.value if hasattr(raw_status, 'value') else str(raw_status)
+        current_stage = review.workflow_stage or ReviewStatus(status_str).derive_workflow_stage()
+
+        # Build stage progression from status history
+        from sqlalchemy import text as sa_text
+        hist_sql = sa_text("""
+            SELECT from_status, to_status, changed_by, created_at
+            FROM review_status_history
+            WHERE tenant_id = :tenant_id AND review_id = :review_id
+            ORDER BY created_at ASC
+        """)
+        result = await self.review_repo.session.execute(
+            hist_sql, {"tenant_id": self.tenant_id, "review_id": review_id}
+        )
+        history = result.fetchall()
+
+        # Map statuses to stage labels
+        stage_label_map = {
+            "draft": "Intake", "uploaded": "Intake",
+            "analyzing": "AI Analysis", "ai_analyzed": "AI Analysis",
+            "review_ready": "AI Analysis", "in_review": "Review",
+            "legal_approval": "Legal Approval", "exec_approval": "Executive Approval",
+            "approved": "Approved", "rejected": "Rejected",
+            "escalated": "Escalated", "closed": "Completed",
+            "finalized": "Finalized", "archived": "Archived",
+        }
+
+        stages_built = []
+        seen_stages = set()
+        for h in history:
+            stage_id = h.to_status
+            if stage_id not in seen_stages:
+                seen_stages.add(stage_id)
+                is_current = (stage_id == status_str)
+                stages_built.append({
+                    "id": stage_id,
+                    "label": stage_label_map.get(stage_id, stage_id.replace("_", " ").title()),
+                    "status": "current" if is_current else "completed",
+                    "completed_at": str(h.created_at) if h.created_at else None,
+                    "completed_by": h.changed_by,
+                })
+
+        # Determine available actions based on current status
+        from app.domains.review.workflow import WorkflowState, map_legacy_status
+        current_wf = map_legacy_status(status_str)
+        available_actions = [s.value for s in WorkflowState.valid_transitions().get(current_wf, set())]
+
+        # Count active reviewers for this review
+        from app.domains.review.models import ReviewAssignment
+        reviewer_count = await self.review_repo.session.execute(
+            select(ReviewAssignment).where(
+                ReviewAssignment.review_id == review_id,
+                ReviewAssignment.tenant_id == self.tenant_id,
+            )
+        )
+        reviewers_list = [
+            {
+                "user_id": a.assignee_id,
+                "name": a.assignee_id,
+                "role": a.role,
+                "assigned_at": str(a.created_at) if a.created_at else None,
+            }
+            for a in reviewer_count.scalars().all()
+        ]
+
+        # SLA calculations
+        sla_remaining = 0
+        if review.sla_deadline:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            if review.sla_deadline.tzinfo is None:
+                from app.kernel.datetime_utils import ensure_utc
+                deadline = ensure_utc(review.sla_deadline)
+            else:
+                deadline = review.sla_deadline
+            delta = deadline - now
+            sla_remaining = delta.total_seconds() / 3600
+
         return {
-            "current_stage": "ai_review",
-            "available_actions": [],
-            "stages": [],
-            "sla_remaining_hours": 0,
-            "escalation_level": 0,
-            "reviewers": [],
+            "current_stage": current_stage,
+            "available_actions": available_actions,
+            "stages": stages_built,
+            "sla_remaining_hours": round(sla_remaining, 1),
+            "escalation_level": review.escalation_count or 0,
+            "reviewers": reviewers_list,
             "queue_position": 0,
             "queue_total": 0,
             "workload_score": 0,
         }
 
     async def get_activity(self, review_id: str) -> dict:
-        return {"events": []}
+        """Get activity events for a review from governance_audit_events and review_status_history."""
+        from sqlalchemy import text as sa_text
+
+        # Query governance_audit_events for this review
+        # entity_id may be the finding_id or redline_id, so also check metadata->>'review_id'
+        gov_sql = sa_text("""
+            SELECT event_id, event_type, action, actor_id, description, created_at
+            FROM governance_audit_events
+            WHERE tenant_id = :tenant_id
+              AND (
+                entity_id = :review_id::uuid
+                OR metadata->>'review_id' = :review_id2
+              )
+            ORDER BY created_at DESC
+            LIMIT 50
+        """)
+        result = await self.review_repo.session.execute(
+            gov_sql, {"tenant_id": self.tenant_id, "review_id": review_id, "review_id2": review_id}
+        )
+        gov_events = [
+            {
+                "event_id": str(row.event_id),
+                "event_type": row.event_type,
+                "action": row.action,
+                "actor_id": row.actor_id,
+                "description": row.description,
+                "created_at": row.created_at.isoformat() if hasattr(row.created_at, "isoformat") else str(row.created_at),
+            }
+            for row in result.fetchall()
+        ]
+
+        # Query review_status_history for status transitions
+        hist_sql = sa_text("""
+            SELECT history_id, from_status, to_status, changed_by, reason, created_at
+            FROM review_status_history
+            WHERE tenant_id = :tenant_id
+              AND review_id = :review_id::uuid
+            ORDER BY created_at DESC
+            LIMIT 50
+        """)
+        result = await self.review_repo.session.execute(
+            hist_sql, {"tenant_id": self.tenant_id, "review_id": review_id}
+        )
+        hist_events = [
+            {
+                "event_id": f"hist-{str(row.history_id)[:8]}",
+                "event_type": "review.status_transition",
+                "action": f"{row.from_status} → {row.to_status}",
+                "actor_id": row.changed_by,
+                "description": row.reason or f"Status changed from {row.from_status} to {row.to_status}",
+                "created_at": row.created_at.isoformat() if hasattr(row.created_at, "isoformat") else str(row.created_at),
+            }
+            for row in result.fetchall()
+        ]
+
+        # Merge and sort by created_at desc
+        all_events = gov_events + hist_events
+        all_events.sort(key=lambda e: e["created_at"], reverse=True)
+
+        return {"events": all_events}
 
     async def get_document(self, review_id: str) -> dict:
         return {"sections": [], "total_pages": 0}

@@ -12,8 +12,26 @@ import { IntegrationsHub } from "./IntegrationsHub";
 import { SecurityCenter } from "./SecurityCenter";
 import { AdminDetailDrawer } from "./AdminDetailDrawer";
 import { AdminFilterBar } from "./AdminFilterBar";
-import { useAdminDashboard, useAdminUsers } from "@/services/hooks/useAdmin";
-import type { AdminUser } from "./types";
+import { useAdminDashboard, useAdminUsers, useAuditLogs } from "@/services/hooks/useAdmin";
+import type { AdminUser, AuditEventType } from "./types";
+
+// ── Audit event type/severity mapping ────────────────────────────
+function mapAuditEventType(eventType: string): AuditEventType {
+  if (eventType.startsWith("review.") || eventType.startsWith("finding.") || eventType.startsWith("redline.")) return "workflow";
+  if (eventType.startsWith("ai.") || eventType.includes("copilot")) return "ai";
+  if (eventType.startsWith("version.")) return "data";
+  if (eventType.startsWith("user.") || eventType.includes("auth")) return "auth";
+  if (eventType.startsWith("security.")) return "security";
+  if (eventType.startsWith("integration.")) return "integration";
+  return "admin";
+}
+
+function mapAuditSeverity(eventType: string): "critical" | "high" | "medium" | "low" | "info" {
+  if (eventType.includes("escalated") || eventType.includes("rejected") || eventType.includes("breach")) return "high";
+  if (eventType.includes("approved") || eventType.includes("resolved") || eventType.includes("accepted")) return "low";
+  if (eventType.includes("deleted") || eventType.includes("failure")) return "medium";
+  return "info";
+}
 
 interface AdminFilters {
   tenant: string; userRole: string; complianceStatus: string;
@@ -31,11 +49,25 @@ export function AdminConsole() {
   // Real API hooks replacing mockData
   const { data: dashboardData, isLoading, error, refetch } = useAdminDashboard();
   const { data: usersData } = useAdminUsers();
+  const { data: auditLogsData } = useAuditLogs({ page_size: 50 });
 
   const adminKpis = dashboardData?.kpis ?? [];
   const adminUsers = usersData?.data ?? [];
   const systemHealthMetrics = dashboardData?.system_health ? [{ status: dashboardData.system_health, uptime: 99.9, lastChecked: new Date().toISOString() }] : [];
-  const auditEvents = [];
+  // AuditLogsData has { events: AuditEventItem[], total, page, page_size, total_pages }
+  const auditLogsResponse = auditLogsData as { events?: Array<Record<string, unknown>> } | undefined;
+  const auditEvents = (auditLogsResponse?.events ?? []).map((e: Record<string, unknown>) => ({
+    id: String(e.event_id ?? ""),
+    timestamp: String(e.created_at ?? ""),
+    type: mapAuditEventType(String(e.event_type ?? "")),
+    action: String(e.action ?? e.event_type ?? ""),
+    user: String(e.actor_id ?? ""),
+    resource: String(e.resource_id ?? e.resource_type ?? ""),
+    details: String(e.description ?? `${e.event_type} on ${e.resource_type}`),
+    severity: mapAuditSeverity(String(e.event_type ?? "")),
+    ip: "",
+    status: "success" as const,
+  }));
   const integrations = [];
   const securityAlerts = [];
   const tenants = [];
