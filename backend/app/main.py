@@ -384,6 +384,12 @@ def create_app() -> FastAPI:
     # ── AI Governance router (prompt registry, evaluation, quality dashboard) ──
     from app.domains.ai_governance.router import router as ai_governance_router
     app.include_router(ai_governance_router, prefix="/api/v1")
+    # ── Workflow Packs router ──
+    from app.domains.workflow_packs.router import router as workflow_packs_router
+    app.include_router(workflow_packs_router, prefix="/api/v1")
+    # ── Workflow Runtime router ──
+    from app.domains.workflows.runtime.router import router as workflow_runtime_router
+    app.include_router(workflow_runtime_router, prefix="/api/v1")
 
     # ── Prometheus metrics endpoint (no prefix, no auth) ──
     from app.kernel.telemetry.metrics import metrics_endpoint

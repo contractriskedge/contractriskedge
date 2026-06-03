@@ -26,6 +26,7 @@ _MODEL_MODULES = (
     "app.domains.admin.heartbeat_models",
     "app.domains.compliance.models",
     "app.domains.human_oversight.models",
+    "app.domains.workflow_packs.models",
 )
 
 
