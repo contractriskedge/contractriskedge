@@ -69,6 +69,19 @@ def get_engine() -> WorkflowExecutionEngine:
             ],
             sla_seconds=86400,
         ))
+        _engine.register_definition(WorkflowDefinition(
+            workflow_type="negotiation_review",
+            version="1.0",
+            description="Negotiation workflow — tracks stage progression through drafting, review, negotiating, approval, execution",
+            steps=[
+                WorkflowStep(name="intake", handler=_noop_handler, sla_seconds=7200),
+                WorkflowStep(name="legal_review", handler=_noop_handler, requires_approval=True, sla_seconds=14400),
+                WorkflowStep(name="negotiation", handler=_noop_handler, sla_seconds=86400),
+                WorkflowStep(name="final_approval", handler=_noop_handler, requires_approval=True, sla_seconds=7200),
+                WorkflowStep(name="execution", handler=_noop_handler, sla_seconds=3600),
+            ],
+            sla_seconds=172800,
+        ))
     return _engine
 
 

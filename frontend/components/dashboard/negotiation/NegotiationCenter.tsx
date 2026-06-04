@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useMemo } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   MessageSquare, PenTool, AlertTriangle, Clock, Brain, ArrowUpCircle,
@@ -10,7 +11,7 @@ import type {
   CompareMode, PanelMode, NegotiationStage, NegotiationKpi,
   FallbackClause, AiNegotiationInsight,
 } from "./types";
-import { mockNegotiationSession, mockNegotiationKpis } from "./mockData";
+import { negotiationsService } from "@/services/api/negotiations";
 import { NegotiationKpiCards } from "./NegotiationKpiCards";
 import { LeftSidebar } from "./LeftSidebar";
 import { CenterPanel } from "./CenterPanel";
@@ -20,13 +21,53 @@ import { ActivityTimeline } from "./ActivityTimeline";
 import { IssueDetailDrawer } from "./IssueDetailDrawer";
 import { NegotiationClauseDrawer } from "./NegotiationClauseDrawer";
 
+// ── Hooks ───────────────────────────────────────────────────────
+
+function useNegotiationSession(sessionId: string | null) {
+  return useQuery({
+    queryKey: ["negotiation", sessionId],
+    queryFn: () => negotiationsService.getSession(sessionId!),
+    enabled: !!sessionId,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+  });
+}
+
+function useNegotiationKpis() {
+  return useQuery({
+    queryKey: ["negotiation-kpis"],
+    queryFn: () => negotiationsService.getKpis(),
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+  });
+}
+
+function useSessions() {
+  return useQuery({
+    queryKey: ["negotiations-list"],
+    queryFn: () => negotiationsService.listSessions({ page_size: 50 }),
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+  });
+}
+
+function useActivities(sessionId: string | null) {
+  return useQuery({
+    queryKey: ["negotiation-activities", sessionId],
+    queryFn: () => negotiationsService.getActivities(sessionId!),
+    enabled: !!sessionId,
+    staleTime: 15_000,
+    gcTime: 30_000,
+  });
+}
+
 // ── Negotiation Center ───────────────────────────────────────────────────
 
 export function NegotiationCenter() {
-  const session = mockNegotiationSession;
-  const kpis = mockNegotiationKpis;
+  const queryClient = useQueryClient();
 
   // State
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [compareMode, setCompareMode] = useState<CompareMode>("inline");
   const [panelMode, setPanelMode] = useState<PanelMode>("review");
   const [activeClauseId, setActiveClauseId] = useState<string | null>(null);
@@ -35,46 +76,129 @@ export function NegotiationCenter() {
   const [showLeftSidebar, setShowLeftSidebar] = useState(true);
   const [showRightPanel, setShowRightPanel] = useState(true);
   const [showActivityTimeline, setShowActivityTimeline] = useState(false);
-  const [redlines, setRedlines] = useState(session.redlines);
-  const [issues, setIssues] = useState(session.issues);
+
+  // Queries
+  const { data: sessionsData } = useSessions();
+  const { data: session, isLoading: sessionLoading } = useNegotiationSession(selectedSessionId);
+  const { data: kpisData } = useNegotiationKpis();
+  const { data: activities } = useActivities(selectedSessionId);
+
+  // Auto-select first session
+  const sessions = sessionsData?.data ?? [];
+  React.useEffect(() => {
+    if (!selectedSessionId && sessions.length > 0) {
+      setSelectedSessionId(sessions[0].id);
+    }
+  }, [sessions, selectedSessionId]);
+
+  // Derive local state from session data
+  const [localRedlines, setLocalRedlines] = useState<any[]>([]);
+  const [localIssues, setLocalIssues] = useState<any[]>([]);
+
+  React.useEffect(() => {
+    if (session) {
+      setLocalRedlines(session.redlines);
+      setLocalIssues(session.issues);
+    }
+  }, [session]);
+
+  // Build KPI cards from API data
+  const kpiCards: NegotiationKpi[] = React.useMemo(() => {
+    const k = kpisData;
+    if (!k) return [];
+    return [
+      {
+        id: "total",
+        label: "Total Sessions",
+        value: String(k.total_sessions),
+        trend: 0, trendDirection: "neutral",
+        icon: "GitBranch", color: "blue", severity: "info",
+        sparklineData: [], tooltip: "Total negotiation sessions",
+      },
+      {
+        id: "active",
+        label: "Active",
+        value: String(k.active_sessions),
+        trend: 0, trendDirection: "neutral",
+        icon: "Activity", color: "green", severity: "success",
+        sparklineData: [], tooltip: "Active negotiations in progress",
+      },
+      {
+        id: "escalated",
+        label: "Escalated",
+        value: String(k.escalated_count),
+        trend: 0, trendDirection: "neutral",
+        icon: "AlertTriangle", color: "red", severity: "critical",
+        sparklineData: [], tooltip: "Escalated negotiations requiring attention",
+      },
+      ...Object.entries(k.by_stage).map(([stage, count]) => ({
+        id: `stage-${stage}`,
+        label: stage.charAt(0).toUpperCase() + stage.slice(1),
+        value: String(count),
+        trend: 0, trendDirection: "neutral" as const,
+        icon: "Target", color: "amber", severity: "info" as const,
+        sparklineData: [] as number[], tooltip: `Sessions in ${stage} stage`,
+      })),
+    ];
+  }, [kpisData]);
 
   // Redline count by clause
   const redlineCountByClause = useMemo(() => {
     const map: Record<string, number> = {};
-    redlines.forEach(r => {
+    localRedlines.forEach((r: any) => {
       map[r.clauseId] = (map[r.clauseId] || 0) + 1;
     });
     return map;
-  }, [redlines]);
+  }, [localRedlines]);
 
   // Current clause data
-  const currentVersion = session.versions.find(v => v.id === session.currentVersionId);
+  const currentVersion = session?.versions.find((v: any) => v.id === session.currentVersionId);
   const clauses = currentVersion?.content || [];
 
   // Handlers
   const handleRedlineAccept = useCallback((redlineId: string) => {
-    setRedlines(prev => prev.map(r => r.id === redlineId ? { ...r, status: "accepted" as const } : r));
-  }, []);
+    if (!selectedSessionId) return;
+    negotiationsService.updateRedlineStatus(selectedSessionId, redlineId, { status: "accepted" })
+      .then(() => {
+        setLocalRedlines(prev => prev.map((r: any) => r.id === redlineId ? { ...r, status: "accepted" } : r));
+        queryClient.invalidateQueries({ queryKey: ["negotiation", selectedSessionId] });
+      });
+  }, [selectedSessionId, queryClient]);
 
   const handleRedlineReject = useCallback((redlineId: string) => {
-    setRedlines(prev => prev.map(r => r.id === redlineId ? { ...r, status: "rejected" as const } : r));
-  }, []);
+    if (!selectedSessionId) return;
+    negotiationsService.updateRedlineStatus(selectedSessionId, redlineId, { status: "rejected" })
+      .then(() => {
+        setLocalRedlines(prev => prev.map((r: any) => r.id === redlineId ? { ...r, status: "rejected" } : r));
+        queryClient.invalidateQueries({ queryKey: ["negotiation", selectedSessionId] });
+      });
+  }, [selectedSessionId, queryClient]);
 
   const handleIssueStatusChange = useCallback((issueId: string, status: string) => {
-    setIssues(prev => prev.map(i => i.id === issueId ? { ...i, status: status as any } : i));
-  }, []);
+    if (!selectedSessionId) return;
+    negotiationsService.updateIssue(selectedSessionId, issueId, { status })
+      .then(() => {
+        setLocalIssues(prev => prev.map((i: any) => i.id === issueId ? { ...i, status } : i));
+        queryClient.invalidateQueries({ queryKey: ["negotiation", selectedSessionId] });
+      });
+  }, [selectedSessionId, queryClient]);
 
   const handleIssueEscalate = useCallback((issueId: string) => {
-    setIssues(prev => prev.map(i => i.id === issueId ? { ...i, escalationLevel: Math.min(i.escalationLevel + 1, 3), status: "escalated" as const } : i));
-  }, []);
+    if (!selectedSessionId) return;
+    const issue = localIssues.find((i: any) => i.id === issueId);
+    if (!issue) return;
+    const newLevel = Math.min((issue.escalationLevel || 0) + 1, 3);
+    negotiationsService.updateIssue(selectedSessionId, issueId, { escalationLevel: newLevel, status: "escalated" })
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ["negotiation", selectedSessionId] });
+      });
+  }, [selectedSessionId, localIssues, queryClient]);
 
   const handleApplyInsight = useCallback((insight: AiNegotiationInsight) => {
-    // In a real app, this would apply the AI suggestion to the document
     console.log("Applied insight:", insight.id);
   }, []);
 
   const handleApplyFallback = useCallback((fb: FallbackClause) => {
-    // In a real app, this would insert the fallback clause
     console.log("Applied fallback:", fb.id);
   }, []);
 
@@ -84,34 +208,66 @@ export function NegotiationCenter() {
   }, []);
 
   const handleGenerateAiRedlines = useCallback(() => {
-    // In a real app, this would trigger AI redline generation
     console.log("Generating AI redlines...");
   }, []);
 
   const handleStageChange = useCallback((stage: NegotiationStage) => {
-    // In a real app, this would update the workflow stage
-    console.log("Stage changed to:", stage);
-  }, []);
+    if (!selectedSessionId) return;
+    negotiationsService.updateSession(selectedSessionId, { stage })
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ["negotiation", selectedSessionId] });
+        queryClient.invalidateQueries({ queryKey: ["negotiation-kpis"] });
+      });
+  }, [selectedSessionId, queryClient]);
 
-  const activeIssue = issues.find(i => i.id === activeIssueId) || null;
-  const activeClause = clauses.find(c => c.clauseId === activeClauseId) || null;
+  // Loading state
+  if (sessionLoading && !session) {
+    return (
+      <div className="h-full flex items-center justify-center bg-gray-50 dark:bg-navy-900">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gold-600 mx-auto mb-4" />
+          <p className="text-gray-500 text-sm">Loading negotiation session...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Empty state
+  if (!session && sessions.length === 0) {
+    return (
+      <div className="h-full flex items-center justify-center bg-gray-50 dark:bg-navy-900">
+        <div className="text-center max-w-md">
+          <GitBranch className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-navy-800 dark:text-white mb-2">No Negotiations</h3>
+          <p className="text-gray-500 text-sm mb-4">
+            Create a negotiation session from a contract review to start tracking redlines, issues, and counter-party discussions.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!session) return null;
+
+  const activeIssue = localIssues.find((i: any) => i.id === activeIssueId) || null;
+  const activeClause = clauses.find((c: any) => c.clauseId === activeClauseId) || null;
 
   // Get original and modified text for the active clause
-  const originalVersion = session.versions.find(v => v.id === "v1");
-  const originalClause = originalVersion?.content.find(c => c.clauseId === activeClauseId);
-  const modifiedClause = clauses.find(c => c.clauseId === activeClauseId);
+  const originalVersion = session.versions.find((v: any) => v.status === "superseded");
+  const originalClause = originalVersion?.content.find((c: any) => c.clauseId === activeClauseId);
+  const modifiedClause = clauses.find((c: any) => c.clauseId === activeClauseId);
   const activeClauseOriginalText = originalClause?.content || modifiedClause?.content || "";
   const activeClauseModifiedText = modifiedClause?.content || "";
-  const activeClauseComments = redlines
-    .filter(r => r.clauseId === activeClauseId)
-    .flatMap(r => r.comments)
-    .concat(issues.filter(i => i.clauseId === activeClauseId).flatMap(i => i.comments));
+  const activeClauseComments = localRedlines
+    .filter((r: any) => r.clauseId === activeClauseId)
+    .flatMap((r: any) => r.comments)
+    .concat(localIssues.filter((i: any) => i.clauseId === activeClauseId).flatMap((i: any) => i.comments));
 
   return (
     <div className="h-full flex flex-col bg-gray-50 dark:bg-navy-900">
       {/* KPI Row */}
       <div className="px-4 pt-3 pb-2">
-        <NegotiationKpiCards metrics={kpis} />
+        <NegotiationKpiCards metrics={kpiCards} />
       </div>
 
       {/* Top Toolbar */}
@@ -120,12 +276,21 @@ export function NegotiationCenter() {
         counterparty={session.counterparty}
         compareMode={compareMode}
         panelMode={panelMode}
-        workflow={session.workflow}
+        workflow={{
+          id: session.id,
+          stage: session.stage as NegotiationStage,
+          slaDeadline: "",
+          slaRemaining: 0,
+          approvers: [],
+          escalationLevel: 0,
+          isOverdue: false,
+          healthScore: session.healthScore,
+        }}
         onCompareModeChange={setCompareMode}
         onPanelModeChange={setPanelMode}
         onGenerateAiRedlines={handleGenerateAiRedlines}
-        onApproveAll={() => redlines.filter(r => r.status === "pending").forEach(r => handleRedlineAccept(r.id))}
-        onRejectAll={() => redlines.filter(r => r.status === "pending").forEach(r => handleRedlineReject(r.id))}
+        onApproveAll={() => localRedlines.filter((r: any) => r.status === "pending").forEach((r: any) => handleRedlineAccept(r.id))}
+        onRejectAll={() => localRedlines.filter((r: any) => r.status === "pending").forEach((r: any) => handleRedlineReject(r.id))}
         onExport={() => {}}
         onAssignReviewer={() => {}}
         onStageChange={handleStageChange}
@@ -155,10 +320,10 @@ export function NegotiationCenter() {
               className="overflow-hidden flex-shrink-0"
             >
               <LeftSidebar
-                issues={issues}
+                issues={localIssues}
                 clauses={clauses}
                 participants={session.participants}
-                playbooks={session.playbooks}
+                playbooks={[]}
                 activeClauseId={activeClauseId}
                 activeIssueId={activeIssueId}
                 redlineCountByClause={redlineCountByClause}
@@ -208,7 +373,7 @@ export function NegotiationCenter() {
                 className="overflow-hidden"
               >
                 <div className="px-3 py-2 border-b border-gray-200 dark:border-navy-700">
-                  <ActivityTimeline activities={session.activities} maxItems={5} />
+                  <ActivityTimeline activities={(activities || []) as any} maxItems={5} />
                 </div>
               </motion.div>
             )}
@@ -218,13 +383,13 @@ export function NegotiationCenter() {
           <div className="flex-1 min-h-0">
             <CenterPanel
               clauses={clauses}
-              redlines={redlines}
+              redlines={localRedlines}
               activeClauseId={activeClauseId}
               compareMode={compareMode}
               panelMode={panelMode}
               versions={session.versions}
               currentVersionId={session.currentVersionId}
-              insights={session.insights}
+              insights={[]}
               onRedlineAccept={handleRedlineAccept}
               onRedlineReject={handleRedlineReject}
             />
@@ -242,9 +407,9 @@ export function NegotiationCenter() {
               className="overflow-hidden flex-shrink-0"
             >
               <RightPanel
-                insights={session.insights}
-                playbooks={session.playbooks}
-                analytics={session.analytics}
+                insights={[]}
+                playbooks={[]}
+                analytics={{}}
                 onApplyInsight={handleApplyInsight}
                 onApplyFallback={handleApplyFallback}
               />
@@ -267,9 +432,9 @@ export function NegotiationCenter() {
         clause={activeClause}
         originalText={activeClauseOriginalText}
         modifiedText={activeClauseModifiedText}
-        redlines={redlines}
-        insights={session.insights}
-        playbooks={session.playbooks}
+        redlines={localRedlines}
+        insights={[]}
+        playbooks={[]}
         comments={activeClauseComments}
         isOpen={showClauseDrawer && !!activeClause}
         onClose={() => setShowClauseDrawer(false)}
@@ -278,3 +443,4 @@ export function NegotiationCenter() {
     </div>
   );
 }
+

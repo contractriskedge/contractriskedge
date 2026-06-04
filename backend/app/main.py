@@ -390,6 +390,9 @@ def create_app() -> FastAPI:
     # ── Workflow Runtime router ──
     from app.domains.workflows.runtime.router import router as workflow_runtime_router
     app.include_router(workflow_runtime_router, prefix="/api/v1")
+    # ── Negotiation router ──
+    from app.domains.negotiation.router import router as negotiation_router
+    app.include_router(negotiation_router, prefix="/api/v1")
 
     # ── Prometheus metrics endpoint (no prefix, no auth) ──
     from app.kernel.telemetry.metrics import metrics_endpoint
