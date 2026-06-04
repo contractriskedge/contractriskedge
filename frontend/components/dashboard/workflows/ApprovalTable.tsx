@@ -35,7 +35,8 @@ export function ApprovalTable({ workflows, onSelect }: ApprovalTableProps) {
   const filtered = useMemo(() => {
     let list = workflows.filter((w) =>
       (stageFilter === "all" || w.currentStage === stageFilter) &&
-      (w.contractName.toLowerCase().includes(search.toLowerCase()) || w.vendor.toLowerCase().includes(search.toLowerCase()))
+      (w.contractName?.toLowerCase().includes(search.toLowerCase()) ?? false) ||
+      (w.vendor?.toLowerCase().includes(search.toLowerCase()) ?? false)
     );
     list.sort((a, b) => {
       const d = sortDir === "asc" ? 1 : -1;

@@ -107,8 +107,8 @@ async def recover_stuck_uploads_on_startup(
                     ingestion_error = :error,
                     retry_count = retry_count + 1,
                     updated_at = NOW()
-                WHERE upload_id = :upload_id::uuid
-                  AND tenant_id = :tenant_id::uuid
+                WHERE upload_id = CAST(:upload_id AS uuid)
+                  AND tenant_id = CAST(:tenant_id AS uuid)
                   AND ingestion_state = :expected_state
             """)
 

@@ -111,16 +111,24 @@ class Settings(BaseSettings):
 
     # ── CORS ───────────────────────────────────────────────────────
     # Override in production: CORS_ORIGINS_RAW='["https://app.contractriskedge.com"]'
+    # Wildcard "*" is NEVER allowed in production — validated at startup.
     cors_origins_raw: str = '["http://localhost:3000", "http://localhost:8000"]'
 
     @property
     def cors_origins(self) -> list[str]:
-        """Parse CORS origins from JSON array or comma-separated string."""
+        """Parse CORS origins from JSON array or comma-separated string.
+
+        In production, wildcard "*" is rejected (startup-blocked by _validate_secrets).
+        Returns a list of explicit origins for the CORSMiddleware.
+        """
         v = self.cors_origins_raw.strip()
         if v.startswith("["):
             import json
             try:
-                return json.loads(v)
+                origins = json.loads(v)
+                if not isinstance(origins, list):
+                    return []
+                return [str(o).strip() for o in origins if o and str(o).strip()]
             except (json.JSONDecodeError, TypeError):
                 pass
         return [origin.strip() for origin in v.split(",") if origin.strip()]

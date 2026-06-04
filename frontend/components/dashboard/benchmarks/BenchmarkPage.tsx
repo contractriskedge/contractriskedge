@@ -80,7 +80,7 @@ export function BenchmarkPage() {
           <button className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
             <Search className="w-3.5 h-3.5" /> Smart Search
           </button>
-          <button onClick={refresh} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+          <button onClick={refetch} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
             <RefreshCw className="w-3.5 h-3.5" /> Refresh
           </button>
           <button className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-navy-700 text-white hover:bg-navy-800 transition-colors shadow-sm">
@@ -90,10 +90,10 @@ export function BenchmarkPage() {
       </motion.div>
 
       {/* KPI Row */}
-      <BenchmarkKpiCards metrics={kpis} />
+      <BenchmarkKpiCards metrics={benchmarkKpis} />
 
       {/* Loading / Error / Seed states */}
-      {loading && (
+      {isLoading && (
         <div className="flex items-center justify-center py-8 text-gray-400">
           <Loader2 className="w-5 h-5 animate-spin mr-2" />
           Loading benchmark data...
@@ -101,24 +101,18 @@ export function BenchmarkPage() {
       )}
       {error && (
         <div className="flex items-center justify-between px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
-          <span>{error}</span>
-          <button onClick={refresh} className="px-3 py-1 text-xs font-medium bg-amber-100 rounded-md hover:bg-amber-200 transition-colors">
+          <span>{error?.message || "An error occurred loading benchmark data"}</span>
+          <button onClick={refetch} className="px-3 py-1 text-xs font-medium bg-amber-100 rounded-md hover:bg-amber-200 transition-colors">
             Retry
           </button>
         </div>
       )}
-      {!loading && !error && !seeded && (
+      {!isLoading && !error && benchmarkKpis.length === 0 && clauseBenchmarks.length === 0 && (
         <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg">
           <div className="flex items-center gap-2 text-sm text-blue-700">
             <Database className="w-4 h-4" />
-            <span>No benchmark data found. Seed with industry-standard clause data to get started.</span>
+            <span>No benchmark data available. Upload and score contracts to see market comparisons.</span>
           </div>
-          <button
-            onClick={seedData}
-            className="px-4 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-          >
-            Seed Data
-          </button>
         </div>
       )}
 

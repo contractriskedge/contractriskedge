@@ -35,34 +35,44 @@ router = APIRouter(prefix="/contracts", tags=["Contracts"])
 
 
 class ContractSummary:
-    """Lightweight contract view mapped from review data."""
+    """Lightweight contract view mapped from review data.
+
+    Fields align with the frontend PortfolioContract interface.
+    Risk scores are stored as 0-1 floats in document_metadata JSONB
+    and converted to 0-10 integers for display.
+    """
     def __init__(self, review, filename: str = "") -> None:
         self.id = str(review.review_id)
-        self.name = filename or getattr(review, 'document_name', '') or "Untitled"
-        self.vendor = getattr(review, 'counterparty', '') or ""
-        self.contractType = getattr(review, 'document_type', '') or "contract"
+        self.name = filename or "Untitled"
+        self.vendor = ""
+        self.contractType = "contract"
         self.businessUnit = ""
-        risk = getattr(review, 'risk_score', None)
-        self.riskScore = int(risk) if risk else 0
+        # risk_score is stored in document_metadata (JSONB) as 0-1 float
+        metadata = getattr(review, 'document_metadata', None) or {}
+        raw_risk = metadata.get('risk_score') if isinstance(metadata, dict) else None
+        self.riskScore = min(10, round((raw_risk or 0) * 10))
         self.riskLevel = _risk_level(self.riskScore)
         self.financialValue = 0
         self.currency = "USD"
-        status = getattr(review, 'status', 'draft') or 'draft'
-        self.status = _map_status(status)
-        self.renewalDate = ""
+        status = getattr(review, 'status', None)
+        status_str = status.value if hasattr(status, 'value') else str(status or 'draft')
+        self.status = _map_status(status_str)
+        self.expiryDate = ""
+        self.topRisk = ""
         self.aiConfidence = min(100, max(0, self.riskScore * 10))
         self.owner = getattr(review, 'assigned_to', None) or getattr(review, 'created_by', '') or ""
-        self.workflowStage = getattr(review, 'workflow_stage', None) or _map_workflow(status)
+        self.workflowStage = getattr(review, 'workflow_stage', None) or _map_workflow(status_str)
         self.lastModified = _fmt_date(getattr(review, 'updated_at', None))
         self.tags = []
         self.geography = ""
-        self.counterparty = getattr(review, 'counterparty', '') or ""
+        self.department = ""
         self.description = ""
         self.aiSummary = ""
         self.clauseCount = 0
         self.missingClauses = []
-        self.aiFlags = _derive_flags(risk)
+        self.aiFlags = _derive_flags(raw_risk)
         self.obligationsDue = 0
+        self.slaCompliant = True
         self.hasRedlines = bool(getattr(review, 'redline_count', 0))
         self.hasDpa = False
         self.autoRenew = False
@@ -80,10 +90,26 @@ def _risk_level(score: int) -> str:
 def _map_status(status: str) -> str:
     mapping = {
         "draft": "draft",
+        "uploaded": "draft",
+        "analyzing": "draft",
         "ai_analyzed": "under_review",
+        "ai_reviewed": "under_review",
+        "review_ready": "under_review",
+        "procurement_review": "under_review",
+        "legal_review": "under_review",
+        "security_review": "under_review",
+        "negotiation": "under_review",
         "in_review": "under_review",
+        "changes_requested": "under_review",
+        "pending_approval": "pending_review",
+        "escalated": "pending_review",
+        "legal_approval": "pending_review",
+        "exec_approval": "pending_review",
         "approved": "active",
         "rejected": "draft",
+        "finalized": "active",
+        "executed": "active",
+        "archived": "expired",
         "closed": "expired",
     }
     return mapping.get(status, "draft")
@@ -92,20 +118,37 @@ def _map_status(status: str) -> str:
 def _map_workflow(status: str) -> str:
     mapping = {
         "draft": "draft",
+        "uploaded": "intake",
+        "analyzing": "ai_review",
         "ai_analyzed": "review",
+        "ai_reviewed": "review",
+        "review_ready": "review",
+        "procurement_review": "procurement",
+        "legal_review": "legal_ops",
+        "security_review": "security",
+        "negotiation": "negotiation",
         "in_review": "review",
+        "changes_requested": "review",
+        "pending_approval": "pending_approval",
+        "escalated": "escalated",
+        "legal_approval": "legal_ops",
+        "exec_approval": "executive",
         "approved": "executed",
         "rejected": "archived",
+        "finalized": "executed",
+        "executed": "executed",
+        "archived": "archived",
         "closed": "archived",
     }
     return mapping.get(status, "draft")
 
 
 def _derive_flags(risk_score) -> list[str]:
+    """Derive flags from raw risk_score (0-1 float from metadata)."""
     flags = []
-    if risk_score and risk_score >= 7:
+    if risk_score and risk_score >= 0.7:
         flags.append("critical")
-    if risk_score and risk_score >= 5:
+    if risk_score and risk_score >= 0.5:
         flags.append("review_needed")
     return flags
 
@@ -170,13 +213,25 @@ async def contract_kpis(
     service: ReviewService = Depends(get_review_service),
     _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
 ):
-    """Aggregate KPI data for the contracts dashboard."""
+    """Aggregate KPI data for the contracts dashboard.
+
+    Risk scores are stored as 0-1 floats in document_metadata JSONB.
+    High risk threshold: >= 0.7 (maps to >= 7 on 0-10 scale).
+    """
     items, total = await service.list_reviews(ReviewFilterParams(page=1, page_size=100))
 
-    high_risk = sum(1 for r in items if getattr(r, 'risk_score', None) and r.risk_score >= 7)
-    active_reviews = sum(1 for r in items if getattr(r, 'status', None) in ("in_review", "ai_analyzed"))
-    pending = sum(1 for r in items if getattr(r, 'status', None) == "draft")
-    scores = [r.risk_score for r in items if getattr(r, 'risk_score', None)]
+    def _get_risk(r) -> float:
+        md = getattr(r, 'document_metadata', None) or {}
+        return float(md.get('risk_score', 0)) if isinstance(md, dict) else 0.0
+
+    def _get_status(r) -> str:
+        s = getattr(r, 'status', None)
+        return s.value if hasattr(s, 'value') else str(s or '')
+
+    high_risk = sum(1 for r in items if _get_risk(r) >= 0.7)
+    active_reviews = sum(1 for r in items if _get_status(r) in ("in_review", "ai_analyzed", "pending_approval", "exec_approval", "legal_approval", "escalated"))
+    pending = sum(1 for r in items if _get_status(r) == "draft")
+    scores = [_get_risk(r) * 10 for r in items if _get_risk(r) > 0]
 
     return {
         "total_contracts": total,

@@ -21,13 +21,14 @@
 
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   LayoutDashboard, FileText, Brain, Shield, Lightbulb, Workflow, Activity,
   PanelLeft, PanelRight, Search, CheckCircle2, XCircle, AlertTriangle,
   Clock, Zap, Target, MessageSquare, Edit3, GitCompare,
-  ChevronDown, ChevronUp, ListChecks,
+  ChevronDown, ChevronUp, ListChecks, Loader2,
   TrendingUp, TrendingDown, Minus, BarChart3,
 } from "lucide-react";
 import { ReviewContextProvider, useReviewContext } from "./ReviewContext";
@@ -43,7 +44,8 @@ import { ExplainabilitySection } from "./ExplainabilitySection";
 import { VersionsSection } from "./VersionsSection";
 import { RiskReductionSection } from "./RiskReductionSection";
 import { ReviewMoreActionsMenu } from "./ReviewMoreActionsMenu";
-import { useReviewRedlinesData, useVersions, useAuditTrailEvents } from "./hooks";
+import { useReviewRedlinesData, useVersions, useAuditTrailEvents, useAdvanceWorkflow } from "./hooks";
+import { reviewService } from "@/services/api/reviews";
 import type { ReviewSection, ReviewSummary } from "./types";
 import {
   onLocateClauseSuccess,
@@ -83,6 +85,11 @@ function EnterpriseReviewPlatformInner() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showReviewList, setShowReviewList] = useState(false);
   const [locateToast, setLocateToast] = useState<string | null>(null);
+  const [approveError, setApproveError] = useState<string | null>(null);
+
+  // Approve/reject mutation
+  const approveMutation = useAdvanceWorkflow();
+  const queryClient = useQueryClient();
 
   // Fetch redline count for the tab badge
   const { data: apiRedlines = [] } = useReviewRedlinesData(selectedReviewId ?? "");
@@ -91,6 +98,34 @@ function EnterpriseReviewPlatformInner() {
   // Audit tab — shared with AuditTrailSection via the same query (React Query dedupes)
   const auditTrail = useAuditTrailEvents(selectedReviewId ?? "", findings);
   const auditBadgeCount = auditTrail.events.length;
+
+  const handleApprove = useCallback(async () => {
+    if (!selectedReviewId) return;
+    setApproveError(null);
+    try {
+      await approveMutation.mutateAsync({
+        reviewId: selectedReviewId,
+        action: "approved",
+      });
+      queryClient.invalidateQueries({ queryKey: ["ai-platform"] });
+    } catch (err) {
+      setApproveError(err instanceof Error ? err.message : "Approval failed");
+    }
+  }, [selectedReviewId, approveMutation, queryClient]);
+
+  const handleReject = useCallback(async () => {
+    if (!selectedReviewId) return;
+    setApproveError(null);
+    try {
+      await approveMutation.mutateAsync({
+        reviewId: selectedReviewId,
+        action: "rejected",
+      });
+      queryClient.invalidateQueries({ queryKey: ["ai-platform"] });
+    } catch (err) {
+      setApproveError(err instanceof Error ? err.message : "Rejection failed");
+    }
+  }, [selectedReviewId, approveMutation, queryClient]);
 
   useEffect(() => {
     const openDocPanel = () => setShowLeftPanel(true);
@@ -329,12 +364,29 @@ function EnterpriseReviewPlatformInner() {
                 </div>
               ) : (
                 <>
-                  <button className="flex items-center gap-1 px-1.5 py-1 text-[9px] font-medium rounded hover:bg-green-50 text-green-700 transition-colors">
-                    <CheckCircle2 className="w-3 h-3" /> Approve
+                  <button
+                    onClick={handleApprove}
+                    disabled={approveMutation.isPending}
+                    className="flex items-center gap-1 px-1.5 py-1 text-[9px] font-medium rounded hover:bg-green-50 text-green-700 transition-colors disabled:opacity-40"
+                    title="Approve review"
+                  >
+                    {approveMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                    Approve
                   </button>
-                  <button className="flex items-center gap-1 px-1.5 py-1 text-[9px] font-medium rounded hover:bg-red-50 text-red-600 transition-colors">
-                    <XCircle className="w-3 h-3" /> Reject
+                  <button
+                    onClick={handleReject}
+                    disabled={approveMutation.isPending}
+                    className="flex items-center gap-1 px-1.5 py-1 text-[9px] font-medium rounded hover:bg-red-50 text-red-600 transition-colors disabled:opacity-40"
+                    title="Reject review"
+                  >
+                    {approveMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
+                    Reject
                   </button>
+                  {approveError && (
+                    <span className="text-[9px] text-red-600 max-w-[200px] truncate" title={approveError}>
+                      {approveError}
+                    </span>
+                  )}
                 </>
               )}
               <ReviewMoreActionsMenu

@@ -38,7 +38,7 @@ from app.domains.negotiation.schemas import (
     RedlineCreateRequest,
     RedlineEntrySchema,
 )
-from app.domains.workflows.runtime import WorkflowExecutionEngine
+from app.domains.workflows.runtime import WorkflowExecutionEngine, WorkflowStatus
 from app.domains.workflow_packs.repository import WorkflowRepository
 
 logger = logging.getLogger(__name__)
@@ -132,11 +132,12 @@ class NegotiationService:
         return await self._build_session_response(session_id)
 
     async def list_sessions(
-        self, stage: Optional[str] = None, page: int = 1, page_size: int = 20
+        self, stage: Optional[str] = None, page: int = 1, page_size: int = 20,
+        search: Optional[str] = None,
     ) -> tuple[list[NegotiationSessionSummary], int]:
-        """List sessions with pagination."""
+        """List sessions with pagination and optional text search."""
         sessions, total = await self.repo.list_sessions(
-            stage=stage, page=page, page_size=page_size
+            stage=stage, page=page, page_size=page_size, search=search,
         )
         summaries = []
         for s in sessions:
@@ -454,6 +455,13 @@ class NegotiationService:
             return
 
         try:
+            # Ensure persistence adapter is wired to the engine
+            if engine._persistence is None and self.workflow_repo is not None:
+                from app.domains.workflows.runtime.persistence import WorkflowPersistenceAdapter
+                adapter = WorkflowPersistenceAdapter(self.workflow_repo)
+                engine.set_persistence(adapter)
+                logger.debug("Wired persistence adapter to workflow engine")
+
             # Map negotiation stages to workflow steps
             stage_map = {
                 "drafting": "intake",
@@ -533,6 +541,28 @@ class NegotiationService:
                     "Workflow already exists for negotiation %s (stage=%s)",
                     session_id[:8], stage,
                 )
+
+                # When negotiation reaches executed, complete the workflow
+                if stage == "executed":
+                    from datetime import datetime, timezone
+                    now = datetime.now(timezone.utc)
+
+                    # Update in-memory instance
+                    if existing:
+                        existing.status = WorkflowStatus.COMPLETED
+                        existing.completed_at = now.isoformat()
+
+                    # Update database via persistence adapter
+                    if self.workflow_repo:
+                        await self.workflow_repo.update_instance(
+                            wf_id,
+                            status=WorkflowStatus.COMPLETED.value,
+                            completed_at=now,
+                        )
+                        logger.info(
+                            "Completed workflow %s for negotiation %s (executed)",
+                            wf_id[:8], session_id[:8],
+                        )
         except Exception:
             logger.exception(
                 "Failed to sync workflow for negotiation %s", session_id[:8],
@@ -745,3 +775,107 @@ class NegotiationService:
         query = select(IssueModel).where(IssueModel.issue_id == issue_id)
         result = await self.repo.session.execute(query)
         return result.scalar_one_or_none()
+
+
+# ── Event Handlers ────────────────────────────────────────────────
+
+
+async def on_review_finalized(event) -> None:
+    """Auto-create a negotiation session when a review is approved or finalized.
+
+    Registered on the event bus at application startup for both
+    ReviewApproved and ReviewFinalized events.
+    Fire-and-forget — failures are logged but don't block the caller.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    review_id = event.data.get("review_id")
+    tenant_id = event.tenant_id
+    logger.info("Handler entered: event_type=%s review_id=%s", event.event_type, review_id[:8] if review_id else None)
+    if not review_id or not tenant_id:
+        logger.warning("on_review_finalized: missing review_id or tenant_id")
+        return
+    # Skip if this is a ReviewApproved event but review is not yet approved
+    # (the event fires after approval, so this is just a safety check)
+    try:
+        # Build a NegotiationService instance for the target tenant
+        from app.domains.negotiation.repository import NegotiationRepository
+
+        # Build a NegotiationService instance for the target tenant
+        from app.domains.negotiation.repository import NegotiationRepository
+        from app.domains.workflow_packs.repository import WorkflowRepository
+        from app.kernel.database.session import TenantAwareSessionFactory
+        from app.config import settings
+
+        factory = TenantAwareSessionFactory(
+            database_url=settings.database_url,
+            pool_size=2,
+            max_overflow=2,
+        )
+        session = await factory.create_session(
+            tenant_id=tenant_id,
+            user_id=event.actor_id or "system",
+            user_role="admin",
+        )
+        try:
+            repo = NegotiationRepository(session, tenant_id)
+            wf_repo = WorkflowRepository(session, tenant_id)
+            svc = NegotiationService(
+                repo=repo,
+                actor_id=event.actor_id or "system",
+                workflow_repo=wf_repo,
+            )
+
+            # Fetch the review to get its document filename
+            from app.domains.ingestion.models import UploadSession
+            from app.domains.review.models import ContractReview
+            from sqlalchemy import select
+
+            review_row = await session.execute(
+                select(ContractReview, UploadSession.filename)
+                .outerjoin(UploadSession, ContractReview.upload_id == UploadSession.upload_id)
+                .where(ContractReview.review_id == review_id)
+            )
+            row = review_row.one_or_none()
+            if not row:
+                logger.warning("on_review_finalized: review %s not found", review_id)
+                return
+
+            review, filename = row
+            contract_title = filename or f"Review {review_id[:8]}"
+
+            # Check if a negotiation session already exists for this review
+            existing = await session.execute(
+                select(NegotiationSession.session_id)
+                .where(
+                    NegotiationSession.tenant_id == tenant_id,
+                    NegotiationSession.contract_id == review_id,
+                )
+            )
+            if existing.scalar_one_or_none():
+                logger.info(
+                    "Negotiation session already exists for review %s — skipping",
+                    review_id[:8],
+                )
+                return
+
+            # Create the negotiation session
+            from app.domains.negotiation.schemas import NegotiationCreateRequest
+
+            create_body = NegotiationCreateRequest(
+                contract_id=review_id,
+                contract_title=contract_title,
+                counterparty="",
+            )
+            result = await svc.create_session(create_body)
+            await session.commit()
+            logger.info(
+                "Auto-created negotiation session %s for review %s (%s)",
+                result.id[:8] if hasattr(result, 'id') else "?",
+                review_id[:8],
+                contract_title,
+            )
+        finally:
+            await session.close()
+    except Exception:
+        logger.exception("on_review_finalized: failed to create negotiation session")

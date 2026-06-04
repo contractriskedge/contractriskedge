@@ -11,10 +11,12 @@ const iconMap: Record<string, React.ReactNode> = {
   FileSearch: <FileSearch className="w-4 h-4" />, ShieldCheck: <ShieldCheck className="w-4 h-4" />,
 };
 
-function MiniSparkline({ data, color }: { data: number[]; color: string }) {
-  const max = Math.max(...data); const min = Math.min(...data); const range = max - min || 1;
+function MiniSparkline({ data, color }: { data?: number[]; color: string }) {
+  const safeData = data ?? [];
+  if (safeData.length < 2) return null;
+  const max = Math.max(...safeData); const min = Math.min(...safeData); const range = max - min || 1;
   const w = 64, h = 22;
-  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - min) / range) * h}`).join(" ");
+  const pts = safeData.map((v, i) => `${(i / (safeData.length - 1)) * w},${h - ((v - min) / range) * h}`).join(" ");
   return <svg width={w} height={h} className="flex-shrink-0 opacity-70" aria-hidden="true"><polyline fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" points={pts} /></svg>;
 }
 

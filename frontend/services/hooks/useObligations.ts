@@ -195,6 +195,9 @@ export function useCreateObligation() {
       obligationsService.createObligation(body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: obligationKeys.lists() });
+      qc.invalidateQueries({ queryKey: obligationKeys.kpis() });
+      qc.invalidateQueries({ queryKey: obligationKeys.overdue() });
+      qc.invalidateQueries({ queryKey: obligationKeys.upcoming() });
     },
   });
 }
@@ -207,6 +210,9 @@ export function useUpdateObligation(id: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: obligationKeys.detail(id) });
       qc.invalidateQueries({ queryKey: obligationKeys.lists() });
+      qc.invalidateQueries({ queryKey: obligationKeys.kpis() });
+      qc.invalidateQueries({ queryKey: obligationKeys.overdue() });
+      qc.invalidateQueries({ queryKey: obligationKeys.upcoming() });
     },
   });
 }
@@ -216,8 +222,12 @@ export function useDeleteObligation() {
   return useMutation({
     mutationFn: (id: string) =>
       obligationsService.deleteObligation(id),
-    onSuccess: () => {
+    onSuccess: (id) => {
       qc.invalidateQueries({ queryKey: obligationKeys.lists() });
+      qc.invalidateQueries({ queryKey: obligationKeys.detail(id) });
+      qc.invalidateQueries({ queryKey: obligationKeys.kpis() });
+      qc.invalidateQueries({ queryKey: obligationKeys.overdue() });
+      qc.invalidateQueries({ queryKey: obligationKeys.upcoming() });
     },
   });
 }
@@ -240,6 +250,8 @@ export function useCreateReminder() {
       obligationsService.createReminder(body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: obligationKeys.notificationHistory() });
+      qc.invalidateQueries({ queryKey: obligationKeys.lists() });
+      qc.invalidateQueries({ queryKey: obligationKeys.metrics() });
     },
   });
 }
@@ -252,6 +264,7 @@ export function useCreateEscalation() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: obligationKeys.escalations() });
       qc.invalidateQueries({ queryKey: obligationKeys.lists() });
+      qc.invalidateQueries({ queryKey: obligationKeys.kpis() });
     },
   });
 }

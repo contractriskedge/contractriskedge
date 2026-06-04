@@ -32,7 +32,7 @@ export function SystemHealth({ metrics }: { metrics: SystemHealthMetric[] }) {
                 <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${m.status === "healthy" ? "bg-green-50 text-green-700" : m.status === "degraded" ? "bg-orange-50 text-orange-700" : "bg-red-50 text-red-700"}`}>{m.status}</span>
               </div>
               <div className="flex items-center gap-3 text-[9px] text-gray-400 mt-0.5">
-                <span>{m.uptime}% uptime</span><span>{m.latency}ms latency</span><span>{m.errorRate}% errors</span><span>{m.requestsPerMin.toLocaleString()} req/min</span><span>{m.region}</span>
+                <span>{m.uptime}% uptime</span><span>{m.latency}ms latency</span><span>{m.errorRate}% errors</span><span>{(m.requestsPerMin ?? 0).toLocaleString()} req/min</span><span>{m.region}</span>
               </div>
             </div>
             <span className="text-[9px] text-gray-400">Last incident: {m.lastIncident}</span>

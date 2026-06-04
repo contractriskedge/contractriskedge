@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   MessageSquare, PenTool, AlertTriangle, Clock, Brain, ArrowUpCircle,
-  GitBranch, Target, PanelLeft, PanelRight, Activity,
+  GitBranch, Target, PanelLeft, PanelRight, Activity, Search,
 } from "lucide-react";
 import type {
   CompareMode, PanelMode, NegotiationStage, NegotiationKpi,
@@ -76,6 +76,7 @@ export function NegotiationCenter() {
   const [showLeftSidebar, setShowLeftSidebar] = useState(true);
   const [showRightPanel, setShowRightPanel] = useState(true);
   const [showActivityTimeline, setShowActivityTimeline] = useState(false);
+  const [sessionSearchQuery, setSessionSearchQuery] = useState("");
 
   // Queries
   const { data: sessionsData } = useSessions();
@@ -85,6 +86,15 @@ export function NegotiationCenter() {
 
   // Auto-select first session
   const sessions = sessionsData?.data ?? [];
+  const filteredSessions = React.useMemo(() => {
+    if (!sessionSearchQuery.trim()) return sessions;
+    const q = sessionSearchQuery.toLowerCase();
+    return sessions.filter((s: any) =>
+      s.contractTitle?.toLowerCase().includes(q) ||
+      s.counterparty?.toLowerCase().includes(q)
+    );
+  }, [sessions, sessionSearchQuery]);
+
   React.useEffect(() => {
     if (!selectedSessionId && sessions.length > 0) {
       setSelectedSessionId(sessions[0].id);
@@ -162,6 +172,7 @@ export function NegotiationCenter() {
       .then(() => {
         setLocalRedlines(prev => prev.map((r: any) => r.id === redlineId ? { ...r, status: "accepted" } : r));
         queryClient.invalidateQueries({ queryKey: ["negotiation", selectedSessionId] });
+        queryClient.invalidateQueries({ queryKey: ["negotiation-activities", selectedSessionId] });
       });
   }, [selectedSessionId, queryClient]);
 
@@ -171,6 +182,7 @@ export function NegotiationCenter() {
       .then(() => {
         setLocalRedlines(prev => prev.map((r: any) => r.id === redlineId ? { ...r, status: "rejected" } : r));
         queryClient.invalidateQueries({ queryKey: ["negotiation", selectedSessionId] });
+        queryClient.invalidateQueries({ queryKey: ["negotiation-activities", selectedSessionId] });
       });
   }, [selectedSessionId, queryClient]);
 
@@ -180,6 +192,7 @@ export function NegotiationCenter() {
       .then(() => {
         setLocalIssues(prev => prev.map((i: any) => i.id === issueId ? { ...i, status } : i));
         queryClient.invalidateQueries({ queryKey: ["negotiation", selectedSessionId] });
+        queryClient.invalidateQueries({ queryKey: ["negotiation-activities", selectedSessionId] });
       });
   }, [selectedSessionId, queryClient]);
 
@@ -191,6 +204,8 @@ export function NegotiationCenter() {
     negotiationsService.updateIssue(selectedSessionId, issueId, { escalationLevel: newLevel, status: "escalated" })
       .then(() => {
         queryClient.invalidateQueries({ queryKey: ["negotiation", selectedSessionId] });
+        queryClient.invalidateQueries({ queryKey: ["negotiation-activities", selectedSessionId] });
+        queryClient.invalidateQueries({ queryKey: ["negotiations-list"] });
       });
   }, [selectedSessionId, localIssues, queryClient]);
 
@@ -213,12 +228,20 @@ export function NegotiationCenter() {
 
   const handleStageChange = useCallback((stage: NegotiationStage) => {
     if (!selectedSessionId) return;
+    // Prevent changing stage of a terminal session
+    if (session?.stage === "executed") return;
     negotiationsService.updateSession(selectedSessionId, { stage })
       .then(() => {
         queryClient.invalidateQueries({ queryKey: ["negotiation", selectedSessionId] });
+        queryClient.invalidateQueries({ queryKey: ["negotiations-list"] });
         queryClient.invalidateQueries({ queryKey: ["negotiation-kpis"] });
+      })
+      .catch(() => {
+        // Revert optimistic UI if backend rejects the transition
+        queryClient.invalidateQueries({ queryKey: ["negotiation", selectedSessionId] });
+        queryClient.invalidateQueries({ queryKey: ["negotiations-list"] });
       });
-  }, [selectedSessionId, queryClient]);
+  }, [selectedSessionId, session?.stage, queryClient]);
 
   // Loading state
   if (sessionLoading && !session) {
@@ -268,6 +291,55 @@ export function NegotiationCenter() {
       {/* KPI Row */}
       <div className="px-4 pt-3 pb-2">
         <NegotiationKpiCards metrics={kpiCards} />
+      </div>
+
+      {/* Session Search */}
+      <div className="px-4 pb-2">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            value={sessionSearchQuery}
+            onChange={(e) => setSessionSearchQuery(e.target.value)}
+            placeholder="Search sessions by title or counterparty..."
+            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-800 text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-gold-400"
+          />
+        </div>
+        {sessionSearchQuery && (
+          <div className="mt-1 max-h-40 overflow-y-auto bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-600 rounded-lg shadow-sm">
+            {filteredSessions.length === 0 ? (
+              <div className="px-3 py-3 text-xs text-gray-400">
+                <p>No negotiation sessions match "{sessionSearchQuery}"</p>
+                <p className="mt-1 text-gray-500">Create a new session from an approved contract to see it here.</p>
+              </div>
+            ) : (
+              filteredSessions.map((s: any) => (
+                <button
+                  key={s.id}
+                  onClick={() => { setSelectedSessionId(s.id); setSessionSearchQuery(""); }}
+                  className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors flex items-center justify-between ${
+                    s.id === selectedSessionId ? "bg-navy-50 dark:bg-navy-700" : ""
+                  }`}
+                >
+                  <div>
+                    <span className="font-medium text-navy-900 dark:text-white">{s.contractTitle}</span>
+                    {s.counterparty && (
+                      <span className="text-gray-500 ml-2">– {s.counterparty}</span>
+                    )}
+                  </div>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full capitalize ${
+                    s.stage === "executed" ? "bg-emerald-100 text-emerald-700" :
+                    s.stage === "approved" ? "bg-green-100 text-green-700" :
+                    s.stage === "drafting" ? "bg-gray-100 text-gray-600" :
+                    "bg-blue-100 text-blue-700"
+                  }`}>
+                    {s.stage}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       {/* Top Toolbar */}

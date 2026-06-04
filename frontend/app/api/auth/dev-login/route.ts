@@ -11,10 +11,10 @@ import {
 } from "@/lib/auth/session";
 
 export async function POST() {
-  if (
-    process.env.NODE_ENV === "production" &&
-    process.env.NEXT_PUBLIC_DEV_AUTH !== "true"
-  ) {
+  // PRODUCTION HARDENING: Dev login is NEVER available in production.
+  // The NEXT_PUBLIC_DEV_AUTH env-var override is intentionally ignored
+  // for NODE_ENV=production to prevent accidental exposure.
+  if (process.env.NODE_ENV === "production") {
     return NextResponse.json({ error: "Not available" }, { status: 403 });
   }
 

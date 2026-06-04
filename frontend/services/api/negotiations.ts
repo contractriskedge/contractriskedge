@@ -229,7 +229,7 @@ export const negotiationsService = {
     api.get<NegotiationKpiData>(`${NEGOTIATIONS_BASE}/kpis`),
 
   // ── Sessions ─────────────────────────────────────────────────
-  listSessions: (params?: { stage?: string; page?: number; page_size?: number }) =>
+  listSessions: (params?: { stage?: string; search?: string; page?: number; page_size?: number }) =>
     api.get<PaginatedResponse<NegotiationSessionSummary>>(`${NEGOTIATIONS_BASE}/`, params as Record<string, unknown>),
 
   getSession: (id: string) =>

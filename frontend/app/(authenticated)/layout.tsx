@@ -72,6 +72,8 @@ export default function AuthenticatedLayout({
     else if (path.startsWith("/workflow-intelligence-dashboard")) setActiveView("workflow-intelligence-dashboard");
     else if (path.startsWith("/ai-operations-dashboard")) setActiveView("ai-operations-dashboard");
     else if (path.startsWith("/tenant-settings")) setActiveView("tenant-settings");
+    else if (path.startsWith("/ai-operations-dashboard")) setActiveView("ai-operations-dashboard");
+    else if (path.startsWith("/relationships")) setActiveView("relationships");
     else setActiveView("ingestion");
   }, []);
 
@@ -120,6 +122,8 @@ export default function AuthenticatedLayout({
               "workflow-intelligence-dashboard": "/workflow-intelligence-dashboard",
               "ai-operations-dashboard": "/ai-operations-dashboard",
               "tenant-settings": "/tenant-settings",
+              "ai-operations-dashboard": "/ai-operations-dashboard",
+              relationships: "/relationships",
             };
             window.location.href = routeMap[view] || "/ingestion";
           }}

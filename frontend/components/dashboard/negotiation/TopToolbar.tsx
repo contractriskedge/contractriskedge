@@ -61,31 +61,39 @@ export function TopToolbar({
           <div className="h-6 w-px bg-gray-200 dark:bg-navy-600" />
           {/* Stage Badge */}
           <div className="relative">
-            <button
-              onClick={() => setShowWorkflowMenu(!showWorkflowMenu)}
-              className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium ${stageColors[workflow.stage]}`}
-            >
-              <span className="capitalize">{workflow.stage}</span>
-              <ChevronDown className="w-2.5 h-2.5" />
-            </button>
-            {showWorkflowMenu && (
-              <motion.div
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="absolute top-full left-0 mt-1 bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-600 rounded-lg shadow-lg z-10 py-1 w-32"
-              >
-                {(["drafting", "review", "negotiating", "approved", "executed"] as NegotiationStage[]).map(stage => (
-                  <button
-                    key={stage}
-                    onClick={() => { onStageChange(stage); setShowWorkflowMenu(false); }}
-                    className={`w-full text-left px-3 py-1.5 text-[10px] hover:bg-gray-50 dark:hover:bg-navy-700 capitalize ${
-                      workflow.stage === stage ? "text-gold-600 font-semibold" : "text-gray-600 dark:text-gray-300"
-                    }`}
+            {workflow.stage === "executed" || workflow.stage === "escalated" ? (
+              <span className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium ${stageColors[workflow.stage]}`}>
+                <span className="capitalize">{workflow.stage}</span>
+              </span>
+            ) : (
+              <>
+                <button
+                  onClick={() => setShowWorkflowMenu(!showWorkflowMenu)}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium ${stageColors[workflow.stage]}`}
+                >
+                  <span className="capitalize">{workflow.stage}</span>
+                  <ChevronDown className="w-2.5 h-2.5" />
+                </button>
+                {showWorkflowMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="absolute top-full left-0 mt-1 bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-600 rounded-lg shadow-lg z-10 py-1 w-32"
                   >
-                    {stage}
-                  </button>
-                ))}
-              </motion.div>
+                    {(["drafting", "review", "negotiating", "approved", "executed"] as NegotiationStage[]).map(stage => (
+                      <button
+                        key={stage}
+                        onClick={() => { onStageChange(stage); setShowWorkflowMenu(false); }}
+                        className={`w-full text-left px-3 py-1.5 text-[10px] hover:bg-gray-50 dark:hover:bg-navy-700 capitalize ${
+                          workflow.stage === stage ? "text-gold-600 font-semibold" : "text-gray-600 dark:text-gray-300"
+                        }`}
+                      >
+                        {stage}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </>
             )}
           </div>
           {/* SLA Timer */}

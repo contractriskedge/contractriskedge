@@ -18,3 +18,8 @@ class ReviewApproved(DomainEvent):
 @dataclass
 class ReviewRejected(DomainEvent):
     event_type: str = "review.rejected"
+
+
+@dataclass
+class ReviewFinalized(DomainEvent):
+    event_type: str = "review.finalized"

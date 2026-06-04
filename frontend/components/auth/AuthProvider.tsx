@@ -244,6 +244,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     realtimeStarted.current = true;
 
+    // In development, Next.js rewrites don't proxy WebSocket upgrades,
+    // so connect directly to the backend port. In production, the same
+    // origin handles both HTTP and WebSocket via reverse proxy.
+    const isDev = process.env.NODE_ENV === "development";
+    const wsUrl = isDev
+      ? `ws://localhost:8000/api/v1/ws/events`
+      : undefined;
+
     const client = getRealtimeClient({
       getToken: async () => {
         // Try to get a fresh token, fall back to current
@@ -271,6 +279,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       topics: ["review.*", "notification.*", "recovery.*", "job.*"],
       tenantId: user.tenant_id,
       userId: user.sub,
+      wsUrl,
+      connectionOwnerId: "auth-provider",
     });
 
     client.connect();

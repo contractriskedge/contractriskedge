@@ -170,6 +170,9 @@ export function useUploadFile() {
       queryClient.invalidateQueries({
         queryKey: uploadKeys.lists(),
       });
+      queryClient.invalidateQueries({
+        queryKey: [...uploadKeys.all, "queue-stats"],
+      });
     },
   });
 }
@@ -187,6 +190,12 @@ export function useRetryUpload() {
       });
       queryClient.invalidateQueries({
         queryKey: uploadKeys.detail(data.upload_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: uploadKeys.lists(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: [...uploadKeys.all, "queue-stats"],
       });
     },
   });
@@ -214,6 +223,15 @@ export function useTriggerAnalysis() {
       queryClient.invalidateQueries({
         queryKey: uploadKeys.status(data.upload_id),
       });
+      queryClient.invalidateQueries({
+        queryKey: uploadKeys.detail(data.upload_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: uploadKeys.lists(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: [...uploadKeys.all, "queue-stats"],
+      });
     },
   });
 }
@@ -227,17 +245,19 @@ export function useGetOrCreateReview() {
       .then(() => reviewService.getOrCreate(uploadId)),
 
     onSuccess: (data) => {
-      // Cache the new review
-      queryClient.setQueryData(
-        reviewKeys.detail(data.review_id),
-        data,
-      );
-      // Invalidate review lists and dashboard
+      // Invalidate review lists and dashboard — let refetch populate the cache
       queryClient.invalidateQueries({
         queryKey: reviewKeys.lists(),
       });
       queryClient.invalidateQueries({
         queryKey: reviewKeys.dashboard(),
+      });
+      // Invalidate upload status — upload transitions to review state
+      queryClient.invalidateQueries({
+        queryKey: uploadKeys.lists(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: uploadKeys.status(data.upload_id),
       });
     },
   });

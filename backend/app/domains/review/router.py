@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from fastapi.responses import Response
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +32,7 @@ from app.domains.review.schemas import (
 from app.domains.review.service import ReviewService
 from app.domains.review.utils import enum_value as _enum_value, redline_to_item
 from app.domains.review.repository import ReviewRepository
+from app.domains.review.workflow import ImmutableReviewError
 from app.domains.ai.repository import AIRepository
 from app.domains.notify.repository import NotificationRepository
 from app.domains.notify.service import NotificationService
@@ -47,16 +48,22 @@ async def get_review_service(
     db: AsyncSession = Depends(get_db),
     user: UserContext = Depends(get_current_user),
     tenant_id: str = Depends(get_tenant_id),
+    request: Request = None,
 ) -> ReviewService:
+    # Use the shared application event bus so domain event handlers
+    # registered at startup (e.g. on_review_finalized) receive events.
+    event_bus = getattr(request.app.state, "event_bus", None) if request else None
+    if event_bus is None:
+        event_bus = EventBus()
     return ReviewService(
         review_repo=ReviewRepository(db, tenant_id=tenant_id),
         ai_repo=AIRepository(db, tenant_id=tenant_id),
-        event_bus=EventBus(),
+        event_bus=event_bus,
         user=user,
         tenant_id=tenant_id,
         notify_service=NotificationService(
             repo=NotificationRepository(db, tenant_id=tenant_id),
-            event_bus=EventBus(),
+            event_bus=event_bus,
             tenant_id=tenant_id,
         ),
     )
@@ -1335,6 +1342,8 @@ async def assign_reviewer(
         if "not found" in msg.lower():
             raise HTTPException(status_code=404, detail=msg)
         raise HTTPException(status_code=400, detail=msg)
+    except ImmutableReviewError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.post("/{review_id}/escalate")
@@ -2468,7 +2477,10 @@ async def advance_workflow(
             return result
 
     # Perform status transition
-    result = await service.update_status(review_id, target_status, reason=note or f"Workflow action: {action}")
+    try:
+        result = await service.update_status(review_id, target_status, reason=note or f"Workflow action: {action}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not result:
         raise HTTPException(status_code=404, detail="Review not found")
 

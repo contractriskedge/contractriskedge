@@ -73,11 +73,20 @@ class NegotiationRepository:
         page_size: int = 20,
         sort_by: str = "created_at",
         sort_order: str = "desc",
+        search: Optional[str] = None,
     ) -> tuple[list[NegotiationSession], int]:
-        """List sessions with pagination and optional stage filter."""
+        """List sessions with pagination and optional stage/text filter."""
         conditions = [NegotiationSession.tenant_id == self.tenant_id]
         if stage:
             conditions.append(NegotiationSession.stage == stage)
+        if search:
+            from sqlalchemy import or_
+            conditions.append(
+                or_(
+                    NegotiationSession.contract_title.ilike(f"%{search}%"),
+                    NegotiationSession.counterparty.ilike(f"%{search}%"),
+                )
+            )
 
         # Count
         count_query = select(func.count()).select_from(NegotiationSession).where(and_(*conditions))
@@ -191,10 +200,16 @@ class NegotiationRepository:
         return version
 
     async def list_versions(self, session_id: str) -> list[NegotiationVersion]:
-        """List all versions for a session."""
+        """List all versions for a session, scoped to tenant."""
         query = (
             select(NegotiationVersion)
-            .where(NegotiationVersion.session_id == session_id)
+            .join(NegotiationSession, NegotiationSession.session_id == NegotiationVersion.session_id)
+            .where(
+                and_(
+                    NegotiationVersion.session_id == session_id,
+                    NegotiationSession.tenant_id == self.tenant_id,
+                )
+            )
             .order_by(NegotiationVersion.version_number.desc())
         )
         result = await self.session.execute(query)
@@ -211,13 +226,14 @@ class NegotiationRepository:
     async def list_redlines(
         self, session_id: str, clause_id: Optional[str] = None
     ) -> list[NegotiationRedline]:
-        """List redlines for a session, optionally filtered by clause."""
+        """List redlines for a session, scoped to tenant."""
         conditions = [NegotiationRedline.session_id == session_id]
         if clause_id:
             conditions.append(NegotiationRedline.clause_id == clause_id)
         query = (
             select(NegotiationRedline)
-            .where(and_(*conditions))
+            .join(NegotiationSession, NegotiationSession.session_id == NegotiationRedline.session_id)
+            .where(and_(*conditions, NegotiationSession.tenant_id == self.tenant_id))
             .order_by(NegotiationRedline.created_at.desc())
         )
         result = await self.session.execute(query)
@@ -226,10 +242,19 @@ class NegotiationRepository:
     async def update_redline_status(
         self, redline_id: str, status: str
     ) -> Optional[NegotiationRedline]:
-        """Update a redline's status (accept/reject)."""
+        """Update a redline's status, scoped to tenant."""
         query = (
             update(NegotiationRedline)
-            .where(NegotiationRedline.redline_id == redline_id)
+            .where(
+                and_(
+                    NegotiationRedline.redline_id == redline_id,
+                    NegotiationRedline.session_id.in_(
+                        select(NegotiationSession.session_id).where(
+                            NegotiationSession.tenant_id == self.tenant_id
+                        )
+                    ),
+                )
+            )
             .values(status=status, updated_at=datetime.now(timezone.utc))
             .returning(NegotiationRedline)
         )
@@ -238,8 +263,20 @@ class NegotiationRepository:
         return result.scalar_one_or_none()
 
     async def delete_redline(self, redline_id: str) -> bool:
-        """Delete a redline."""
-        query = delete(NegotiationRedline).where(NegotiationRedline.redline_id == redline_id)
+        """Delete a redline, scoped to tenant."""
+        query = (
+            delete(NegotiationRedline)
+            .where(
+                and_(
+                    NegotiationRedline.redline_id == redline_id,
+                    NegotiationRedline.session_id.in_(
+                        select(NegotiationSession.session_id).where(
+                            NegotiationSession.tenant_id == self.tenant_id
+                        )
+                    ),
+                )
+            )
+        )
         result = await self.session.execute(query)
         await self.session.flush()
         return result.rowcount > 0
@@ -253,10 +290,16 @@ class NegotiationRepository:
         return issue
 
     async def list_issues(self, session_id: str) -> list[NegotiationIssue]:
-        """List all issues for a session."""
+        """List all issues for a session, scoped to tenant."""
         query = (
             select(NegotiationIssue)
-            .where(NegotiationIssue.session_id == session_id)
+            .join(NegotiationSession, NegotiationSession.session_id == NegotiationIssue.session_id)
+            .where(
+                and_(
+                    NegotiationIssue.session_id == session_id,
+                    NegotiationSession.tenant_id == self.tenant_id,
+                )
+            )
             .order_by(NegotiationIssue.created_at.desc())
         )
         result = await self.session.execute(query)
@@ -265,11 +308,20 @@ class NegotiationRepository:
     async def update_issue(
         self, issue_id: str, **kwargs: Any
     ) -> Optional[NegotiationIssue]:
-        """Update an issue (status, severity, assignee, etc.)."""
+        """Update an issue, scoped to tenant."""
         kwargs["updated_at"] = datetime.now(timezone.utc)
         query = (
             update(NegotiationIssue)
-            .where(NegotiationIssue.issue_id == issue_id)
+            .where(
+                and_(
+                    NegotiationIssue.issue_id == issue_id,
+                    NegotiationIssue.session_id.in_(
+                        select(NegotiationSession.session_id).where(
+                            NegotiationSession.tenant_id == self.tenant_id
+                        )
+                    ),
+                )
+            )
             .values(**kwargs)
             .returning(NegotiationIssue)
         )
@@ -291,7 +343,7 @@ class NegotiationRepository:
         redline_id: Optional[str] = None,
         issue_id: Optional[str] = None,
     ) -> list[NegotiationComment]:
-        """List comments for a session, optionally filtered by redline or issue."""
+        """List comments for a session, scoped to tenant."""
         conditions = [NegotiationComment.session_id == session_id]
         if redline_id:
             conditions.append(NegotiationComment.redline_id == redline_id)
@@ -299,7 +351,8 @@ class NegotiationRepository:
             conditions.append(NegotiationComment.issue_id == issue_id)
         query = (
             select(NegotiationComment)
-            .where(and_(*conditions))
+            .join(NegotiationSession, NegotiationSession.session_id == NegotiationComment.session_id)
+            .where(and_(*conditions, NegotiationSession.tenant_id == self.tenant_id))
             .order_by(NegotiationComment.created_at.asc())
         )
         result = await self.session.execute(query)
@@ -308,10 +361,19 @@ class NegotiationRepository:
     async def resolve_comment(
         self, comment_id: str, resolved_by: str
     ) -> Optional[NegotiationComment]:
-        """Mark a comment as resolved."""
+        """Mark a comment as resolved, scoped to tenant."""
         query = (
             update(NegotiationComment)
-            .where(NegotiationComment.comment_id == comment_id)
+            .where(
+                and_(
+                    NegotiationComment.comment_id == comment_id,
+                    NegotiationComment.session_id.in_(
+                        select(NegotiationSession.session_id).where(
+                            NegotiationSession.tenant_id == self.tenant_id
+                        )
+                    ),
+                )
+            )
             .values(
                 status=CommentStatus.RESOLVED.value,
                 resolved_by=resolved_by,
@@ -334,10 +396,16 @@ class NegotiationRepository:
         return participant
 
     async def list_participants(self, session_id: str) -> list[NegotiationParticipant]:
-        """List all participants in a session."""
+        """List all participants in a session, scoped to tenant."""
         query = (
             select(NegotiationParticipant)
-            .where(NegotiationParticipant.session_id == session_id)
+            .join(NegotiationSession, NegotiationSession.session_id == NegotiationParticipant.session_id)
+            .where(
+                and_(
+                    NegotiationParticipant.session_id == session_id,
+                    NegotiationSession.tenant_id == self.tenant_id,
+                )
+            )
             .order_by(NegotiationParticipant.created_at.asc())
         )
         result = await self.session.execute(query)
@@ -346,10 +414,19 @@ class NegotiationRepository:
     async def update_participant_role(
         self, participant_id: str, role: str
     ) -> Optional[NegotiationParticipant]:
-        """Update a participant's role."""
+        """Update a participant's role, scoped to tenant."""
         query = (
             update(NegotiationParticipant)
-            .where(NegotiationParticipant.participant_id == participant_id)
+            .where(
+                and_(
+                    NegotiationParticipant.participant_id == participant_id,
+                    NegotiationParticipant.session_id.in_(
+                        select(NegotiationSession.session_id).where(
+                            NegotiationSession.tenant_id == self.tenant_id
+                        )
+                    ),
+                )
+            )
             .values(role=role)
             .returning(NegotiationParticipant)
         )
@@ -358,9 +435,19 @@ class NegotiationRepository:
         return result.scalar_one_or_none()
 
     async def delete_participant(self, participant_id: str) -> bool:
-        """Remove a participant."""
-        query = delete(NegotiationParticipant).where(
-            NegotiationParticipant.participant_id == participant_id
+        """Remove a participant, scoped to tenant."""
+        query = (
+            delete(NegotiationParticipant)
+            .where(
+                and_(
+                    NegotiationParticipant.participant_id == participant_id,
+                    NegotiationParticipant.session_id.in_(
+                        select(NegotiationSession.session_id).where(
+                            NegotiationSession.tenant_id == self.tenant_id
+                        )
+                    ),
+                )
+            )
         )
         result = await self.session.execute(query)
         await self.session.flush()

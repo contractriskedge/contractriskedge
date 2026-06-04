@@ -286,7 +286,7 @@ export function GraphCanvas({ data, mode, onNodeSelect, selectedNodeId, filterVe
       </div>
 
       {/* SVG */}
-      <svg ref={svgRef} width={dimensions.width} height={dimensions.height} className="w-full" style={{ minHeight: 500 }}>
+      <svg id="graph-canvas-svg" ref={svgRef} width={dimensions.width} height={dimensions.height} className="w-full" style={{ minHeight: 500 }}>
         <defs>
           <filter id="glow">
             <feGaussianBlur stdDeviation="3" result="coloredBlur" />

@@ -10,7 +10,7 @@ Provides endpoints for the full workflow lifecycle:
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -85,6 +85,16 @@ def get_engine() -> WorkflowExecutionEngine:
     return _engine
 
 
+def set_engine_persistence(persistence: Any) -> None:
+    """Set the persistence adapter on the global engine instance."""
+    global _engine
+    if _engine is not None:
+        _engine.set_persistence(persistence)
+        logger.info("Workflow engine persistence adapter set")
+    else:
+        logger.warning("Cannot set persistence — engine not initialized")
+
+
 async def get_repo(
     session: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
@@ -95,7 +105,10 @@ async def get_repo(
 async def get_persistence(
     repo: WorkflowRepository = Depends(get_repo),
 ) -> WorkflowPersistenceAdapter:
-    return WorkflowPersistenceAdapter(repo)
+    adapter = WorkflowPersistenceAdapter(repo)
+    # Wire persistence into the global engine for completion/failure/cancellation
+    set_engine_persistence(adapter)
+    return adapter
 
 
 # ── Schemas ──────────────────────────────────────────────────────

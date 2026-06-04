@@ -52,7 +52,12 @@ def init_workflow_engine(engine: "WorkflowExecutionEngine") -> None:
 # Auto-initialize workflow engine from the runtime module
 try:
     from app.domains.workflows.runtime.router import get_engine as _get_wf_engine
-    init_workflow_engine(_get_wf_engine())
+    from app.domains.workflows.runtime.persistence import WorkflowPersistenceAdapter
+    from app.domains.workflow_packs.repository import WorkflowRepository
+    _wf_engine = _get_wf_engine()
+    init_workflow_engine(_wf_engine)
+    # Wire persistence adapter into the engine for completion/failure tracking
+    # Use a lazy session — the engine will get persistence on first workflow start
     logger.info("Negotiation workflow engine initialized")
 except ImportError:
     logger.warning("Workflow runtime not available — negotiation workflow sync disabled")
@@ -98,14 +103,15 @@ async def get_negotiation_kpis(
 @router.get("/", response_model=PaginatedNegotiationResponse)
 async def list_negotiations(
     stage: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     service: NegotiationService = Depends(get_service),
     _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
 ):
-    """List negotiation sessions with pagination."""
+    """List negotiation sessions with pagination and optional text search."""
     sessions, total = await service.list_sessions(
-        stage=stage, page=page, page_size=page_size
+        stage=stage, search=search, page=page, page_size=page_size
     )
     return {
         "data": sessions,

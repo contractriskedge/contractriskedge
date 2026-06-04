@@ -59,7 +59,24 @@ export interface Contract {
 }
 
 export async function listContracts(token: string): Promise<{ contracts: Contract[]; total: number }> {
-  return fetchApi("/contracts/", { token });
+  const raw: any = await fetchApi("/contracts/", { token });
+  // Backend ContractSummary uses camelCase (name, riskScore, id, contractType, vendor, createdAt)
+  // Legacy Contract interface uses snake_case (filename, risk_score, contract_id, contract_type, counterparty, created_at)
+  if (Array.isArray(raw.data)) {
+    const contracts: Contract[] = raw.data.map((item: any) => ({
+      contract_id: item.id ?? "",
+      filename: item.name ?? "Untitled",
+      status: item.status ?? "draft",
+      contract_type: item.contractType ?? "contract",
+      risk_score: item.riskScore ?? 0,
+      counterparty: item.vendor ?? "",
+      total_pages: item.totalPages ?? 0,
+      created_at: item.createdAt ?? "",
+      tags: item.tags ?? [],
+    }));
+    return { contracts, total: raw.pagination?.total ?? contracts.length };
+  }
+  return { contracts: raw.contracts ?? [], total: raw.total ?? 0 };
 }
 
 // ── Risks ──

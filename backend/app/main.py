@@ -37,23 +37,24 @@ logger = logging.getLogger(__name__)
 def _validate_secrets() -> None:
     """Validate that no default/placeholder secrets are in use.
 
-    Raises a warning if secrets are not properly configured.
-    In production, this can be escalated to prevent startup.
+    In production, missing or default secrets BLOCK application startup
+    by raising a RuntimeError. This prevents deploying with insecure defaults.
     """
     env = settings.environment
+    is_prod = env == "production"
+    errors: list[str] = []
 
-    # SECRET_KEY validation
+    # SECRET_KEY validation — BLOCKING in production
     if not settings.secret_key:
-        logger.warning(
-            "SECRET_KEY is not configured! Set SECRET_KEY in .env. "
-            "Using an empty secret key is a security risk."
-        )
+        msg = "SECRET_KEY is not configured! Set SECRET_KEY in .env."
+        if is_prod:
+            errors.append(msg)
+        logger.warning("%s Using an empty secret key is a security risk.", msg)
     elif settings.secret_key in ("change-this-in-production",):
-        logger.warning(
-            "SECRET_KEY is still set to the default placeholder '%s'. "
-            "Generate a unique secret key for production.",
-            settings.secret_key,
-        )
+        msg = "SECRET_KEY is still set to the default placeholder 'change-this-in-production'."
+        if is_prod:
+            errors.append(msg)
+        logger.warning("%s Generate a unique secret key for production.", msg)
 
     # DEV_JWT_SECRET validation (only relevant in development)
     if env == "development":
@@ -69,18 +70,31 @@ def _validate_secrets() -> None:
                 settings.dev_jwt_secret,
             )
 
-    # Auth0 validation (required for production)
-    if env == "production":
+    # Auth0 validation (required for production) — BLOCKING
+    if is_prod:
         if not settings.auth0_domain:
-            logger.error(
+            errors.append(
                 "AUTH0_DOMAIN is not configured! "
                 "Production environment requires Auth0 for authentication."
             )
-        if not settings.secret_key or settings.secret_key in ("change-this-in-production",):
-            logger.error(
-                "SECRET_KEY is not properly configured for production! "
-                "Application startup should be blocked."
-            )
+
+    # CORS validation — BLOCKING in production
+    if is_prod:
+        origins = settings.cors_origins
+        if not origins:
+            errors.append("CORS_ORIGINS_RAW is empty! Configure allowed origins for production.")
+        for origin in origins:
+            if origin == "*":
+                errors.append(
+                    "CORS wildcard origin '*' is not allowed in production! "
+                    "Set explicit origins via CORS_ORIGINS_RAW."
+                )
+
+    # Block startup if production validation fails
+    if errors:
+        error_msg = "\n  - ".join(["STARTUP BLOCKED — production security validation failed:"] + errors)
+        logger.critical(error_msg)
+        raise RuntimeError(error_msg)
 
 
 @asynccontextmanager
@@ -142,6 +156,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Initialize in-memory event bus
     app.state.event_bus = EventBus()
+
+    # Register domain event handlers
+    try:
+        from app.domains.review.events import ReviewApproved, ReviewFinalized
+        from app.domains.negotiation.service import on_review_finalized
+
+        app.state.event_bus.register(ReviewFinalized, on_review_finalized)
+        app.state.event_bus.register(ReviewApproved, on_review_finalized)
+        logger.info("Registered event handlers: ReviewFinalized → on_review_finalized, ReviewApproved → on_review_finalized")
+    except Exception as exc:
+        logger.warning("Failed to register event handlers: %s", exc)
+
     logger.info("Event bus initialized")
 
     try:

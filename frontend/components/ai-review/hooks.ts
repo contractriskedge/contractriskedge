@@ -867,9 +867,10 @@ export function useResolveFinding() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: platformKeys.findings(variables.reviewId) });
       queryClient.invalidateQueries({ queryKey: platformKeys.activity(variables.reviewId) });
-      queryClient.invalidateQueries({
-        queryKey: [...platformKeys.all, "audit-history", variables.reviewId],
-      });
+      queryClient.invalidateQueries({ queryKey: platformKeys.review(variables.reviewId) });
+      queryClient.invalidateQueries({ queryKey: platformKeys.reviews() });
+      queryClient.invalidateQueries({ queryKey: platformKeys.riskBreakdown(variables.reviewId) });
+      queryClient.invalidateQueries({ queryKey: platformKeys.metrics() });
     },
   });
 }
@@ -882,6 +883,8 @@ export function useApplyRecommendation() {
       api.post(`/reviews/${reviewId}/recommendations/${recommendationId}/apply`),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: platformKeys.recommendations(variables.reviewId) });
+      queryClient.invalidateQueries({ queryKey: platformKeys.findings(variables.reviewId) });
+      queryClient.invalidateQueries({ queryKey: platformKeys.activity(variables.reviewId) });
     },
   });
 }
@@ -894,6 +897,7 @@ export function useDismissRecommendation() {
       api.post(`/reviews/${reviewId}/recommendations/${recommendationId}/dismiss`),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: platformKeys.recommendations(variables.reviewId) });
+      queryClient.invalidateQueries({ queryKey: platformKeys.activity(variables.reviewId) });
     },
   });
 }
@@ -919,6 +923,7 @@ export function useAdvanceWorkflow() {
       api.post(`/reviews/${reviewId}/workflow/advance`, { action, assignee_id, note }),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: platformKeys.workflow(variables.reviewId) });
+      queryClient.invalidateQueries({ queryKey: platformKeys.review(variables.reviewId) });
       queryClient.invalidateQueries({ queryKey: platformKeys.reviews() });
     },
   });

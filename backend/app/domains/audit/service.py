@@ -156,9 +156,9 @@ class AuditService:
         conditions, bind = self._build_governance_conditions(params)
         offset = (params.page - 1) * params.page_size
         sql = sa_text(f"""
-            SELECT event_id, event_type, action, resource_type, resource_id,
-                   actor_id, before_state, after_state, description,
-                   correlation_id, created_at
+            SELECT event_id, event_type, previous_state, new_state, change_summary,
+                   entity_type, entity_id,
+                   actor_id, correlation_id, created_at
             FROM governance_audit_events
             WHERE {' AND '.join(conditions)}
             ORDER BY created_at DESC
@@ -169,13 +169,13 @@ class AuditService:
             AuditEventItem(
                 event_id=str(row.event_id),
                 event_type=row.event_type,
-                action=row.action,
-                resource_type=row.resource_type,
-                resource_id=row.resource_id,
+                action=row.event_type,
+                resource_type=row.entity_type,
+                resource_id=str(row.entity_id) if row.entity_id else "",
                 actor_id=row.actor_id,
-                before_state=row.before_state,
-                after_state=row.after_state,
-                description=row.description,
+                before_state=row.previous_state,
+                after_state=row.new_state,
+                description=row.change_summary,
                 correlation_id=row.correlation_id,
                 created_at=row.created_at,
             )
@@ -228,7 +228,7 @@ class AuditService:
             conditions.append("actor_id = :actor_id")
             bind["actor_id"] = params.actor_id
         if params.action:
-            conditions.append("action = :action")
+            conditions.append("event_type = :action")
             bind["action"] = params.action
         if params.from_date:
             conditions.append("created_at >= :from_date")

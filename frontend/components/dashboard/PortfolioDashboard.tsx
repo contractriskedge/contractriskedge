@@ -124,7 +124,7 @@ export function PortfolioDashboard() {
           </div>
           <span className="stat-value text-risk-medium">{mediumRisk}</span>
           <span className="stat-trend text-risk-medium">
-            {totalContracts > 0 ? `${Math.round((mediumRisk / totalContracts) * 100)}% of portfolio` : "0%"}
+            {totalContracts > 0 ? ` ${Math.round((mediumRisk / totalContracts) * 100)}% of portfolio` : "0%"}
           </span>
         </div>
 
@@ -135,7 +135,7 @@ export function PortfolioDashboard() {
           </div>
           <span className="stat-value text-risk-low">{lowRisk}</span>
           <span className="stat-trend text-risk-low">
-            {totalContracts > 0 ? `${Math.round((lowRisk / totalContracts) * 100)}% of portfolio` : "0%"}
+            {totalContracts > 0 ? ` ${Math.round((lowRisk / totalContracts) * 100)}% of portfolio` : "0%"}
           </span>
         </div>
       </div>

@@ -37,19 +37,23 @@ from app.kernel.security.auth import JWTValidator
 from app.config import settings
 
 # Initialize JWT validator for WebSocket auth
+# Uses dev_jwt_secret for development HS256 tokens, auth0 for production RS256.
 _jwt_validator = JWTValidator(
     domain=settings.auth0_domain,
     audience=settings.auth0_audience,
     issuer=settings.auth0_issuer or f"https://{settings.auth0_domain}/",
-    dev_secret=settings.secret_key,
+    dev_secret=settings.dev_jwt_secret,
     environment=settings.environment,
 )
 
 # Allowed origins for WebSocket connections
-ALLOWED_ORIGINS = set(settings.cors_origins or [
+# In production, these come from CORS_ORIGINS_RAW env-var only.
+# The fallback list is safe for development only.
+_ALLOWED_ORIGINS_FALLBACK = [
     "http://localhost:3000",
     "https://app.contractriskedge.com",
-])
+]
+ALLOWED_ORIGINS = set(settings.cors_origins or _ALLOWED_ORIGINS_FALLBACK)
 
 # Message rate limiting: max messages per minute per connection
 MAX_MESSAGES_PER_MINUTE = 100

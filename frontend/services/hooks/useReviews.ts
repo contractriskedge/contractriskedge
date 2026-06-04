@@ -315,8 +315,15 @@ export function useResolveFinding(reviewId: string) {
       });
       queryClient.invalidateQueries({
         queryKey: [...reviewKeys.all, "risk-breakdown", reviewId],
+      });      queryClient.invalidateQueries({
+        queryKey: reviewKeys.lists(),
       });
-    },
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.history(reviewId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.dashboard(),
+      });    },
   });
 }
 
@@ -378,10 +385,16 @@ export function useUpdateRedline(reviewId: string) {
         queryKey: reviewKeys.redlines(reviewId),
       });
       queryClient.invalidateQueries({
-        queryKey: ["reviews", reviewId, "versions"],
+        queryKey: [...reviewKeys.all, "risk-breakdown", reviewId],
       });
       queryClient.invalidateQueries({
-        queryKey: [...reviewKeys.all, "risk-breakdown", reviewId],
+        queryKey: reviewKeys.detail(reviewId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.lists(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.dashboard(),
       });
     },
   });
@@ -401,6 +414,9 @@ export function useAddComment(reviewId: string) {
       });
       queryClient.invalidateQueries({
         queryKey: reviewKeys.detail(reviewId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.history(reviewId),
       });
     },
   });
@@ -425,6 +441,12 @@ export function useAssignReviewer(reviewId: string) {
         queryKey: reviewKeys.lists(),
       });
       queryClient.invalidateQueries({
+        queryKey: reviewKeys.dashboard(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.history(reviewId),
+      });
+      queryClient.invalidateQueries({
         queryKey: ["reviews", "workload"],
       });
     },
@@ -447,7 +469,13 @@ export function useEscalateReview(reviewId: string) {
         queryKey: reviewKeys.status(reviewId),
       });
       queryClient.invalidateQueries({
+        queryKey: reviewKeys.lists(),
+      });
+      queryClient.invalidateQueries({
         queryKey: reviewKeys.dashboard(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.history(reviewId),
       });
     },
   });
@@ -471,6 +499,9 @@ export function useApproveReview(reviewId: string) {
       });
       queryClient.invalidateQueries({
         queryKey: reviewKeys.history(reviewId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.lists(),
       });
       queryClient.invalidateQueries({
         queryKey: reviewKeys.dashboard(),
@@ -501,6 +532,12 @@ export function useUpdateReviewStatus(reviewId: string) {
       });
       queryClient.invalidateQueries({
         queryKey: reviewKeys.history(reviewId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.lists(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.dashboard(),
       });
     },
   });
@@ -538,6 +575,20 @@ export function useReAnalyzeReview() {
       queryClient.invalidateQueries({
         queryKey: [...reviewKeys.all, "risk-breakdown", data.review_id],
       });
+      // Invalidate review lists and dashboard — re-analysis changes status and scores
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.lists(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.dashboard(),
+      });
+      // Invalidate history and comments — re-analysis creates audit trail
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.history(data.review_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.comments(data.review_id),
+      });
       // Also invalidate uploads list (new analysis run created)
       queryClient.invalidateQueries({
         queryKey: ["uploads"],
@@ -559,13 +610,19 @@ export function useDeleteReview() {
       reason?: string;
     }) => reviewService.softDelete(reviewId, { reason }),
 
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       // Invalidate all review lists
       queryClient.invalidateQueries({
         queryKey: reviewKeys.lists(),
       });
       queryClient.invalidateQueries({
         queryKey: reviewKeys.dashboard(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.detail(variables.reviewId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.status(variables.reviewId),
       });
     },
   });
@@ -584,10 +641,16 @@ export function useGenerateMitigationRedline(reviewId: string) {
 
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: [...reviewKeys.detail(reviewId), "redlines"],
+        queryKey: reviewKeys.redlines(reviewId),
       });
       queryClient.invalidateQueries({
         queryKey: [...reviewKeys.all, "risk-breakdown", reviewId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.detail(reviewId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.history(reviewId),
       });
     },
   });

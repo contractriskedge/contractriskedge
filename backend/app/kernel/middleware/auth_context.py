@@ -54,9 +54,16 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
         #
         # This triple gate prevents accidental bypass in deployed environments
         # even if the .env file is misconfigured.
-        _is_local_dev = settings.environment == "development" and settings.dev_auth_bypass
-        _host = request.url.hostname or ""
-        _bypass_allowed = _is_local_dev and _host in ("localhost", "127.0.0.1", "0.0.0.0")
+        #
+        # PRODUCTION HARDENING: Even if ENVIRONMENT=production is somehow set
+        # with DEV_AUTH_BYPASS=true, the bypass is still blocked because the
+        # environment check fails first. This is defense-in-depth.
+        if settings.environment != "development":
+            _bypass_allowed = False
+        else:
+            _is_local_dev = settings.dev_auth_bypass
+            _host = request.url.hostname or ""
+            _bypass_allowed = _is_local_dev and _host in ("localhost", "127.0.0.1", "0.0.0.0")
 
         # Development-only: act as a scoped dev user when no Bearer token is sent.
         # Never enable outside local dev — send a real JWT to test auth in any other environment.

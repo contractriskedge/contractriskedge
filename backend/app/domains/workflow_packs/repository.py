@@ -173,9 +173,14 @@ class WorkflowRepository:
         return version
 
     async def get_versions(self, pack_id: str) -> list[WorkflowVersion]:
-        """Get all versions for a pack."""
-        query = select(WorkflowVersion).where(
-            WorkflowVersion.pack_id == pack_id
+        """Get all versions for a pack, scoped to tenant."""
+        query = select(WorkflowVersion).join(
+            WorkflowPack, WorkflowPack.pack_id == WorkflowVersion.pack_id
+        ).where(
+            and_(
+                WorkflowVersion.pack_id == pack_id,
+                WorkflowPack.tenant_id == self.tenant_id,
+            )
         ).order_by(WorkflowVersion.version_number.desc())
         result = await self.session.execute(query)
         return list(result.scalars().all())
@@ -189,14 +194,19 @@ class WorkflowRepository:
         return instance
 
     async def get_instance(self, workflow_id: str) -> Optional[WorkflowInstance]:
-        """Get a workflow instance with steps and logs."""
+        """Get a workflow instance with steps and logs, scoped to tenant."""
         query = (
             select(WorkflowInstance)
             .options(
                 selectinload(WorkflowInstance.steps),
                 selectinload(WorkflowInstance.execution_logs),
             )
-            .where(WorkflowInstance.workflow_id == workflow_id)
+            .where(
+                and_(
+                    WorkflowInstance.workflow_id == workflow_id,
+                    WorkflowInstance.tenant_id == self.tenant_id,
+                )
+            )
         )
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
@@ -242,11 +252,16 @@ class WorkflowRepository:
         return list(result.scalars().all()), total
 
     async def update_instance(self, workflow_id: str, **kwargs: Any) -> Optional[WorkflowInstance]:
-        """Update a workflow instance."""
+        """Update a workflow instance, scoped to tenant."""
         kwargs["updated_at"] = datetime.now(timezone.utc)
         query = (
             update(WorkflowInstance)
-            .where(WorkflowInstance.workflow_id == workflow_id)
+            .where(
+                and_(
+                    WorkflowInstance.workflow_id == workflow_id,
+                    WorkflowInstance.tenant_id == self.tenant_id,
+                )
+            )
             .values(**kwargs)
             .returning(WorkflowInstance)
         )
@@ -278,18 +293,35 @@ class WorkflowRepository:
         return step
 
     async def get_steps(self, workflow_id: str) -> list[WorkflowInstanceStep]:
-        """Get all steps for a workflow instance."""
-        query = select(WorkflowInstanceStep).where(
-            WorkflowInstanceStep.workflow_id == workflow_id
-        ).order_by(WorkflowInstanceStep.step_order)
+        """Get all steps for a workflow instance, scoped to tenant."""
+        query = (
+            select(WorkflowInstanceStep)
+            .join(WorkflowInstance, WorkflowInstance.workflow_id == WorkflowInstanceStep.workflow_id)
+            .where(
+                and_(
+                    WorkflowInstanceStep.workflow_id == workflow_id,
+                    WorkflowInstance.tenant_id == self.tenant_id,
+                )
+            )
+            .order_by(WorkflowInstanceStep.step_order)
+        )
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
     async def update_step(self, step_id: str, **kwargs: Any) -> Optional[WorkflowInstanceStep]:
-        """Update a workflow step."""
+        """Update a workflow step, scoped to tenant."""
         query = (
             update(WorkflowInstanceStep)
-            .where(WorkflowInstanceStep.step_id == step_id)
+            .where(
+                and_(
+                    WorkflowInstanceStep.step_id == step_id,
+                    WorkflowInstanceStep.workflow_id.in_(
+                        select(WorkflowInstance.workflow_id).where(
+                            WorkflowInstance.tenant_id == self.tenant_id
+                        )
+                    ),
+                )
+            )
             .values(**kwargs)
             .returning(WorkflowInstanceStep)
         )
@@ -300,14 +332,15 @@ class WorkflowRepository:
     async def get_pending_approvals(
         self, user_id: Optional[str] = None
     ) -> list[WorkflowInstanceStep]:
-        """Get all steps waiting for approval."""
+        """Get all steps waiting for approval, scoped to tenant."""
         conditions = [
             WorkflowInstanceStep.requires_approval == True,
             WorkflowInstanceStep.approval_status == "pending",
         ]
         query = (
             select(WorkflowInstanceStep)
-            .where(and_(*conditions))
+            .join(WorkflowInstance, WorkflowInstance.workflow_id == WorkflowInstanceStep.workflow_id)
+            .where(and_(*conditions, WorkflowInstance.tenant_id == self.tenant_id))
             .options(selectinload(WorkflowInstanceStep.workflow_instance))
         )
         result = await self.session.execute(query)

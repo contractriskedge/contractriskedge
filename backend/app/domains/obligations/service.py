@@ -111,7 +111,11 @@ class ObligationService:
         return [self._to_response(o) for o in obligations], total
 
     async def get_obligation(self, obligation_id: str) -> ObligationResponse:
-        o = await self.session.get(Obligation, uuid.UUID(obligation_id))
+        from sqlalchemy import select
+        q = select(Obligation).where(
+            and_(Obligation.id == uuid.UUID(obligation_id), Obligation.tenant_id == uuid.UUID(self.tenant_id))
+        )
+        o = (await self.session.execute(q)).scalar_one_or_none()
         if not o:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Obligation not found")
@@ -150,7 +154,11 @@ class ObligationService:
         return self._to_response(o)
 
     async def update_obligation(self, obligation_id: str, data: ObligationUpdate) -> ObligationResponse:
-        o = await self.session.get(Obligation, uuid.UUID(obligation_id))
+        from sqlalchemy import select
+        q = select(Obligation).where(
+            and_(Obligation.id == uuid.UUID(obligation_id), Obligation.tenant_id == uuid.UUID(self.tenant_id))
+        )
+        o = (await self.session.execute(q)).scalar_one_or_none()
         if not o:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Obligation not found")
@@ -163,7 +171,11 @@ class ObligationService:
         return self._to_response(o)
 
     async def delete_obligation(self, obligation_id: str) -> bool:
-        o = await self.session.get(Obligation, uuid.UUID(obligation_id))
+        from sqlalchemy import select
+        q = select(Obligation).where(
+            and_(Obligation.id == uuid.UUID(obligation_id), Obligation.tenant_id == uuid.UUID(self.tenant_id))
+        )
+        o = (await self.session.execute(q)).scalar_one_or_none()
         if not o:
             return False
         await self.session.delete(o)
@@ -499,7 +511,11 @@ class ObligationService:
     # ── AI ─────────────────────────────────────────────────────────────
 
     async def get_risk_analysis(self, obligation_id: str) -> RiskAnalysisResponse:
-        o = await self.session.get(Obligation, uuid.UUID(obligation_id))
+        from sqlalchemy import select
+        q = select(Obligation).where(
+            and_(Obligation.id == uuid.UUID(obligation_id), Obligation.tenant_id == uuid.UUID(self.tenant_id))
+        )
+        o = (await self.session.execute(q)).scalar_one_or_none()
         if not o:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Obligation not found")
@@ -597,7 +613,11 @@ class ObligationService:
         return anomalies
 
     async def ai_review(self, request: AiReviewRequest) -> dict:
-        o = await self.session.get(Obligation, uuid.UUID(request.obligation_id))
+        from sqlalchemy import select
+        q = select(Obligation).where(
+            and_(Obligation.id == uuid.UUID(request.obligation_id), Obligation.tenant_id == uuid.UUID(self.tenant_id))
+        )
+        o = (await self.session.execute(q)).scalar_one_or_none()
         if not o:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Obligation not found")
@@ -669,7 +689,11 @@ class ObligationService:
         )
         self.session.add(e)
 
-        o = await self.session.get(Obligation, uuid.UUID(data.obligation_id))
+        from sqlalchemy import select
+        q = select(Obligation).where(
+            and_(Obligation.id == uuid.UUID(data.obligation_id), Obligation.tenant_id == uuid.UUID(self.tenant_id))
+        )
+        o = (await self.session.execute(q)).scalar_one_or_none()
         if o:
             o.escalation_level = data.escalation_level
             o.updated_at = datetime.now(timezone.utc)

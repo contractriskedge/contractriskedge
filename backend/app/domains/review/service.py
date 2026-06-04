@@ -1303,16 +1303,23 @@ class ReviewService:
             except Exception as exc:
                 logger.warning("Finalized notification failed for %s: %s", review_id, exc)
 
-        await self.event_bus.emit("review.finalized", {
-            "review_id": review_id,
-            "tenant_id": self.tenant_id,
-            "finalized_by": self.user.id,
-            "finalized_at": datetime.utcnow().isoformat(),
-            "finalized_version": {
-                "version_id": finalized_version.version_id if finalized_version else None,
-                "version_number": finalized_version.version_number if finalized_version else None,
+        from app.domains.review.events import ReviewFinalized
+        event = ReviewFinalized(
+            tenant_id=self.tenant_id,
+            actor_id=self.user.id,
+            data={
+                "review_id": review_id,
+                "tenant_id": self.tenant_id,
+                "finalized_by": self.user.id,
+                "finalized_at": datetime.utcnow().isoformat(),
+                "finalized_version": {
+                    "version_id": finalized_version.version_id if finalized_version else None,
+                    "version_number": finalized_version.version_number if finalized_version else None,
+                },
             },
-        })
+        )
+        logger.info("Emitting ReviewFinalized event for review %s", review_id[:8])
+        await self.event_bus.emit(event)
 
         # Mark idempotency complete
         await self.idempotency.mark_completed("finalize", review_id, self.user.id, {
@@ -2803,7 +2810,7 @@ class ReviewService:
             FROM governance_audit_events
             WHERE tenant_id = :tenant_id
               AND (
-                entity_id = :review_id::uuid
+                entity_id = CAST(:review_id AS uuid)
                 OR metadata->>'review_id' = :review_id2
               )
             ORDER BY created_at DESC
@@ -2829,7 +2836,7 @@ class ReviewService:
             SELECT history_id, from_status, to_status, changed_by, reason, created_at
             FROM review_status_history
             WHERE tenant_id = :tenant_id
-              AND review_id = :review_id::uuid
+              AND review_id = CAST(:review_id AS uuid)
             ORDER BY created_at DESC
             LIMIT 50
         """)

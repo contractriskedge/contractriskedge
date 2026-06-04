@@ -343,6 +343,11 @@ class WorkflowExecutionEngine:
     _sla_timers: dict[str, SLATimer] = field(default_factory=dict)
     _escalation_policies: dict[str, EscalationPolicy] = field(default_factory=dict)
     _compensation: CompensationHandler = field(default_factory=CompensationHandler)
+    _persistence: Any = None  # Optional WorkflowPersistenceAdapter reference
+
+    def set_persistence(self, adapter: Any) -> None:
+        """Set the persistence adapter for saving workflow state to DB."""
+        self._persistence = adapter
 
     def register_definition(self, definition: WorkflowDefinition) -> None:
         """Register a workflow definition."""
@@ -527,12 +532,34 @@ class WorkflowExecutionEngine:
                 await self._compensation.compensate_workflow(definition, instance)
                 instance.status = WorkflowStatus.FAILED
                 logger.error("Workflow %s failed at step '%s': %s", workflow_id[:8], step.name, step_error)
+
+                # Persist failure to database
+                if self._persistence:
+                    try:
+                        await self._persistence.save_workflow_completion(
+                            workflow_id=workflow_id,
+                            status=WorkflowStatus.FAILED.value,
+                            error=step_error,
+                        )
+                    except Exception:
+                        logger.exception("Failed to persist failure for workflow %s", workflow_id[:8])
                 return
 
         # All steps completed
         instance.status = WorkflowStatus.COMPLETED
         instance.completed_at = datetime.utcnow().isoformat()
         logger.info("Workflow %s completed successfully (%d steps)", workflow_id[:8], len(definition.steps))
+
+        # Persist completion to database
+        if self._persistence:
+            try:
+                await self._persistence.save_workflow_completion(
+                    workflow_id=workflow_id,
+                    status=WorkflowStatus.COMPLETED.value,
+                )
+                logger.info("Persisted completion for workflow %s", workflow_id[:8])
+            except Exception:
+                logger.exception("Failed to persist completion for workflow %s", workflow_id[:8])
 
     async def get_workflow(self, workflow_id: str) -> WorkflowInstance | None:
         """Get a workflow instance by ID."""
@@ -544,6 +571,17 @@ class WorkflowExecutionEngine:
         if instance and instance.status in (WorkflowStatus.RUNNING, WorkflowStatus.PAUSED, WorkflowStatus.WAITING_APPROVAL):
             instance.status = WorkflowStatus.CANCELLED
             logger.info("Cancelled workflow %s", workflow_id[:8])
+
+            # Persist cancellation to database
+            if self._persistence:
+                try:
+                    await self._persistence.save_workflow_completion(
+                        workflow_id=workflow_id,
+                        status=WorkflowStatus.CANCELLED.value,
+                    )
+                    logger.info("Persisted cancellation for workflow %s", workflow_id[:8])
+                except Exception:
+                    logger.exception("Failed to persist cancellation for workflow %s", workflow_id[:8])
 
     async def resolve_approval(self, gate_id: str, user_id: str, action: str, reason: str | None = None) -> bool:
         """Resolve an approval gate."""
