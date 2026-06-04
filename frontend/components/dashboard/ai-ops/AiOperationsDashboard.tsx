@@ -14,6 +14,8 @@
 "use client";
 
 import React, { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/services/api/client";
 import { DashboardHeader } from "../command-center/DashboardHeader";
 
 type DateRange = "24h" | "7d" | "30d" | "90d";
@@ -29,10 +31,35 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "gates", label: "Safety Gates" },
 ];
 
+const AI_GOV_BASE = "/ai-governance";
+
+// ── Hooks ───────────────────────────────────────────────────────
+
+function useCostSummary() {
+  return useQuery({
+    queryKey: ["ai-cost-summary"],
+    queryFn: () => api.get<any>(`${AI_GOV_BASE}/cost-summary`),
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+  });
+}
+
+function useSafetySummary() {
+  return useQuery({
+    queryKey: ["ai-safety-summary"],
+    queryFn: () => api.get<any>(`${AI_GOV_BASE}/safety-summary`),
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+  });
+}
+
 export function AiOperationsDashboard() {
   const [activeTab, setActiveTab] = useState<TabId>("cost");
   const [dateRange, setDateRange] = useState<DateRange>("7d");
   const [refreshInterval, setRefreshInterval] = useState<RefreshInterval>(30);
+
+  const { data: costData, isLoading: costLoading } = useCostSummary();
+  const { data: safetyData, isLoading: safetyLoading } = useSafetySummary();
 
   return (
     <div className="p-6 space-y-4">
@@ -65,28 +92,32 @@ export function AiOperationsDashboard() {
 
       {/* ── Tab Content ──────────────────────────────────────── */}
       <div>
-        {activeTab === "cost" && <TokenCostExplorer />}
+        {activeTab === "cost" && <TokenCostExplorer data={costData} isLoading={costLoading} />}
         {activeTab === "routing" && <ModelRoutingAnalytics />}
         {activeTab === "quality" && <HallucinationQualityMonitor />}
         {activeTab === "benchmarks" && <BenchmarkSuiteDashboard />}
-        {activeTab === "gates" && <DeploymentSafetyGate />}
+        {activeTab === "gates" && <DeploymentSafetyGate data={safetyData} isLoading={safetyLoading} />}
       </div>
     </div>
   );
 }
 
-// ── Tab Components ───────────────────────────────────────────────────
+// ── Cost Tab ───────────────────────────────────────────────────
 
-function TokenCostExplorer() {
-  const modelCosts = [
-    { model: "gpt-4o-mini", cost: 124.50, tokens: 830_000_000, pct: 38 },
-    { model: "gpt-4o", cost: 98.20, tokens: 39_280_000, pct: 30 },
-    { model: "claude-3.5-sonnet", cost: 72.80, tokens: 24_270_000, pct: 22 },
-    { model: "gpt-4-turbo", cost: 32.50, tokens: 3_250_000, pct: 10 },
-  ];
+function TokenCostExplorer({ data, isLoading }: { data?: any; isLoading: boolean }) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-48">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gold-600" />
+      </div>
+    );
+  }
 
-  const totalCost = modelCosts.reduce((a, b) => a + b.cost, 0);
-  const totalTokens = modelCosts.reduce((a, b) => a + b.tokens, 0);
+  const modelCosts = data?.cost_by_model ?? [];
+  const totalCost = data?.total_cost ?? 0;
+  const totalTokens = data?.total_tokens ?? 0;
+  const totalRequests = data?.total_requests ?? 0;
+  const avgLatency = data?.avg_latency_ms ?? 0;
 
   return (
     <div className="space-y-4">
@@ -94,23 +125,23 @@ function TokenCostExplorer() {
       <div className="grid grid-cols-4 gap-3">
         <div className="p-3 rounded-lg bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-700">
           <span className="text-[10px] text-gray-500 uppercase">Total Cost</span>
-          <p className="text-lg font-bold text-navy-900 dark:text-white">${totalCost.toFixed(2)}</p>
-          <span className="text-[10px] text-green-500">↑ 12.3% vs last period</span>
+          <p className="text-lg font-bold text-navy-900 dark:text-white">${Number(totalCost).toFixed(4)}</p>
+          <span className="text-[10px] text-gray-400">{totalRequests} requests</span>
         </div>
         <div className="p-3 rounded-lg bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-700">
           <span className="text-[10px] text-gray-500 uppercase">Total Tokens</span>
           <p className="text-lg font-bold text-navy-900 dark:text-white">{(totalTokens / 1_000_000).toFixed(1)}M</p>
-          <span className="text-[10px] text-green-500">↑ 8.7% vs last period</span>
+          <span className="text-[10px] text-gray-400">{totalTokens.toLocaleString()} tokens</span>
+        </div>
+        <div className="p-3 rounded-lg bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-700">
+          <span className="text-[10px] text-gray-500 uppercase">Avg Latency</span>
+          <p className="text-lg font-bold text-navy-900 dark:text-white">{Math.round(avgLatency).toLocaleString()}ms</p>
+          <span className="text-[10px] text-gray-400">per request</span>
         </div>
         <div className="p-3 rounded-lg bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-700">
           <span className="text-[10px] text-gray-500 uppercase">Avg Cost/Token</span>
-          <p className="text-lg font-bold text-navy-900 dark:text-white">${((totalCost / totalTokens) * 1_000_000).toFixed(4)}/M</p>
-          <span className="text-[10px] text-green-500">↓ 2.1% efficient</span>
-        </div>
-        <div className="p-3 rounded-lg bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-700">
-          <span className="text-[10px] text-gray-500 uppercase">Cache Hit Rate</span>
-          <p className="text-lg font-bold text-green-600 dark:text-green-400">34.2%</p>
-          <span className="text-[10px] text-green-500">↑ 5.3% improvement</span>
+          <p className="text-lg font-bold text-navy-900 dark:text-white">${Number(data?.avg_cost_per_token ?? 0).toExponential(2)}</p>
+          <span className="text-[10px] text-gray-400">per token</span>
         </div>
       </div>
 
@@ -120,22 +151,55 @@ function TokenCostExplorer() {
           <h3 className="text-sm font-semibold text-navy-900 dark:text-white">Cost by Model</h3>
         </div>
         <div className="p-4 space-y-2">
-          {modelCosts.map((m) => (
-            <div key={m.model} className="flex items-center gap-3">
-              <span className="text-xs text-gray-600 dark:text-gray-400 w-28 truncate">{m.model}</span>
-              <div className="flex-1 h-3 bg-gray-100 dark:bg-navy-700 rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full"
-                  style={{
-                    width: `${m.pct}%`,
-                    backgroundColor: m.model.includes("mini") ? "#10B981" : m.model.includes("turbo") ? "#8B5CF6" : m.model.includes("sonnet") ? "#F59E0B" : "#3B82F6",
-                  }}
-                />
+          {modelCosts.length === 0 ? (
+            <p className="text-xs text-gray-400 text-center py-4">No cost data available</p>
+          ) : (
+            modelCosts.map((m: any) => (
+              <div key={m.model} className="flex items-center gap-3">
+                <span className="text-xs text-gray-600 dark:text-gray-400 w-28 truncate">{m.model}</span>
+                <div className="flex-1 h-3 bg-gray-100 dark:bg-navy-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${m.percentage}%`,
+                      backgroundColor: m.model.includes("mini") ? "#10B981" : m.model.includes("turbo") ? "#8B5CF6" : m.model.includes("sonnet") ? "#F59E0B" : "#3B82F6",
+                    }}
+                  />
+                </div>
+                <span className="text-xs text-navy-900 dark:text-white font-medium w-20 text-right">${Number(m.cost).toFixed(4)}</span>
+                <span className="text-[10px] text-gray-400 w-12 text-right">{m.percentage}%</span>
               </div>
-              <span className="text-xs text-navy-900 dark:text-white font-medium w-20 text-right">${m.cost.toFixed(2)}</span>
-              <span className="text-[10px] text-gray-400 w-16 text-right">{(m.tokens / 1_000_000).toFixed(1)}M</span>
-            </div>
-          ))}
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* ── Latency by Model ──────────────────────────────────── */}
+      <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm">
+        <div className="px-4 py-3 border-b border-gray-100 dark:border-navy-700">
+          <h3 className="text-sm font-semibold text-navy-900 dark:text-white">Latency by Model</h3>
+        </div>
+        <div className="p-4">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-gray-500 border-b border-gray-100 dark:border-navy-700">
+                <th className="text-left py-1 font-medium">Model</th>
+                <th className="text-right py-1 font-medium">Avg (ms)</th>
+                <th className="text-right py-1 font-medium">Min (ms)</th>
+                <th className="text-right py-1 font-medium">Max (ms)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data?.latency_by_model ?? []).map((m: any) => (
+                <tr key={m.model} className="border-b border-gray-50 dark:border-navy-800">
+                  <td className="py-1.5 text-navy-900 dark:text-white">{m.model}</td>
+                  <td className="py-1.5 text-right">{Math.round(m.avg_latency_ms).toLocaleString()}</td>
+                  <td className="py-1.5 text-right">{Math.round(m.min_latency_ms).toLocaleString()}</td>
+                  <td className="py-1.5 text-right">{Math.round(m.max_latency_ms).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -294,32 +358,54 @@ function BenchmarkSuiteDashboard() {
   );
 }
 
-function DeploymentSafetyGate() {
+function DeploymentSafetyGate({ data, isLoading }: { data?: any; isLoading: boolean }) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-48">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gold-600" />
+      </div>
+    );
+  }
+
   const gates = [
-    { name: "Quality Score", status: "pass", value: "87%", threshold: "≥80%" },
-    { name: "Benchmark Pass Rate", status: "pass", value: "84%", threshold: "≥80%" },
-    { name: "Hallucination Rate", status: "pass", value: "3.2%", threshold: "<5.0%" },
-    { name: "Cost Impact", status: "warning", value: "+12.3%", threshold: "<10%" },
-    { name: "Regression Check", status: "pass", value: "2 regressions", threshold: "0 critical" },
+    { name: "Quality Score", status: data?.total_approvals > 0 ? "pass" : "na", value: data ? `${(data.avg_confidence * 100).toFixed(0)}%` : "N/A", threshold: "≥ 70%" },
+    { name: "Approval Rate", status: (data?.approval_rate ?? 0) >= 50 ? "pass" : "warning", value: data ? `${data.approval_rate}%` : "N/A", threshold: "≥ 50%" },
+    { name: "Execution Success Rate", status: (data?.execution_success_rate ?? 100) >= 95 ? "pass" : "warning", value: data ? `${data.execution_success_rate}%` : "N/A", threshold: "≥ 95%" },
+    { name: "Hallucination Rate", status: "na", value: "N/A", threshold: "Data pending" },
+    { name: "Benchmark Pass Rate", status: "na", value: "N/A", threshold: "Data pending" },
   ];
+
+  const totalChecks = gates.filter(g => g.status !== "na").length;
+  const passedChecks = gates.filter(g => g.status === "pass").length;
+  const gateStatus = totalChecks > 0 && passedChecks === totalChecks ? "pass" : passedChecks > 0 ? "warning" : "na";
 
   return (
     <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm">
       <div className="px-4 py-3 border-b border-gray-100 dark:border-navy-700 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-navy-900 dark:text-white">Deployment Safety Gates</h3>
-        <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300">
-          Gate: Warning
+        <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+          gateStatus === "pass" ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300" :
+          gateStatus === "warning" ? "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300" :
+          "bg-gray-100 dark:bg-navy-700 text-gray-500"
+        }`}>
+          {gateStatus === "pass" ? "All Pass" : gateStatus === "warning" ? `${passedChecks}/${totalChecks} Pass` : "Insufficient Data"}
         </span>
       </div>
       <div className="p-4 space-y-2">
         {gates.map((gate) => (
           <div key={gate.name} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-navy-700">
             <span className={`w-2 h-2 rounded-full ${
-              gate.status === "pass" ? "bg-green-500" : "bg-yellow-500"
+              gate.status === "pass" ? "bg-green-500" :
+              gate.status === "warning" ? "bg-yellow-500" :
+              "bg-gray-300 dark:bg-navy-500"
             }`} />
-            <span className="text-xs text-gray-600 dark:text-gray-400 w-32">{gate.name}</span>
+            <span className="text-xs text-gray-600 dark:text-gray-400 w-36">{gate.name}</span>
             <div className="flex-1" />
-            <span className="text-xs font-medium text-navy-900 dark:text-white">{gate.value}</span>
+            <span className={`text-xs font-medium ${
+              gate.status === "pass" ? "text-green-600 dark:text-green-400" :
+              gate.status === "warning" ? "text-yellow-600 dark:text-yellow-400" :
+              "text-gray-400"
+            }`}>{gate.value}</span>
             <span className="text-[10px] text-gray-400">threshold: {gate.threshold}</span>
           </div>
         ))}

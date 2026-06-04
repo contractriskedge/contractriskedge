@@ -334,3 +334,67 @@ class ModelUsageSummary(BaseModel):
     total_tokens: int = 0
     cost_usd: float = 0.0
     error_rate: float = 0.0
+
+
+# ── Cost Summary (Sprint 19) ────────────────────────────────────────
+
+
+class CostSummaryResponse(BaseModel):
+    """Aggregated AI cost and usage summary."""
+    total_cost: float = 0.0
+    total_tokens: int = 0
+    total_requests: int = 0
+    avg_cost_per_request: float = 0.0
+    avg_cost_per_token: float = 0.0
+    avg_latency_ms: float = 0.0
+    cost_by_model: list[ModelCostBreakdown] = Field(default_factory=list)
+    requests_by_model: list[ModelRequestBreakdown] = Field(default_factory=list)
+    latency_by_model: list[ModelLatencyBreakdown] = Field(default_factory=list)
+
+
+class ModelCostBreakdown(BaseModel):
+    """Cost breakdown for a single model."""
+    model: str
+    provider: str
+    cost: float = 0.0
+    percentage: float = 0.0
+
+
+class ModelRequestBreakdown(BaseModel):
+    """Request count breakdown for a single model."""
+    model: str
+    requests: int = 0
+    percentage: float = 0.0
+
+
+class ModelLatencyBreakdown(BaseModel):
+    """Latency breakdown for a single model."""
+    model: str
+    avg_latency_ms: float = 0.0
+    min_latency_ms: float = 0.0
+    max_latency_ms: float = 0.0
+
+
+# ── Safety Summary (Sprint 19) ──────────────────────────────────────
+
+
+class SafetySummaryResponse(BaseModel):
+    """Aggregated AI safety and approval summary."""
+    total_approvals: int = 0
+    approved_count: int = 0
+    rejected_count: int = 0
+    pending_count: int = 0
+    approval_rate: float = 0.0
+    avg_confidence: float = 0.0
+    total_executions: int = 0
+    execution_success_rate: float = 0.0
+    cost_impact_pct: float = 0.0
+    approvals_by_type: list[ApprovalTypeBreakdown] = Field(default_factory=list)
+
+
+class ApprovalTypeBreakdown(BaseModel):
+    """Breakdown of approvals by type."""
+    approval_type: str = ""
+    count: int = 0
+    approved: int = 0
+    rejected: int = 0

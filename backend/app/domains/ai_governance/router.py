@@ -19,6 +19,8 @@ from app.domains.ai_governance.schemas import (
     RegressionSuiteCreate, RegressionSuiteResponse, RegressionRunResponse,
     ModelAuditEvent, ModelAuditLogResponse,
     AIQualityDashboard,
+    CostSummaryResponse,
+    SafetySummaryResponse,
 )
 from app.domains.ai_governance.service import (
     PromptRegistryService,
@@ -276,3 +278,27 @@ async def evaluate_quality_gates(
         new_version=new_version,
         evaluation_run_id=evaluation_run_id,
     )
+
+
+# ── Cost Summary (Sprint 19) ─────────────────────────────────────
+
+
+@router.get("/cost-summary", response_model=CostSummaryResponse)
+async def get_cost_summary(
+    service: ModelAuditService = Depends(get_audit_service),
+    _: None = Depends(require_permission(Permissions.ADMIN_TENANT)),
+):
+    """Get aggregated AI cost and usage summary from execution runs."""
+    return await service.get_cost_summary()
+
+
+# ── Safety Summary (Sprint 19) ────────────────────────────────────
+
+
+@router.get("/safety-summary", response_model=SafetySummaryResponse)
+async def get_safety_summary(
+    service: ModelAuditService = Depends(get_audit_service),
+    _: None = Depends(require_permission(Permissions.ADMIN_TENANT)),
+):
+    """Get aggregated AI safety and approval summary."""
+    return await service.get_safety_summary()

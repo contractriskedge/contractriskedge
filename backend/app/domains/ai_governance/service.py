@@ -22,6 +22,8 @@ from app.domains.ai_governance.schemas import (
     ConfidenceCalibrationRecord, CalibrationPoint, CalibrationRecommendation,
     ModelAuditEvent, ModelAuditLogResponse,
     AIQualityDashboard, ModelUsageSummary,
+    CostSummaryResponse, ModelCostBreakdown, ModelRequestBreakdown,
+    ModelLatencyBreakdown, SafetySummaryResponse, ApprovalTypeBreakdown,
 )
 
 logger = logging.getLogger(__name__)
@@ -569,4 +571,160 @@ class ModelAuditService:
             avg_latency_ms_24h=round(row.avg_latency, 1) if row else 0.0,
             total_cost_24h=round(row.total_cost, 4) if row else 0.0,
             model_usage=model_usage,
+        )
+
+    # ── Cost Summary (from ai_execution_runs) ───────────────────
+
+    async def get_cost_summary(self) -> CostSummaryResponse:
+        """Get aggregated AI cost and usage summary from execution runs."""
+        # Overall stats
+        total = await self.session.execute(
+            sa_text("""
+                SELECT
+                    COALESCE(SUM(cost_usd), 0)::float AS total_cost,
+                    COALESCE(SUM(total_tokens), 0)::int AS total_tokens,
+                    COUNT(*)::int AS total_requests,
+                    COALESCE(AVG(latency_ms), 0)::float AS avg_latency
+                FROM ai_execution_runs
+                WHERE tenant_id = :tid
+            """),
+            {"tid": self.tenant_id},
+        )
+        row = total.fetchone()
+        total_cost = row.total_cost if row else 0.0
+        total_tokens = row.total_tokens if row else 0
+        total_requests = row.total_requests if row else 0
+        avg_latency = row.avg_latency if row else 0.0
+
+        avg_cost_per_request = round(total_cost / total_requests, 6) if total_requests > 0 else 0.0
+        avg_cost_per_token = round(total_cost / total_tokens, 10) if total_tokens > 0 else 0.0
+
+        # Cost by model
+        by_model = await self.session.execute(
+            sa_text("""
+                SELECT model, provider,
+                    COALESCE(SUM(cost_usd), 0)::float AS cost,
+                    COUNT(*)::int AS requests,
+                    COALESCE(AVG(latency_ms), 0)::float AS avg_lat,
+                    COALESCE(MIN(latency_ms), 0)::float AS min_lat,
+                    COALESCE(MAX(latency_ms), 0)::float AS max_lat
+                FROM ai_execution_runs
+                WHERE tenant_id = :tid
+                GROUP BY model, provider
+                ORDER BY cost DESC
+            """),
+            {"tid": self.tenant_id},
+        )
+        rows = by_model.fetchall()
+
+        cost_by_model = []
+        requests_by_model = []
+        latency_by_model = []
+
+        for r in rows:
+            pct = round(r.cost / total_cost * 100, 1) if total_cost > 0 else 0.0
+            req_pct = round(r.requests / total_requests * 100, 1) if total_requests > 0 else 0.0
+            cost_by_model.append(ModelCostBreakdown(
+                model=r.model, provider=r.provider,
+                cost=round(r.cost, 4), percentage=pct,
+            ))
+            requests_by_model.append(ModelRequestBreakdown(
+                model=r.model, requests=r.requests, percentage=req_pct,
+            ))
+            latency_by_model.append(ModelLatencyBreakdown(
+                model=r.model,
+                avg_latency_ms=round(r.avg_lat, 1),
+                min_latency_ms=round(r.min_lat, 1),
+                max_latency_ms=round(r.max_lat, 1),
+            ))
+
+        return CostSummaryResponse(
+            total_cost=round(total_cost, 4),
+            total_tokens=total_tokens,
+            total_requests=total_requests,
+            avg_cost_per_request=avg_cost_per_request,
+            avg_cost_per_token=avg_cost_per_token,
+            avg_latency_ms=round(avg_latency, 1),
+            cost_by_model=cost_by_model,
+            requests_by_model=requests_by_model,
+            latency_by_model=latency_by_model,
+        )
+
+    # ── Safety Summary (from ai_approvals + ai_execution_runs) ──
+
+    async def get_safety_summary(self) -> SafetySummaryResponse:
+        """Get aggregated AI safety and approval summary."""
+        # Approval stats
+        apr = await self.session.execute(
+            sa_text("""
+                SELECT
+                    COUNT(*)::int AS total,
+                    COUNT(*) FILTER (WHERE status = 'approved')::int AS approved,
+                    COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected,
+                    COUNT(*) FILTER (WHERE status = 'pending')::int AS pending,
+                    COALESCE(AVG(confidence), 0)::float AS avg_conf
+                FROM ai_approvals
+                WHERE tenant_id = :tid
+            """),
+            {"tid": self.tenant_id},
+        )
+        arow = apr.fetchone()
+        total_approvals = arow.total if arow else 0
+        approved_count = arow.approved if arow else 0
+        rejected_count = arow.rejected if arow else 0
+        pending_count = arow.pending if arow else 0
+        avg_confidence = arow.avg_conf if arow else 0.0
+        approval_rate = round(approved_count / total_approvals * 100, 1) if total_approvals > 0 else 0.0
+
+        # Execution stats
+        exec_stats = await self.session.execute(
+            sa_text("""
+                SELECT
+                    COUNT(*)::int AS total,
+                    COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
+                    COUNT(*) FILTER (WHERE status = 'failed')::int AS failed
+                FROM ai_execution_runs
+                WHERE tenant_id = :tid
+            """),
+            {"tid": self.tenant_id},
+        )
+        erow = exec_stats.fetchone()
+        total_execs = (erow.total if erow else 0)
+        completed_execs = (erow.completed if erow else 0)
+        exec_success_rate = round(completed_execs / total_execs * 100, 1) if total_execs > 0 else 0.0
+
+        # Approvals by type
+        by_type = await self.session.execute(
+            sa_text("""
+                SELECT approval_type,
+                    COUNT(*)::int AS total,
+                    COUNT(*) FILTER (WHERE status = 'approved')::int AS approved,
+                    COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected
+                FROM ai_approvals
+                WHERE tenant_id = :tid
+                GROUP BY approval_type
+            """),
+            {"tid": self.tenant_id},
+        )
+        approvals_by_type = [
+            ApprovalTypeBreakdown(
+                approval_type=r.approval_type,
+                count=r.total,
+                approved=r.approved,
+                rejected=r.rejected,
+            )
+            for r in by_type.fetchall()
+        ]
+
+        return SafetySummaryResponse(
+            total_approvals=total_approvals,
+            approved_count=approved_count,
+            rejected_count=rejected_count,
+            pending_count=pending_count,
+            approval_rate=approval_rate,
+            avg_confidence=round(avg_confidence, 2),
+            total_executions=total_execs,
+            execution_success_rate=exec_success_rate,
+            cost_impact_pct=0.0,
+            approvals_by_type=approvals_by_type,
         )
