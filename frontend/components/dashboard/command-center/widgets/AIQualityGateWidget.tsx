@@ -1,11 +1,14 @@
 /**
- * AIQualityGateWidget — Benchmark results, hallucination rate, gate status.
+ * AIQualityGateWidget — AI execution quality monitoring.
  *
- * Shows:
- * - Latest benchmark score with pass/fail badge
- * - Hallucination rate trend line (7d)
- * - Regression count with severity breakdown
- * - Deployment block indicators
+ * Shows REAL data from ai_execution_runs table:
+ * - AI run success rate (completed / total * 100)
+ * - Failed runs count
+ * - Average findings per run
+ * - Average processing time
+ * - Deployment gate status based on success rate threshold
+ *
+ * No synthetic/hardcoded metrics. When no data exists, shows empty state.
  */
 
 "use client";
@@ -13,15 +16,19 @@
 import React from "react";
 
 interface QualitySummaryData {
-  latestBenchmarkScore: number;
-  benchmarkPassed: boolean;
-  hallucinationRate: number;
-  hallucinationTrend: number[]; // 7 days
-  regressionCount: number;
-  criticalRegressions: number;
-  majorRegressions: number;
-  minorRegressions: number;
-  deploymentBlocked: boolean;
+  /** AI run success rate (completed / total * 100) */
+  successRate: number;
+  /** Total completed AI runs */
+  completedRuns: number;
+  /** Total failed AI runs */
+  failedRuns: number;
+  /** Average findings detected per run */
+  avgFindingsPerRun: number;
+  /** Average processing time in seconds */
+  avgProcessingSeconds: number;
+  /** Whether the deployment gate is open (success rate >= 80%) */
+  deploymentGateOpen: boolean;
+  /** Reasons the deployment gate is blocked */
   blockReasons: string[];
 }
 
@@ -40,7 +47,7 @@ export function AIQualityGateWidget({ summary }: AIQualityGateWidgetProps) {
           </svg>
         </div>
         <p className="text-sm font-medium text-gray-500 dark:text-gray-400">No AI quality data available</p>
-        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Connect to the backend to see AI quality gate metrics.</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">No AI execution runs found in the current period.</p>
       </div>
     );
   }
@@ -49,97 +56,67 @@ export function AIQualityGateWidget({ summary }: AIQualityGateWidgetProps) {
 
   return (
     <div className="space-y-3">
-      {/* ── Top row: Score + Hallucination ────────────────────── */}
+      {/* ── Top row: Success Rate + Failed Runs ──────────────── */}
       <div className="flex items-center gap-4">
-        {/* Benchmark Score */}
+        {/* Success Rate */}
         <div className="flex-1 p-3 rounded-lg bg-gray-50 dark:bg-navy-700">
-          <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Benchmark</span>
+          <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">AI Run Success</span>
           <div className="flex items-center gap-2 mt-1">
-            <span className={`text-2xl font-bold ${data.benchmarkPassed ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
-              {data.latestBenchmarkScore}%
+            <span className={`text-2xl font-bold ${data.successRate >= 90 ? "text-green-600 dark:text-green-400" : data.successRate >= 80 ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400"}`}>
+              {data.successRate}%
             </span>
             <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${
-              data.benchmarkPassed
+              data.successRate >= 90
                 ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
+                : data.successRate >= 80
+                ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
                 : "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
             }`}>
-              {data.benchmarkPassed ? "Pass" : "Fail"}
+              {data.completedRuns} runs
             </span>
           </div>
+          <p className="text-[10px] text-gray-400 mt-0.5">{data.completedRuns} completed · {data.failedRuns} failed</p>
         </div>
 
-        {/* Hallucination Rate */}
+        {/* Avg Processing */}
         <div className="flex-1 p-3 rounded-lg bg-gray-50 dark:bg-navy-700">
-          <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Hallucination</span>
+          <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Processing</span>
           <div className="flex items-center gap-2 mt-1">
-            <span className={`text-2xl font-bold ${
-              data.hallucinationRate < 3 ? "text-green-600 dark:text-green-400" :
-              data.hallucinationRate < 5 ? "text-amber-600 dark:text-amber-400" :
-              "text-red-600 dark:text-red-400"
-            }`}>
-              {data.hallucinationRate}%
+            <span className="text-2xl font-bold text-navy-900 dark:text-white">
+              {data.avgProcessingSeconds.toFixed(1)}s
             </span>
-            <span className="text-xs text-gray-500">rate</span>
+            <span className="text-xs text-gray-500">avg</span>
           </div>
-          {/* Mini sparkline */}
-          <div className="flex items-end gap-0.5 h-6 mt-1">
-            {data.hallucinationTrend.map((val, i) => (
-              <div
-                key={i}
-                className="flex-1 rounded-t"
-                style={{
-                  height: `${(val / 5) * 100}%`,
-                  backgroundColor: val < 3 ? "#10B981" : val < 5 ? "#F59E0B" : "#EF4444",
-                  opacity: 0.7 + (i / data.hallucinationTrend.length) * 0.3,
-                }}
-              />
-            ))}
-          </div>
+          <p className="text-[10px] text-gray-400 mt-0.5">{data.avgFindingsPerRun.toFixed(1)} avg findings/run</p>
         </div>
       </div>
 
-      {/* ── Regressions ───────────────────────────────────────── */}
-      <div>
-        <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase mb-1 block">
-          Regressions
-        </span>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-red-500" />
-            <span className="text-xs text-navy-900 dark:text-white font-medium">{data.criticalRegressions}</span>
-            <span className="text-[10px] text-gray-400">critical</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-orange-500" />
-            <span className="text-xs text-navy-900 dark:text-white font-medium">{data.majorRegressions}</span>
-            <span className="text-[10px] text-gray-400">major</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-yellow-500" />
-            <span className="text-xs text-navy-900 dark:text-white font-medium">{data.minorRegressions}</span>
-            <span className="text-[10px] text-gray-400">minor</span>
-          </div>
-          <span className="text-xs text-gray-500 ml-auto">{data.regressionCount} total</span>
+      {/* ── Run Details ───────────────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="p-2 rounded-lg bg-gray-50 dark:bg-navy-700 text-center">
+          <span className="text-lg font-bold text-navy-900 dark:text-white">{data.completedRuns}</span>
+          <p className="text-[10px] text-gray-500">Completed Runs</p>
+        </div>
+        <div className="p-2 rounded-lg bg-gray-50 dark:bg-navy-700 text-center">
+          <span className={`text-lg font-bold ${data.failedRuns > 0 ? "text-red-600" : "text-green-600"}`}>
+            {data.failedRuns}
+          </span>
+          <p className="text-[10px] text-gray-500">Failed Runs</p>
         </div>
       </div>
 
       {/* ── Deployment Gate ───────────────────────────────────── */}
       <div className={`px-3 py-2 rounded-lg border ${
-        data.deploymentBlocked
+        !data.deploymentGateOpen
           ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"
           : "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800"
       }`}>
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium">
-            {data.deploymentBlocked ? "🚫 Deployment Blocked" : "✅ Deployment Gate Open"}
+            {!data.deploymentGateOpen ? "🚫 Deployment Blocked" : "✅ Deployment Gate Open"}
           </span>
-          {data.deploymentBlocked && (
-            <span className="text-[10px] text-red-600 dark:text-red-400">
-              {data.blockReasons.length} reason{data.blockReasons.length > 1 ? "s" : ""}
-            </span>
-          )}
         </div>
-        {data.deploymentBlocked && data.blockReasons.length > 0 && (
+        {!data.deploymentGateOpen && data.blockReasons.length > 0 && (
           <ul className="mt-1 space-y-0.5">
             {data.blockReasons.map((reason, i) => (
               <li key={i} className="text-[10px] text-red-600 dark:text-red-400 flex items-center gap-1">
@@ -147,6 +124,11 @@ export function AIQualityGateWidget({ summary }: AIQualityGateWidgetProps) {
               </li>
             ))}
           </ul>
+        )}
+        {data.deploymentGateOpen && (
+          <p className="text-[10px] text-green-600 dark:text-green-400 mt-0.5">
+            AI execution success rate ({data.successRate}%) meets the 80% threshold.
+          </p>
         )}
       </div>
     </div>

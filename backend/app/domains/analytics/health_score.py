@@ -32,6 +32,8 @@ from typing import Optional
 from sqlalchemy import select, func as sa_func, text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.analytics.status_constants import ACTIVE_REVIEW_STATUSES
+
 logger = logging.getLogger(__name__)
 
 
@@ -282,16 +284,16 @@ class TenantHealthScorer:
 
     async def _score_backlog_pressure(self, tenant_id: str) -> TenantHealthDimension:
         """Score backlog pressure."""
-        # Active reviews
+        # Active reviews (using shared status constants)
         active_result = await self.session.execute(
             sa_text("""
                 SELECT COUNT(*)::int AS active
                 FROM contract_reviews
                 WHERE tenant_id = :tid
                   AND is_deleted = FALSE
-                  AND status NOT IN ('approved', 'rejected', 'closed')
+                  AND status = ANY(:active_statuses)
             """),
-            {"tid": tenant_id},
+            {"tid": tenant_id, "active_statuses": ACTIVE_REVIEW_STATUSES},
         )
         active = active_result.fetchone().active or 0
 

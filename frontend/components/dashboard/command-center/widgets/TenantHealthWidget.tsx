@@ -88,7 +88,7 @@ export function TenantHealthWidget({ healthScore }: TenantHealthWidgetProps) {
       <div className="flex items-start gap-4">
         {/* ── Gauge ──────────────────────────────────────────── */}
         <div className="w-24 h-24 shrink-0">
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width={96} height={96}>
             <RadialBarChart
               cx="50%"
               cy="50%"
@@ -139,8 +139,8 @@ export function TenantHealthWidget({ healthScore }: TenantHealthWidgetProps) {
             </div>
           </div>
           <div className="space-y-1.5">
-            {data.dimensions.map((dim) => (
-              <div key={dim.label} className="flex items-center gap-2">
+            {data.dimensions.map((dim, idx) => (
+              <div key={`dim-${idx}`} className="flex items-center gap-2">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-gray-600 dark:text-gray-400 truncate">
@@ -192,8 +192,8 @@ export function TenantHealthWidget({ healthScore }: TenantHealthWidgetProps) {
               </button>
             </div>
             <div className="space-y-4">
-              {data.dimensions.map((dim) => (
-                <div key={dim.label} className="p-3 bg-gray-50 dark:bg-navy-700 rounded-lg">
+              {data.dimensions.map((dim, idx) => (
+                <div key={`drilldown-dim-${idx}`} className="p-3 bg-gray-50 dark:bg-navy-700 rounded-lg">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-sm font-medium text-navy-900 dark:text-white">{dim.label}</span>
                     <span className="text-xs text-gray-500">{dim.value != null && !isNaN(dim.value) ? `${Math.round(dim.value * 100)}%` : "—"}</span>

@@ -14,8 +14,69 @@ export interface ExecutiveDashboardData {
   negotiation_trends: NegotiationTrends;
   contract_exposure: ContractExposureData;
   throughput_bottlenecks: ThroughputBottlenecks;
+  cost_governance: CostGovernanceData;
+  ai_quality_gate: AIQualityGateData;
+  benchmark_analytics: BenchmarkAnalyticsData;
+  risk_score_trend: RiskScoreTrendPoint[];
+  review_volume_trend: ReviewVolumeTrendPoint[];
+  exposure_trend: ExposureTrendPoint[];
+  throughput_trend: ThroughputTrendPoint[];
   period: string;
   generated_at: string;
+}
+
+// ── Cost Governance ────────────────────────────────────────────────
+
+export interface CostGovernanceData {
+  total_ai_reviews: number;
+  estimated_ai_cost: number;
+  cost_per_contract: number;
+  monthly_projection: number;
+  trend: CostTrendPoint[];
+}
+
+export interface CostTrendPoint {
+  period: string;
+  ai_reviews: number;
+  estimated_cost: number;
+}
+
+// ── AI Quality Gate ────────────────────────────────────────────────
+
+export interface AIQualityGateData {
+  success_rate: number;
+  completed_runs: number;
+  failed_runs: number;
+  avg_findings: number;
+  avg_processing_seconds: number;
+}
+
+// ── Benchmark Analytics ────────────────────────────────────────────
+
+export interface BenchmarkAnalyticsData {
+  cycle_time_vs_benchmark: string;
+  sla_vs_benchmark: string;
+  reviewer_efficiency_vs_benchmark: string;
+  benchmark_cycle_time_days: number;
+  benchmark_sla_pct: number;
+  benchmark_reviewer_load: number;
+  current_cycle_time_days: number;
+  current_sla_pct: number;
+  current_reviewer_load: number;
+}
+
+// ── Executive Trend Points ─────────────────────────────────────────
+
+export interface RiskScoreTrendPoint {
+  period: string;
+  avg_risk_score: number;
+  contract_count: number;
+}
+
+export interface ReviewVolumeTrendPoint {
+  period: string;
+  reviews_created: number;
+  reviews_completed: number;
 }
 
 // ── Portfolio ──────────────────────────────────────────────────────
@@ -162,6 +223,15 @@ export interface ContractExposureData {
   top_risk_drivers: RiskDriver[];
   exposure_trend: ExposureTrendPoint[];
   concentration_risk: string;
+  top_riskiest_contracts: RiskiestContractItem[];
+}
+
+export interface RiskiestContractItem {
+  review_id: string;
+  document_name: string;
+  risk_score: number;
+  exposure_score: number;
+  top_finding: string;
 }
 
 export interface CategoryExposure {
@@ -253,4 +323,9 @@ export interface WidgetDataMap {
   cycleTime: CycleTimeAnalytics | null;
   negotiationTrends: NegotiationTrends | null;
   portfolioSummary: PortfolioSummary | null;
+  costGovernance: CostGovernanceData | null;
+  aiQualityGate: AIQualityGateData | null;
+  benchmarkAnalytics: BenchmarkAnalyticsData | null;
+  riskScoreTrend: RiskScoreTrendPoint[];
+  reviewVolumeTrend: ReviewVolumeTrendPoint[];
 }

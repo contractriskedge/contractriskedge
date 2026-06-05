@@ -193,7 +193,18 @@ export function ExecutiveAlertCenter() {
                         </span>
                       </div>
                       <p className="text-xs font-medium text-navy-900 dark:text-white mt-0.5">{alert.title}</p>
-                      <p className="text-[10px] text-gray-500 mt-0.5 line-clamp-2">{alert.description}</p>
+                      <p className="text-[10px] text-gray-500 mt-0.5 line-clamp-2">
+                        {(() => {
+                          // Split description into main text and evidence (parenthesized part)
+                          const desc = alert.description;
+                          const evidenceMatch = desc.match(/\s(\(before:.*\))$/);
+                          if (evidenceMatch) {
+                            const main = desc.slice(0, desc.indexOf(evidenceMatch[1]));
+                            return <>{main}<span className="text-[9px] text-gray-400 font-mono">{evidenceMatch[1]}</span></>;
+                          }
+                          return desc;
+                        })()}
+                      </p>
                       {alert.affected_count && alert.affected_count > 0 && (
                         <p className="text-[10px] text-gray-400 mt-0.5">{alert.affected_count} affected</p>
                       )}

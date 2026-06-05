@@ -45,7 +45,8 @@ export function CostGovernanceSnapshotWidget({ dashboard }: CostGovernanceSnapsh
   }
 
   const data = dashboard;
-  const usagePct = Math.round((data.budgetUsed / data.totalBudget) * 100);
+  const totalBudget = Math.max(data.totalBudget, 1); // prevent division by zero
+  const usagePct = Math.min(100, Math.round((data.budgetUsed / totalBudget) * 100));
   const remainingPct = 100 - usagePct;
 
   const isWarning = usagePct >= 80 && usagePct < 95;

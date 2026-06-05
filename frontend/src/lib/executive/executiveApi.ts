@@ -65,9 +65,21 @@ export async function fetchThroughputBottlenecks(params?: { period_days?: number
 
 // ── Health Score ───────────────────────────────────────────────────
 
-export async function fetchHealthScore(params?: { period_days?: number }) {
+export async function fetchHealthScore(params?: { period_days?: number }): Promise<import("./executiveTypes").HealthScoreData> {
   const qs = params?.period_days ? `?period_days=${params.period_days}` : "";
-  return api.get(`/analytics/health-score${qs}`);
+  const raw: any = await api.get(`/analytics/health-score${qs}`);
+  // Backend returns { composite_score, dimensions: [{ name, score, ... }] }
+  // Frontend expects { composite, dimensions: [{ label, value, ... }] }
+  return {
+    composite: raw.composite_score ?? 0,
+    status: raw.status ?? "unknown",
+    dimensions: (raw.dimensions ?? []).map((d: any, i: number) => ({
+      label: d.name ?? `Dimension ${i + 1}`,
+      value: d.score ?? 0,
+      trend: d.trend ?? "stable",
+      history: d.history,
+    })),
+  };
 }
 
 export async function fetchHealthScoreHistory(params?: { period_days?: number }) {

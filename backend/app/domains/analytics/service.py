@@ -9,6 +9,7 @@ from typing import Optional
 
 from sqlalchemy import text as sa_text
 
+from app.domains.analytics.status_constants import ACTIVE_REVIEW_STATUSES
 from app.kernel.datetime_utils import age_minutes, ensure_utc, utc_now
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -219,9 +220,9 @@ class AnalyticsService:
             SELECT COUNT(*)::int FROM contract_reviews
             WHERE tenant_id = :tenant_id
               AND is_deleted = FALSE
-              AND status IN ('draft', 'ai_analyzed', 'in_review', 'pending_approval')
+              AND status = ANY(:active_statuses)
         """)
-        result = await self.session.execute(pending_reviews_sql, {"tenant_id": self.tenant_id})
+        result = await self.session.execute(pending_reviews_sql, {"tenant_id": self.tenant_id, "active_statuses": ACTIVE_REVIEW_STATUSES})
         pending_reviews = result.scalar() or 0
 
         # Recent errors (24h)
@@ -424,11 +425,11 @@ class AnalyticsService:
             FROM contract_reviews
             WHERE tenant_id = :tid
               AND is_deleted = FALSE
-              AND status IN ('draft', 'ai_analyzed', 'in_review', 'pending_approval')
+              AND status = ANY(:active_statuses)
             GROUP BY bucket
             ORDER BY bucket
         """)
-        result = await self.session.execute(sql, {"tid": self.tenant_id})
+        result = await self.session.execute(sql, {"tid": self.tenant_id, "active_statuses": ACTIVE_REVIEW_STATUSES})
         return [{"bucket": r.bucket, "count": r.count} for r in result.fetchall()]
 
     async def get_executive_summary(self) -> dict:
@@ -466,9 +467,9 @@ class AnalyticsService:
             sa_text("""
                 SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (NOW() - updated_at)) / 86400), 0)::float AS avg_days
                 FROM contract_reviews
-                WHERE tenant_id = :tid AND is_deleted = FALSE AND status IN ('draft', 'ai_analyzed', 'in_review', 'pending_approval')
+                WHERE tenant_id = :tid AND is_deleted = FALSE AND status = ANY(:active_statuses)
             """),
-            {"tid": self.tenant_id},
+            {"tid": self.tenant_id, "active_statuses": ACTIVE_REVIEW_STATUSES},
         )
         avg_sla_days = round(avg_age.scalar() or 0, 1)
 

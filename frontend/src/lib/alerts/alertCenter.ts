@@ -95,14 +95,24 @@ export function useAlertCenter() {
 
     if (raw.anomalies && Array.isArray(raw.anomalies)) {
       for (const a of raw.anomalies) {
+        // Build evidence string from before/after window comparison
+        const evidenceParts: string[] = [];
+        if (a.current_value !== undefined && a.expected_value !== undefined) {
+          evidenceParts.push(`before: ${a.expected_value}, after: ${a.current_value}`);
+        }
+        if (a.deviation_pct !== undefined) {
+          evidenceParts.push(`change: ${a.deviation_pct > 0 ? '+' : ''}${a.deviation_pct.toFixed(1)}%`);
+        }
+        const evidence = evidenceParts.length > 0 ? ` (${evidenceParts.join(' | ')})` : '';
+
         backendAlerts.push({
-          id: a.id ?? `alert-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          type: mapAnomalyType(a.type),
+          id: a.anomaly_id ?? a.id ?? `alert-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          type: mapAnomalyType(a.category ?? a.type),
           severity: a.severity ?? "medium",
           status: a.acknowledged ? "acknowledged" : "open",
           title: a.title ?? a.type ?? "Operational Alert",
-          description: a.description ?? a.message ?? "",
-          timestamp: a.timestamp ?? a.created_at ?? new Date().toISOString(),
+          description: (a.description ?? a.message ?? "") + evidence,
+          timestamp: a.detected_at ?? a.timestamp ?? a.created_at ?? new Date().toISOString(),
           correlation_id: a.correlation_id,
           affected_entities: a.affected_entities ?? a.affected_reviews ?? [],
           affected_count: a.affected_count ?? a.affected_reviews?.length ?? 0,
@@ -116,7 +126,29 @@ export function useAlertCenter() {
     setAlerts((prev) => {
       // Merge: new alerts take precedence, preserve acknowledged state
       const existingMap = new Map(prev.map((a) => [a.id, a]));
+
+      // Track seen anomaly signatures to deduplicate (same title + metric_name = same anomaly)
+      const seenSignatures = new Set<string>();
+      for (const a of prev) {
+        const meta = a.metadata as Record<string, unknown> | undefined;
+        const sig = `${a.title}::${meta?.metric_name ?? ''}`;
+        if (sig) seenSignatures.add(sig);
+      }
+
       for (const alert of backendAlerts) {
+        // Deduplicate by anomaly signature (title + metric_name)
+        const meta = alert.metadata as Record<string, unknown> | undefined;
+        const sig = `${alert.title}::${meta?.metric_name ?? ''}`;
+        if (sig && seenSignatures.has(sig)) {
+          // Update existing alert's timestamp and values instead of adding duplicate
+          const existing = existingMap.get(alert.id);
+          if (existing) {
+            existingMap.set(alert.id, { ...alert, status: existing.status });
+          }
+          continue;
+        }
+        if (sig) seenSignatures.add(sig);
+
         const existing = existingMap.get(alert.id);
         if (existing && existing.status === "acknowledged") {
           alert.status = "acknowledged";
@@ -210,8 +242,17 @@ export function useAlertCenter() {
 
 // ── Type Mapping ──────────────────────────────────────────────────
 
-function mapAnomalyType(type: string): AlertType {
+function mapAnomalyType(typeOrCategory: string): AlertType {
   const map: Record<string, AlertType> = {
+    // Backend category values
+    sla: "sla_breach",
+    volume: "workflow_bottleneck",
+    risk: "compliance_escalation",
+    performance: "provider_instability",
+    quality: "ai_drift",
+    cost: "workflow_bottleneck",
+    workload: "reviewer_overload",
+    // Legacy type values
     stuck_workflow: "workflow_bottleneck",
     error_spike: "provider_instability",
     sla_breach: "sla_breach",
@@ -223,5 +264,5 @@ function mapAnomalyType(type: string): AlertType {
     replay: "replay_inconsistency",
     vendor_concentration: "vendor_concentration_spike",
   };
-  return map[type] ?? "workflow_bottleneck";
+  return map[typeOrCategory] ?? "workflow_bottleneck";
 }

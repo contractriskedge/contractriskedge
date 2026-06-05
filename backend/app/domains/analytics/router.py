@@ -434,7 +434,8 @@ async def get_all_tenant_health_scores(
 
 @router.get("/executive/dashboard", response_model=ExecutiveDashboard)
 async def get_executive_dashboard(
-    period_days: int = Query(30, ge=7, le=365, description="Lookback period in days"),
+    period_days: int = Query(30, ge=1, le=365, description="Lookback period in days"),
+    include_trends: bool = Query(True, description="Include trend data (ignored, always included)"),
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
     _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),

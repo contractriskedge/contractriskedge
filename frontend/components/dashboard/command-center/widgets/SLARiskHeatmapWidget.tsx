@@ -40,8 +40,8 @@ function getHeatIntensity(probability: number): string {
 export function SLARiskHeatmapWidget({ slaRisk }: SLARiskHeatmapWidgetProps) {
   const [selectedCell, setSelectedCell] = useState<SLAPrediction | null>(null);
 
-  // No data state
-  if (!slaRisk || !slaRisk.at_risk_reviews || slaRisk.at_risk_reviews.length === 0) {
+  // ── No data state (null/undefined/API failure) ──
+  if (slaRisk === null || slaRisk === undefined) {
     return (
       <div className="flex flex-col items-center justify-center py-8 text-center">
         <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-navy-700 flex items-center justify-center mb-2">
@@ -51,6 +51,43 @@ export function SLARiskHeatmapWidget({ slaRisk }: SLARiskHeatmapWidgetProps) {
         </div>
         <p className="text-sm font-medium text-gray-500 dark:text-gray-400">No SLA risk data available</p>
         <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Connect to the backend to see SLA risk metrics.</p>
+      </div>
+    );
+  }
+
+  // ── Valid response with zero at-risk reviews — show summary with zero counts ──
+  if (!slaRisk.at_risk_reviews || slaRisk.at_risk_reviews.length === 0) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 mb-3 text-xs">
+          <span className="px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 font-medium">
+            All Clear
+          </span>
+          <span className="text-gray-500 dark:text-gray-400">
+            {slaRisk.total_active_reviews} active reviews
+          </span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="p-3 rounded-lg bg-gray-50 dark:bg-navy-700 text-center">
+            <span className="text-lg font-bold text-green-600 dark:text-green-400">{slaRisk.on_track}</span>
+            <p className="text-[10px] text-gray-500 mt-0.5">On Track</p>
+          </div>
+          <div className="p-3 rounded-lg bg-gray-50 dark:bg-navy-700 text-center">
+            <span className="text-lg font-bold text-amber-600 dark:text-amber-400">{slaRisk.at_risk}</span>
+            <p className="text-[10px] text-gray-500 mt-0.5">At Risk</p>
+          </div>
+          <div className="p-3 rounded-lg bg-gray-50 dark:bg-navy-700 text-center">
+            <span className="text-lg font-bold text-red-600 dark:text-red-400">{slaRisk.critical}</span>
+            <p className="text-[10px] text-gray-500 mt-0.5">Critical</p>
+          </div>
+          <div className="p-3 rounded-lg bg-gray-50 dark:bg-navy-700 text-center">
+            <span className="text-lg font-bold text-red-700 dark:text-red-300">{slaRisk.breached}</span>
+            <p className="text-[10px] text-gray-500 mt-0.5">Breached</p>
+          </div>
+        </div>
+        <div className="text-center py-2">
+          <p className="text-xs text-gray-400">No reviews currently at SLA risk</p>
+        </div>
       </div>
     );
   }

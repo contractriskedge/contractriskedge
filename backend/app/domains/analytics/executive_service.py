@@ -24,7 +24,22 @@ from app.domains.analytics.executive_schemas import (
     NegotiationTrends, ClauseNegotiationMetric, NegotiationTrendPoint,
     ContractExposure, CategoryExposure, RiskDriver, ExposureTrendPoint,
     ThroughputBottlenecks, Bottleneck, ThroughputTrendPoint,
+    CostGovernance, CostTrendPoint,
+    AIQualityGate,
+    RiskiestContract,
+    BenchmarkAnalytics,
+    RiskScoreTrendPoint,
+    ReviewVolumeTrendPoint,
     ExecutiveReport, ExecutiveReportRequest,
+)
+from app.domains.analytics.status_constants import (
+    ACTIVE_REVIEW_STATUSES,
+    TERMINAL_REVIEW_STATUSES,
+)
+from app.domains.analytics.benchmark_constants import (
+    BENCHMARK_CYCLE_TIME_DAYS,
+    BENCHMARK_SLA_PCT,
+    BENCHMARK_REVIEWER_LOAD,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,6 +66,13 @@ class ExecutiveAnalyticsService:
         negotiation = await self._build_negotiation_trends(cutoff)
         exposure = await self._build_contract_exposure(cutoff)
         bottlenecks = await self._build_throughput_bottlenecks(cutoff)
+        cost_gov = await self._build_cost_governance(cutoff)
+        ai_quality = await self._build_ai_quality_gate(cutoff)
+        benchmark = await self._build_benchmark_analytics(cutoff)
+        risk_trend = await self._build_risk_score_trend(cutoff)
+        volume_trend = await self._build_review_volume_trend(cutoff)
+        exp_trend = await self._build_exposure_trend(cutoff)
+        tp_trend = await self._build_throughput_trend(cutoff)
 
         return ExecutiveDashboard(
             portfolio_summary=portfolio,
@@ -60,6 +82,13 @@ class ExecutiveAnalyticsService:
             negotiation_trends=negotiation,
             contract_exposure=exposure,
             throughput_bottlenecks=bottlenecks,
+            cost_governance=cost_gov,
+            ai_quality_gate=ai_quality,
+            benchmark_analytics=benchmark,
+            risk_score_trend=risk_trend,
+            review_volume_trend=volume_trend,
+            exposure_trend=exp_trend,
+            throughput_trend=tp_trend,
             period=f"last_{period_days}_days",
             generated_at=datetime.now(timezone.utc),
         )
@@ -105,9 +134,9 @@ class ExecutiveAnalyticsService:
             sa_text("""
                 SELECT COUNT(*)::int FROM contract_reviews
                 WHERE tenant_id = :tid AND is_deleted = FALSE
-                  AND status IN ('draft', 'ai_analyzed', 'in_review', 'pending_approval')
+                  AND status = ANY(:active_statuses)
             """),
-            {"tid": self.tenant_id},
+            {"tid": self.tenant_id, "active_statuses": ACTIVE_REVIEW_STATUSES},
         )
         active_reviews = active.scalar() or 0
 
@@ -172,6 +201,27 @@ class ExecutiveAnalyticsService:
         )
         total_exposure_score = round(total_exposure.scalar() or 0, 2)
 
+        # Escalation metrics
+        escalation = await self.session.execute(
+            sa_text("""
+                SELECT
+                    COUNT(DISTINCT cr.review_id)::int AS total_reviews,
+                    COUNT(DISTINCT re.review_id)::int AS escalated_reviews
+                FROM contract_reviews cr
+                LEFT JOIN review_escalations re ON re.review_id = cr.review_id
+                WHERE cr.tenant_id = :tid
+                  AND cr.created_at >= :cutoff
+            """),
+            {"tid": self.tenant_id, "cutoff": cutoff},
+        )
+        esc_row = escalation.fetchone()
+        total_for_esc = esc_row.total_reviews if esc_row else 0
+        escalated_count = esc_row.escalated_reviews if esc_row else 0
+        escalation_rate = round(escalated_count / total_for_esc, 3) if total_for_esc > 0 else 0.0
+
+        # Escalation trend (weekly)
+        escalation_trend = await self._build_escalation_trend(cutoff)
+
         return PortfolioSummary(
             total_contracts=total_contracts,
             active_reviews=active_reviews,
@@ -181,7 +231,40 @@ class ExecutiveAnalyticsService:
             total_exposure=total_exposure_score,
             critical_contracts=critical_count,
             high_risk_vendors=high_risk_vendor_count,
+            escalation_rate=escalation_rate,
+            escalated_reviews=escalated_count,
+            escalation_trend=escalation_trend,
         )
+
+    async def _build_escalation_trend(
+        self,
+        cutoff: datetime,
+    ) -> list["EscalationTrendPoint"]:
+        """Build weekly escalation trend."""
+        from app.domains.analytics.executive_schemas import EscalationTrendPoint
+
+        trend_sql = sa_text("""
+            SELECT
+                DATE_TRUNC('week', cr.created_at)::date AS week,
+                COUNT(DISTINCT cr.review_id)::int AS total_reviews,
+                COUNT(DISTINCT re.review_id)::int AS escalated_reviews
+            FROM contract_reviews cr
+            LEFT JOIN review_escalations re ON re.review_id = cr.review_id
+            WHERE cr.tenant_id = :tid
+              AND cr.created_at >= :cutoff
+            GROUP BY DATE_TRUNC('week', cr.created_at)
+            ORDER BY week ASC
+        """)
+        result = await self.session.execute(trend_sql, {"tid": self.tenant_id, "cutoff": cutoff})
+        return [
+            EscalationTrendPoint(
+                period=row.week.strftime("%Y-%m-%d") if hasattr(row.week, 'strftime') else str(row.week),
+                escalated_count=row.escalated_reviews,
+                total_reviews=row.total_reviews,
+                escalation_rate=round(row.escalated_reviews / row.total_reviews, 3) if row.total_reviews > 0 else 0.0,
+            )
+            for row in result.fetchall()
+        ]
 
     async def _get_risk_distribution(self) -> RiskDistribution:
         """Get risk score distribution."""
@@ -296,18 +379,25 @@ class ExecutiveAnalyticsService:
         cutoff: datetime,
     ) -> ReviewerEfficiency:
         """Build reviewer efficiency metrics."""
-        # Reviewer stats
+        # Reviewer stats with name lookup
         reviewer_sql = sa_text("""
             SELECT
-                assigned_to,
-                COUNT(*) FILTER (WHERE status IN ('draft', 'ai_analyzed', 'in_review', 'pending_approval'))::int AS active,
-                COUNT(*) FILTER (WHERE status IN ('approved', 'rejected', 'finalized', 'executed', 'closed'))::int AS completed,
-                COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600), 0)::float AS avg_hours
-            FROM contract_reviews
-            WHERE tenant_id = :tid AND assigned_to IS NOT NULL AND created_at >= :cutoff
-            GROUP BY assigned_to
+                cr.assigned_to,
+                u.name AS reviewer_name,
+                COUNT(*) FILTER (WHERE cr.status = ANY(:active_statuses))::int AS active,
+                COUNT(*) FILTER (WHERE cr.status = ANY(:terminal_statuses))::int AS completed,
+                COALESCE(AVG(EXTRACT(EPOCH FROM (cr.completed_at - cr.created_at)) / 3600), 0)::float AS avg_hours
+            FROM contract_reviews cr
+            LEFT JOIN admin_users u ON u.user_id = cr.assigned_to AND u.tenant_id = :tid
+            WHERE cr.tenant_id = :tid AND cr.assigned_to IS NOT NULL AND cr.created_at >= :cutoff
+            GROUP BY cr.assigned_to, u.name
         """)
-        result = await self.session.execute(reviewer_sql, {"tid": self.tenant_id, "cutoff": cutoff})
+        result = await self.session.execute(reviewer_sql, {
+            "tid": self.tenant_id,
+            "cutoff": cutoff,
+            "active_statuses": ACTIVE_REVIEW_STATUSES,
+            "terminal_statuses": TERMINAL_REVIEW_STATUSES,
+        })
         rows = result.fetchall()
 
         total_reviewers = len(rows)
@@ -326,7 +416,7 @@ class ExecutiveAnalyticsService:
                 overloaded += 1
             details.append(ReviewerMetric(
                 reviewer_id=row.assigned_to,
-                reviewer_name=row.assigned_to,
+                reviewer_name=row.reviewer_name or row.assigned_to,
                 active_reviews=row.active,
                 completed_reviews=row.completed,
                 avg_completion_hours=round(row.avg_hours, 1),
@@ -342,22 +432,50 @@ class ExecutiveAnalyticsService:
             reviewer_backlog=total_active,
             overloaded_reviewers=overloaded,
             reviewer_details=details,
+            trend=await self._build_reviewer_efficiency_trend(cutoff),
         )
+
+    async def _build_reviewer_efficiency_trend(
+        self,
+        cutoff: datetime,
+    ) -> list[EfficiencyTrendPoint]:
+        """Build weekly reviewer efficiency trend."""
+        trend_sql = sa_text("""
+            SELECT
+                DATE_TRUNC('week', created_at)::date AS week,
+                COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600), 0)::float AS avg_hours,
+                COUNT(*)::int AS completed
+            FROM contract_reviews
+            WHERE tenant_id = :tid
+              AND completed_at IS NOT NULL
+              AND created_at >= :cutoff
+            GROUP BY DATE_TRUNC('week', created_at)
+            ORDER BY week ASC
+        """)
+        result = await self.session.execute(trend_sql, {"tid": self.tenant_id, "cutoff": cutoff})
+        return [
+            EfficiencyTrendPoint(
+                period=row.week.strftime("%Y-%m-%d") if hasattr(row.week, 'strftime') else str(row.week),
+                avg_completion_hours=round(row.avg_hours, 1),
+                reviews_completed=row.completed,
+            )
+            for row in result.fetchall()
+        ]
 
     async def _build_sla_risk_overview(self) -> SLARiskOverview:
         """Build SLA risk overview."""
         # Active reviews with SLA
         sla_sql = sa_text("""
             SELECT review_id, status, assigned_to, sla_deadline,
-                   sla_breached, sla_status,
+                   sla_breached, sla_status, created_at,
                    metadata->>'document_name' AS document_name
             FROM contract_reviews
             WHERE tenant_id = :tid
               AND is_deleted = FALSE
-              AND status IN ('draft', 'ai_analyzed', 'in_review', 'pending_approval')
+              AND status = ANY(:active_statuses)
               AND sla_deadline IS NOT NULL
         """)
-        result = await self.session.execute(sla_sql, {"tid": self.tenant_id})
+        result = await self.session.execute(sla_sql, {"tid": self.tenant_id, "active_statuses": ACTIVE_REVIEW_STATUSES})
         reviews = result.fetchall()
 
         now = datetime.now(timezone.utc)
@@ -375,8 +493,9 @@ class ExecutiveAnalyticsService:
                 continue
 
             total_hours = (deadline - now).total_seconds() / 3600
-            # Estimate elapsed from created_at (approximate)
-            elapsed_hours = max(0, 0)  # simplified
+            # Real elapsed hours since review creation
+            created = row.created_at if hasattr(row, 'created_at') else now
+            elapsed_hours = max(0, (now - created).total_seconds() / 3600)
             remaining_pct = max(0, min(100, (total_hours / 168) * 100))  # 168h = 7d default SLA
 
             is_breached = row.sla_breached or False
@@ -437,25 +556,45 @@ class ExecutiveAnalyticsService:
         cutoff: datetime,
     ) -> NegotiationTrends:
         """Build negotiation trends from redline data."""
-        # Redline stats
+        # Redline stats with rounds and risk reduction
         redline_sql = sa_text("""
-            SELECT clause_type, status, COUNT(*)::int AS count
+            SELECT
+                clause_type,
+                status,
+                risk_level,
+                finding_id,
+                COUNT(*)::int AS count
             FROM review_redlines
             WHERE tenant_id = :tid AND created_at >= :cutoff
-            GROUP BY clause_type, status
+            GROUP BY clause_type, status, risk_level, finding_id
         """)
         result = await self.session.execute(redline_sql, {"tid": self.tenant_id, "cutoff": cutoff})
         redline_rows = result.fetchall()
 
+        # Track per-clause-type metrics
         by_type: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        # Track finding_id counts per clause_type to estimate rounds
+        finding_counts: dict[str, set[str]] = defaultdict(set)
+        # Track risk level changes per clause_type
+        risk_levels: dict[str, list[str]] = defaultdict(list)
+
         for row in redline_rows:
             ct = row.clause_type or "other"
             status = row.status or "proposed"
-            by_type[ct][status] = row.count
+            by_type[ct][status] = by_type[ct].get(status, 0) + row.count
+            if row.finding_id:
+                finding_counts[ct].add(str(row.finding_id))
+            if row.risk_level:
+                risk_levels[ct].append(row.risk_level)
 
         total_proposed = sum(sum(d.values()) for d in by_type.values())
         total_accepted = sum(d.get("accepted", 0) for d in by_type.values())
         acceptance_rate = round(total_accepted / total_proposed, 2) if total_proposed > 0 else 0.0
+
+        # Compute overall avg_rounds_per_clause
+        risk_weight = {"critical": 1.0, "high": 0.7, "medium": 0.4, "low": 0.15, "info": 0.0}
+        total_rounds_weighted = 0.0
+        total_clause_weight = 0
 
         clause_metrics: list[ClauseNegotiationMetric] = []
         most_contested: list[tuple[str, int]] = []
@@ -463,25 +602,74 @@ class ExecutiveAnalyticsService:
             proposed = sum(statuses.values())
             accepted = statuses.get("accepted", 0)
             rate = round(accepted / proposed, 2) if proposed > 0 else 0.0
+
+            # avg_rounds: total redlines / unique finding_ids (each unique finding = one negotiation instance)
+            unique_findings = len(finding_counts.get(ct, set())) or 1
+            avg_rounds = round(proposed / unique_findings, 1)
+
+            # avg_risk_reduction: compare risk_level of accepted vs all proposed
+            all_risk = risk_levels.get(ct, [])
+            if all_risk:
+                avg_risk_before = sum(risk_weight.get(rl, 0.4) for rl in all_risk) / len(all_risk)
+                # Accepted redlines likely had their risk mitigated
+                accepted_risk = [rl for rl in all_risk if rl in risk_weight]
+                avg_risk_after = sum(risk_weight.get(rl, 0.4) for rl in accepted_risk) / len(accepted_risk) if accepted_risk else avg_risk_before
+                risk_reduction = round(max(0, avg_risk_before - avg_risk_after), 2)
+            else:
+                risk_reduction = 0.0
+
             clause_metrics.append(ClauseNegotiationMetric(
                 clause_type=ct,
                 proposed=proposed,
                 accepted=accepted,
                 acceptance_rate=rate,
-                avg_rounds=1.0,
-                avg_risk_reduction=0.0,
+                avg_rounds=avg_rounds,
+                avg_risk_reduction=risk_reduction,
             ))
             most_contested.append((ct, proposed))
+            total_rounds_weighted += avg_rounds * proposed
+            total_clause_weight += proposed
 
         most_contested.sort(key=lambda x: -x[1])
+        overall_avg_rounds = round(total_rounds_weighted / total_clause_weight, 1) if total_clause_weight > 0 else 1.0
+
+        # Negotiation trend (weekly)
+        trend = await self._build_negotiation_trend(cutoff)
 
         return NegotiationTrends(
             total_redlines_proposed=total_proposed,
             acceptance_rate=acceptance_rate,
-            avg_rounds_per_clause=1.0,
+            avg_rounds_per_clause=overall_avg_rounds,
             by_clause_type=clause_metrics,
             most_contested_clauses=[c[0] for c in most_contested[:5]],
+            trend=trend,
         )
+
+    async def _build_negotiation_trend(
+        self,
+        cutoff: datetime,
+    ) -> list[NegotiationTrendPoint]:
+        """Build weekly negotiation trend."""
+        trend_sql = sa_text("""
+            SELECT
+                DATE_TRUNC('week', created_at)::date AS week,
+                COUNT(*)::int AS proposed,
+                COUNT(*) FILTER (WHERE status = 'accepted')::int AS accepted
+            FROM review_redlines
+            WHERE tenant_id = :tid AND created_at >= :cutoff
+            GROUP BY DATE_TRUNC('week', created_at)
+            ORDER BY week ASC
+        """)
+        result = await self.session.execute(trend_sql, {"tid": self.tenant_id, "cutoff": cutoff})
+        return [
+            NegotiationTrendPoint(
+                period=row.week.strftime("%Y-%m-%d") if hasattr(row.week, 'strftime') else str(row.week),
+                proposed=row.proposed,
+                accepted=row.accepted,
+                acceptance_rate=round(row.accepted / row.proposed, 2) if row.proposed > 0 else 0.0,
+            )
+            for row in result.fetchall()
+        ]
 
     async def _build_contract_exposure(
         self,
@@ -539,29 +727,92 @@ class ExecutiveAnalyticsService:
         else:
             concentration = "diversified"
 
+        # Exposure trend (weekly)
+        exposure_trend = await self._build_exposure_trend(cutoff)
+
+        # Top 5 riskiest contracts
+        riskiest_sql = sa_text("""
+            SELECT
+                review_id,
+                COALESCE(metadata->>'document_name', '') AS document_name,
+                COALESCE((metadata->>'risk_score')::numeric, 0)::float AS risk_score
+            FROM contract_reviews
+            WHERE tenant_id = :tid
+              AND is_deleted = FALSE
+              AND metadata->>'risk_score' IS NOT NULL
+            ORDER BY (metadata->>'risk_score')::numeric DESC
+            LIMIT 5
+        """)
+        riskiest_result = await self.session.execute(riskiest_sql, {"tid": self.tenant_id})
+        riskiest_contracts = [
+            RiskiestContract(
+                review_id=str(row.review_id),
+                document_name=row.document_name,
+                risk_score=round(row.risk_score, 2),
+                exposure_score=round(row.risk_score * 10, 2),
+                top_finding="",
+            )
+            for row in riskiest_result.fetchall()
+        ]
+
         return ContractExposure(
             total_exposure_score=round(total_exposure, 2),
             by_category=categories,
             top_risk_drivers=risk_drivers[:5],
+            exposure_trend=exposure_trend,
             concentration_risk=concentration,
+            top_riskiest_contracts=riskiest_contracts,
         )
+
+    async def _build_exposure_trend(
+        self,
+        cutoff: datetime,
+    ) -> list[ExposureTrendPoint]:
+        """Build weekly exposure trend from findings."""
+        trend_sql = sa_text("""
+            SELECT
+                DATE_TRUNC('week', created_at)::date AS week,
+                COUNT(*)::int AS finding_count,
+                COALESCE(SUM(
+                    CASE severity
+                        WHEN 'critical' THEN 1.0
+                        WHEN 'high' THEN 0.7
+                        WHEN 'medium' THEN 0.4
+                        WHEN 'low' THEN 0.15
+                        ELSE 0.0
+                    END
+                ), 0)::float AS weighted_score
+            FROM review_findings
+            WHERE tenant_id = :tid AND created_at >= :cutoff
+            GROUP BY DATE_TRUNC('week', created_at)
+            ORDER BY week ASC
+        """)
+        result = await self.session.execute(trend_sql, {"tid": self.tenant_id, "cutoff": cutoff})
+        return [
+            ExposureTrendPoint(
+                period=row.week.strftime("%Y-%m-%d") if hasattr(row.week, 'strftime') else str(row.week),
+                exposure_score=round(row.weighted_score, 2),
+                contract_count=row.finding_count,
+            )
+            for row in result.fetchall()
+        ]
 
     async def _build_throughput_bottlenecks(
         self,
         cutoff: datetime,
     ) -> ThroughputBottlenecks:
         """Build throughput bottleneck analysis."""
-        # Overall throughput
+        # Overall throughput (reviews reaching terminal decision state)
         throughput_sql = sa_text("""
             SELECT
-                COUNT(*)::int AS completed,
-                COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - created_at)) / 86400), 0)::float AS avg_days
-            FROM contract_reviews
-            WHERE tenant_id = :tid AND completed_at IS NOT NULL AND created_at >= :cutoff
+                COUNT(*)::int AS completed
+            FROM review_status_history
+            WHERE tenant_id = :tid
+              AND to_status IN ('approved', 'rejected')
+              AND created_at >= :cutoff
         """)
         result = await self.session.execute(throughput_sql, {"tid": self.tenant_id, "cutoff": cutoff})
-        row = result.fetchone()
-        completed = row.completed if row else 0
+        completed = result.scalar() or 0
         days_span = max(1, (datetime.now(timezone.utc) - cutoff).days)
         throughput = round(completed / days_span, 1)
 
@@ -569,9 +820,9 @@ class ExecutiveAnalyticsService:
         queue_sql = sa_text("""
             SELECT COUNT(*)::int FROM contract_reviews
             WHERE tenant_id = :tid AND is_deleted = FALSE
-              AND status IN ('draft', 'ai_analyzed', 'in_review', 'pending_approval')
+              AND status = ANY(:active_statuses)
         """)
-        queue_result = await self.session.execute(queue_sql, {"tid": self.tenant_id})
+        queue_result = await self.session.execute(queue_sql, {"tid": self.tenant_id, "active_statuses": ACTIVE_REVIEW_STATUSES})
         queue_depth = queue_result.scalar() or 0
 
         # Detect bottlenecks by stage
@@ -597,14 +848,15 @@ class ExecutiveAnalyticsService:
             ))
 
         # Review bottleneck (unassigned or stuck in review)
+        stuck_review_statuses = [s for s in ACTIVE_REVIEW_STATUSES if s in ("in_review", "pending_approval")]
         review_bottleneck_sql = sa_text("""
             SELECT COUNT(*)::int FROM contract_reviews
             WHERE tenant_id = :tid AND is_deleted = FALSE
-              AND status IN ('in_review', 'pending_approval')
+              AND status = ANY(:stuck_statuses)
               AND updated_at < NOW() - INTERVAL '24 hours'
         """)
         review_b_result = await self.session.execute(
-            review_bottleneck_sql, {"tid": self.tenant_id},
+            review_bottleneck_sql, {"tid": self.tenant_id, "stuck_statuses": stuck_review_statuses},
         )
         stuck_reviews = review_b_result.scalar() or 0
         if stuck_reviews > 3:
@@ -617,12 +869,292 @@ class ExecutiveAnalyticsService:
                 affected_reviews=stuck_reviews,
             ))
 
+        # Throughput trend (weekly)
+        throughput_trend = await self._build_throughput_trend(cutoff)
+
         return ThroughputBottlenecks(
             bottlenecks=bottlenecks,
             overall_throughput=throughput,
             queue_depth=queue_depth,
             avg_wait_time_hours=24.0 if queue_depth > 10 else 8.0,
+            trend=throughput_trend,
         )
+
+    async def _build_throughput_trend(
+        self,
+        cutoff: datetime,
+    ) -> list[ThroughputTrendPoint]:
+        """Build weekly throughput trend."""
+        trend_sql = sa_text("""
+            SELECT
+                DATE_TRUNC('week', created_at)::date AS week,
+                COUNT(*)::int AS completed
+            FROM review_status_history
+            WHERE tenant_id = :tid
+              AND to_status IN ('approved', 'rejected')
+              AND created_at >= :cutoff
+            GROUP BY DATE_TRUNC('week', created_at)
+            ORDER BY week ASC
+        """)
+        result = await self.session.execute(trend_sql, {"tid": self.tenant_id, "cutoff": cutoff})
+        return [
+            ThroughputTrendPoint(
+                period=row.week.strftime("%Y-%m-%d") if hasattr(row.week, 'strftime') else str(row.week),
+                contracts_completed=row.completed,
+                avg_cycle_time_days=0.0,
+            )
+            for row in result.fetchall()
+        ]
+
+    # ── Cost Governance ───────────────────────────────────────────
+
+    async def _build_cost_governance(
+        self,
+        cutoff: datetime,
+    ) -> CostGovernance:
+        """Build AI cost governance metrics."""
+        # Aggregate AI execution costs
+        cost_sql = sa_text("""
+            SELECT
+                COUNT(*)::int AS total_runs,
+                COALESCE(SUM(cost_usd), 0)::float AS total_cost
+            FROM ai_execution_runs
+            WHERE tenant_id = :tid AND created_at >= :cutoff
+        """)
+        result = await self.session.execute(cost_sql, {"tid": self.tenant_id, "cutoff": cutoff})
+        row = result.fetchone()
+        total_runs = row.total_runs if row else 0
+        total_cost = round(row.total_cost, 4) if row else 0.0
+
+        # Total contracts in period for per-contract cost
+        contract_count = await self.session.execute(
+            sa_text("""
+                SELECT COUNT(*)::int FROM contract_reviews
+                WHERE tenant_id = :tid AND is_deleted = FALSE AND created_at >= :cutoff
+            """),
+            {"tid": self.tenant_id, "cutoff": cutoff},
+        )
+        total_contracts = contract_count.scalar() or 1
+        cost_per_contract = round(total_cost / total_contracts, 4) if total_contracts > 0 else 0.0
+
+        # Monthly projection
+        days_span = max(1, (datetime.now(timezone.utc) - cutoff).days)
+        daily_rate = total_cost / days_span if days_span > 0 else 0.0
+        monthly_projection = round(daily_rate * 30, 2)
+
+        # Weekly cost trend
+        trend_sql = sa_text("""
+            SELECT
+                DATE_TRUNC('week', created_at)::date AS week,
+                COUNT(*)::int AS runs,
+                COALESCE(SUM(cost_usd), 0)::float AS cost
+            FROM ai_execution_runs
+            WHERE tenant_id = :tid AND created_at >= :cutoff
+            GROUP BY DATE_TRUNC('week', created_at)
+            ORDER BY week ASC
+        """)
+        trend_result = await self.session.execute(trend_sql, {"tid": self.tenant_id, "cutoff": cutoff})
+        trend = [
+            CostTrendPoint(
+                period=row.week.strftime("%Y-%m-%d") if hasattr(row.week, 'strftime') else str(row.week),
+                ai_reviews=row.runs,
+                estimated_cost=round(row.cost, 4),
+            )
+            for row in trend_result.fetchall()
+        ]
+
+        return CostGovernance(
+            total_ai_reviews=total_runs,
+            estimated_ai_cost=total_cost,
+            cost_per_contract=cost_per_contract,
+            monthly_projection=monthly_projection,
+            trend=trend,
+        )
+
+    # ── AI Quality Gate ───────────────────────────────────────────
+
+    async def _build_ai_quality_gate(
+        self,
+        cutoff: datetime,
+    ) -> AIQualityGate:
+        """Build AI quality monitoring metrics."""
+        quality_sql = sa_text("""
+            SELECT
+                COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
+                COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
+                COALESCE(AVG(findings_count), 0)::float AS avg_findings,
+                COALESCE(AVG(latency_ms), 0)::float AS avg_latency_ms
+            FROM ai_execution_runs
+            WHERE tenant_id = :tid AND created_at >= :cutoff
+        """)
+        result = await self.session.execute(quality_sql, {"tid": self.tenant_id, "cutoff": cutoff})
+        row = result.fetchone()
+        total = row.total if row else 0
+        completed = row.completed if row else 0
+        failed = row.failed if row else 0
+        avg_findings = round(row.avg_findings, 2) if row else 0.0
+        avg_latency_ms = row.avg_latency_ms if row else 0.0
+        success_rate = round((completed / total * 100), 1) if total > 0 else 0.0
+
+        return AIQualityGate(
+            success_rate=success_rate,
+            completed_runs=completed,
+            failed_runs=failed,
+            avg_findings=avg_findings,
+            avg_processing_seconds=round(avg_latency_ms / 1000, 2),
+        )
+
+    # ── Benchmark Analytics ───────────────────────────────────────
+
+    async def _build_benchmark_analytics(
+        self,
+        cutoff: datetime,
+    ) -> BenchmarkAnalytics:
+        """Build operational benchmarks comparing current performance against targets."""
+        # Current cycle time
+        ct_sql = sa_text("""
+            SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - created_at)) / 86400), 0)::float AS avg_days
+            FROM contract_reviews
+            WHERE tenant_id = :tid AND completed_at IS NOT NULL AND created_at >= :cutoff
+        """)
+        ct_result = await self.session.execute(ct_sql, {"tid": self.tenant_id, "cutoff": cutoff})
+        ct_row = ct_result.fetchone()
+        current_cycle_time = ct_row.avg_days if ct_row else 0.0
+
+        # Current SLA compliance
+        sla_sql = sa_text("""
+            SELECT
+                COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE sla_breached = FALSE OR sla_breached IS NULL)::int AS compliant
+            FROM contract_reviews
+            WHERE tenant_id = :tid AND is_deleted = FALSE AND created_at >= :cutoff
+        """)
+        sla_result = await self.session.execute(sla_sql, {"tid": self.tenant_id, "cutoff": cutoff})
+        sla_row = sla_result.fetchone()
+        sla_total = sla_row.total if sla_row else 0
+        sla_compliant = sla_row.compliant if sla_row else 0
+        sla_compliance_pct = round((sla_compliant / sla_total * 100), 1) if sla_total > 0 else -1.0  # -1 means no data
+
+        # Current reviewer load (active reviews / active reviewers)
+        load_sql = sa_text("""
+            SELECT
+                COUNT(*) FILTER (WHERE status = ANY(:active_statuses))::int AS active,
+                COUNT(DISTINCT assigned_to) FILTER (WHERE assigned_to IS NOT NULL AND status = ANY(:active_statuses))::int AS reviewers
+            FROM contract_reviews
+            WHERE tenant_id = :tid AND is_deleted = FALSE
+        """)
+        load_result = await self.session.execute(load_sql, {"tid": self.tenant_id, "active_statuses": ACTIVE_REVIEW_STATUSES})
+        load_row = load_result.fetchone()
+        active_reviews = load_row.active if load_row else 0
+        active_reviewers = load_row.reviewers if load_row else 1
+        current_reviewer_load = round(active_reviews / max(active_reviewers, 1), 1)
+
+        # Compare against benchmarks
+        ct_benchmark = "on_track"
+        if current_cycle_time > 0:
+            if current_cycle_time < BENCHMARK_CYCLE_TIME_DAYS * 0.8:
+                ct_benchmark = "ahead"
+            elif current_cycle_time > BENCHMARK_CYCLE_TIME_DAYS * 1.2:
+                ct_benchmark = "behind"
+
+        sla_benchmark = "on_track"
+        if sla_compliance_pct < 0:
+            sla_benchmark = "no_data"
+        elif sla_compliance_pct < BENCHMARK_SLA_PCT * 0.95:
+            sla_benchmark = "behind"
+        elif sla_compliance_pct >= BENCHMARK_SLA_PCT:
+            sla_benchmark = "ahead"
+
+        load_benchmark = "on_track"
+        if current_reviewer_load > 0:
+            if current_reviewer_load <= BENCHMARK_REVIEWER_LOAD * 0.8:
+                load_benchmark = "ahead"
+            elif current_reviewer_load > BENCHMARK_REVIEWER_LOAD:
+                load_benchmark = "behind"
+        elif active_reviews == 0 and active_reviewers <= 1:
+            load_benchmark = "no_data"
+
+        return BenchmarkAnalytics(
+            cycle_time_vs_benchmark=ct_benchmark,
+            sla_vs_benchmark=sla_benchmark,
+            reviewer_efficiency_vs_benchmark=load_benchmark,
+            benchmark_cycle_time_days=BENCHMARK_CYCLE_TIME_DAYS,
+            benchmark_sla_pct=BENCHMARK_SLA_PCT,
+            benchmark_reviewer_load=BENCHMARK_REVIEWER_LOAD,
+            current_cycle_time_days=round(current_cycle_time, 1),
+            current_sla_pct=round(sla_compliance_pct, 1),
+            current_reviewer_load=current_reviewer_load,
+        )
+
+    # ── Executive Trends ─────────────────────────────────────────
+
+    async def _build_risk_score_trend(
+        self,
+        cutoff: datetime,
+    ) -> list[RiskScoreTrendPoint]:
+        """Build weekly risk score trend."""
+        sql = sa_text("""
+            SELECT
+                DATE_TRUNC('week', created_at)::date AS week,
+                COALESCE(AVG((metadata->>'risk_score')::numeric), 0)::float AS avg_risk,
+                COUNT(*)::int AS cnt
+            FROM contract_reviews
+            WHERE tenant_id = :tid
+              AND metadata->>'risk_score' IS NOT NULL
+              AND created_at >= :cutoff
+            GROUP BY DATE_TRUNC('week', created_at)
+            ORDER BY week ASC
+        """)
+        result = await self.session.execute(sql, {"tid": self.tenant_id, "cutoff": cutoff})
+        return [
+            RiskScoreTrendPoint(
+                period=row.week.strftime("%Y-%m-%d") if hasattr(row.week, 'strftime') else str(row.week),
+                avg_risk_score=round(row.avg_risk, 4),
+                contract_count=row.cnt,
+            )
+            for row in result.fetchall()
+        ]
+
+    async def _build_review_volume_trend(
+        self,
+        cutoff: datetime,
+    ) -> list[ReviewVolumeTrendPoint]:
+        """Build weekly review volume trend."""
+        sql = sa_text("""
+            SELECT
+                week,
+                COALESCE(created_cnt, 0)::int AS created,
+                COALESCE(completed_cnt, 0)::int AS completed
+            FROM (
+                SELECT
+                    DATE_TRUNC('week', created_at)::date AS week,
+                    COUNT(*)::int AS created_cnt
+                FROM contract_reviews
+                WHERE tenant_id = :tid AND created_at >= :cutoff
+                GROUP BY DATE_TRUNC('week', created_at)
+            ) c
+            FULL JOIN (
+                SELECT
+                    DATE_TRUNC('week', completed_at)::date AS week,
+                    COUNT(*)::int AS completed_cnt
+                FROM contract_reviews
+                WHERE tenant_id = :tid
+                  AND completed_at IS NOT NULL
+                  AND completed_at >= :cutoff
+                GROUP BY DATE_TRUNC('week', completed_at)
+            ) d USING (week)
+            ORDER BY week ASC
+        """)
+        result = await self.session.execute(sql, {"tid": self.tenant_id, "cutoff": cutoff})
+        return [
+            ReviewVolumeTrendPoint(
+                period=row.week.strftime("%Y-%m-%d") if hasattr(row.week, 'strftime') else str(row.week),
+                reviews_created=row.created,
+                reviews_completed=row.completed,
+            )
+            for row in result.fetchall()
+        ]
 
     def _generate_key_findings(self, dashboard: ExecutiveDashboard) -> list[str]:
         """Generate key findings from dashboard data."""

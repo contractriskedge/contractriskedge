@@ -18,6 +18,11 @@ import type {
   SLARiskOverview,
   ContractExposureData,
   ThroughputBottlenecks,
+  CostGovernanceData,
+  AIQualityGateData,
+  BenchmarkAnalyticsData,
+  RiskScoreTrendPoint,
+  ReviewVolumeTrendPoint,
 } from "./executiveTypes";
 
 // ── Widget Data Map ────────────────────────────────────────────────
@@ -36,6 +41,11 @@ export function extractWidgetData(
       cycleTime: null,
       negotiationTrends: null,
       portfolioSummary: null,
+      costGovernance: null,
+      aiQualityGate: null,
+      benchmarkAnalytics: null,
+      riskScoreTrend: [],
+      reviewVolumeTrend: [],
     };
   }
 
@@ -48,6 +58,11 @@ export function extractWidgetData(
     cycleTime: dashboard.cycle_time_analytics,
     negotiationTrends: dashboard.negotiation_trends,
     portfolioSummary: dashboard.portfolio_summary,
+    costGovernance: dashboard.cost_governance ?? null,
+    aiQualityGate: dashboard.ai_quality_gate ?? null,
+    benchmarkAnalytics: dashboard.benchmark_analytics ?? null,
+    riskScoreTrend: dashboard.risk_score_trend ?? [],
+    reviewVolumeTrend: dashboard.review_volume_trend ?? [],
   };
 }
 
@@ -58,6 +73,7 @@ export function extractExecutiveKpis(
   cycleTime: CycleTimeAnalytics | undefined,
   slaRisk: SLARiskOverview | undefined,
   bottlenecks: ThroughputBottlenecks | undefined,
+  reviewerEfficiency?: ReviewerEfficiency | undefined,
 ): ExecutiveKpi[] {
   if (!portfolio) return [];
 
@@ -134,11 +150,11 @@ export function extractExecutiveKpis(
     },
     {
       id: "reviewer-load",
-      label: "Reviewer Load",
-      value: portfolio.active_reviews.toLocaleString(),
-      subtitle: `${portfolio.high_risk_vendors} overloaded`,
+      label: "Overloaded Reviewers",
+      value: reviewerEfficiency ? reviewerEfficiency.overloaded_reviewers.toLocaleString() : "—",
+      subtitle: reviewerEfficiency ? `${reviewerEfficiency.reviewer_backlog} total backlog` : "",
       trend: 0,
-      trendDirection: "neutral",
+      trendDirection: reviewerEfficiency && reviewerEfficiency.overloaded_reviewers > 3 ? "up" : "neutral",
       icon: "Users",
       color: "from-sky-500 to-sky-600",
     },

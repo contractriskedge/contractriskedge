@@ -20,6 +20,13 @@ class ExecutiveDashboard(BaseModel):
     negotiation_trends: NegotiationTrends
     contract_exposure: ContractExposure
     throughput_bottlenecks: ThroughputBottlenecks
+    cost_governance: CostGovernance = Field(default_factory=lambda: CostGovernance())
+    ai_quality_gate: AIQualityGate = Field(default_factory=lambda: AIQualityGate())
+    benchmark_analytics: BenchmarkAnalytics = Field(default_factory=lambda: BenchmarkAnalytics())
+    risk_score_trend: list[RiskScoreTrendPoint] = Field(default_factory=list)
+    review_volume_trend: list[ReviewVolumeTrendPoint] = Field(default_factory=list)
+    exposure_trend: list[ExposureTrendPoint] = Field(default_factory=list)
+    throughput_trend: list[ThroughputTrendPoint] = Field(default_factory=list)
     period: str = "last_30_days"
     generated_at: datetime
 
@@ -34,6 +41,17 @@ class PortfolioSummary(BaseModel):
     total_exposure: float = 0.0  # aggregate risk exposure
     critical_contracts: int = 0
     high_risk_vendors: int = 0
+    escalation_rate: float = 0.0  # % of reviews escalated
+    escalated_reviews: int = 0  # count of distinct reviews escalated
+    escalation_trend: list[EscalationTrendPoint] = Field(default_factory=list)
+
+
+class EscalationTrendPoint(BaseModel):
+    """A single data point in escalation trend."""
+    period: str
+    escalated_count: int = 0
+    total_reviews: int = 0
+    escalation_rate: float = 0.0
 
 
 class RiskDistribution(BaseModel):
@@ -185,6 +203,7 @@ class ContractExposure(BaseModel):
     top_risk_drivers: list[RiskDriver] = Field(default_factory=list)
     exposure_trend: list[ExposureTrendPoint] = Field(default_factory=list)
     concentration_risk: str = ""  # 'diversified', 'concentrated', 'highly_concentrated'
+    top_riskiest_contracts: list[RiskiestContract] = Field(default_factory=list)
 
 
 class CategoryExposure(BaseModel):
@@ -241,6 +260,83 @@ class ThroughputTrendPoint(BaseModel):
     period: str
     contracts_completed: int = 0
     avg_cycle_time_days: float = 0.0
+
+
+# ── Cost Governance ────────────────────────────────────────────────
+
+
+class CostTrendPoint(BaseModel):
+    """A single data point in AI cost trend."""
+    period: str
+    ai_reviews: int = 0
+    estimated_cost: float = 0.0
+
+
+class CostGovernance(BaseModel):
+    """AI cost and usage metrics."""
+    total_ai_reviews: int = 0
+    estimated_ai_cost: float = 0.0
+    cost_per_contract: float = 0.0
+    monthly_projection: float = 0.0
+    trend: list[CostTrendPoint] = Field(default_factory=list)
+
+
+# ── AI Quality Gate ────────────────────────────────────────────────
+
+
+class AIQualityGate(BaseModel):
+    """AI analysis quality monitoring."""
+    success_rate: float = 0.0
+    completed_runs: int = 0
+    failed_runs: int = 0
+    avg_findings: float = 0.0
+    avg_processing_seconds: float = 0.0
+
+
+# ── Exposure Enhancements ──────────────────────────────────────────
+
+
+class RiskiestContract(BaseModel):
+    """A single contract with elevated risk exposure."""
+    review_id: str
+    document_name: str = ""
+    risk_score: float = 0.0
+    exposure_score: float = 0.0
+    top_finding: str = ""
+
+
+# ── Benchmark Analytics ────────────────────────────────────────────
+
+
+class BenchmarkAnalytics(BaseModel):
+    """Operational benchmarks comparing current performance against targets."""
+    cycle_time_vs_benchmark: str = ""  # 'ahead', 'on_track', 'behind'
+    sla_vs_benchmark: str = ""  # 'ahead', 'on_track', 'behind'
+    reviewer_efficiency_vs_benchmark: str = ""  # 'ahead', 'on_track', 'behind'
+    benchmark_cycle_time_days: float = 0.0
+    benchmark_sla_pct: float = 0.0
+    benchmark_reviewer_load: int = 0
+    # Actual current values for display
+    current_cycle_time_days: float = 0.0
+    current_sla_pct: float = 0.0
+    current_reviewer_load: float = 0.0
+
+
+# ── Executive Trend Visualizations ─────────────────────────────────
+
+
+class RiskScoreTrendPoint(BaseModel):
+    """A single data point in risk score trend."""
+    period: str
+    avg_risk_score: float = 0.0
+    contract_count: int = 0
+
+
+class ReviewVolumeTrendPoint(BaseModel):
+    """A single data point in review volume trend."""
+    period: str
+    reviews_created: int = 0
+    reviews_completed: int = 0
 
 
 # ── Report Generation ──────────────────────────────────────────────

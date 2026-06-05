@@ -273,12 +273,45 @@ class ReportScheduler:
         )
 
 
+# Module-level in-memory cache for anomaly deduplication.
+# Keyed by tenant_id -> signature -> {current_value, last_seen}.
+# An anomaly is re-emitted only if its current_value changes by >20%.
+_anomaly_cache: dict[str, dict[str, dict]] = {}
+
+
 @dataclass
 class AnomalyDetector:
-    """Detects anomalies in tenant metrics."""
+    """Detects anomalies in tenant metrics.
+
+    Uses an in-memory cache to avoid re-emitting the same anomaly
+    on every poll cycle. An anomaly is re-emitted only if its
+    current_value changes by more than 20% from the last emission.
+    """
 
     session: AsyncSession
     tenant_id: str
+
+    def _should_emit(self, signature: str, current_value: float) -> bool:
+        """Check if an anomaly should be emitted (dedup logic).
+
+        Returns True if:
+        - No previous emission for this signature, OR
+        - current_value changed by >20% from last emission
+        """
+        tenant_cache = _anomaly_cache.setdefault(self.tenant_id, {})
+        last = tenant_cache.get(signature)
+        if last is None:
+            tenant_cache[signature] = {"current_value": current_value, "last_seen": datetime.now(timezone.utc)}
+            return True
+        # Re-emit only if value changed significantly
+        old_val = abs(last["current_value"])
+        new_val = abs(current_value)
+        if old_val > 0 and new_val > 0:
+            change_pct = abs(new_val - old_val) / max(old_val, 0.01)
+            if change_pct < 0.2:
+                return False
+        tenant_cache[signature] = {"current_value": current_value, "last_seen": datetime.now(timezone.utc)}
+        return True
 
     async def detect_anomalies(self, lookback_hours: int = 24) -> AnomalyDetectionResult:
         """Detect anomalies across tenant metrics."""
@@ -345,21 +378,23 @@ class AnomalyDetector:
         prev_breaches = previous.scalar() or 0
 
         if recent_breaches > prev_breaches * 1.5 and prev_breaches > 0:
-            anomalies.append(AnomalyItem(
-                anomaly_id=uuid.uuid4().hex[:12],
-                category=AnomalyCategory.SLA,
-                severity=AnomalySeverity.HIGH if recent_breaches > prev_breaches * 2 else AnomalySeverity.MEDIUM,
-                title="SLA breach spike detected",
-                description=f"SLA breaches increased from {prev_breaches} to {recent_breaches}",
-                metric_name="sla_breaches",
-                current_value=recent_breaches,
-                expected_value=prev_breaches,
-                deviation_pct=round((recent_breaches - prev_breaches) / prev_breaches * 100, 1),
-                trend_direction="increasing",
-                affected_area="review_workflow",
-                recommendation="Review reviewer capacity and redistribute workload",
-                detected_at=datetime.now(timezone.utc),
-            ))
+            signature = f"sla_breach_spike::{self.tenant_id}"
+            if self._should_emit(signature, recent_breaches):
+                anomalies.append(AnomalyItem(
+                    anomaly_id=uuid.uuid4().hex[:12],
+                    category=AnomalyCategory.SLA,
+                    severity=AnomalySeverity.HIGH if recent_breaches > prev_breaches * 2 else AnomalySeverity.MEDIUM,
+                    title="SLA breach spike detected",
+                    description=f"SLA breaches increased from {prev_breaches} to {recent_breaches}",
+                    metric_name="sla_breaches",
+                    current_value=recent_breaches,
+                    expected_value=prev_breaches,
+                    deviation_pct=round((recent_breaches - prev_breaches) / prev_breaches * 100, 1),
+                    trend_direction="increasing",
+                    affected_area="review_workflow",
+                    recommendation="Review reviewer capacity and redistribute workload",
+                    detected_at=datetime.now(timezone.utc),
+                ))
 
         return anomalies
 
@@ -394,21 +429,23 @@ class AnomalyDetector:
         prev_completed = previous.scalar() or 0
 
         if recent_completed < prev_completed * 0.5 and prev_completed > 3:
-            anomalies.append(AnomalyItem(
-                anomaly_id=uuid.uuid4().hex[:12],
-                category=AnomalyCategory.VOLUME,
-                severity=AnomalySeverity.HIGH,
-                title="Review completion rate drop",
-                description=f"Completed reviews dropped from {prev_completed} to {recent_completed}",
-                metric_name="reviews_completed",
-                current_value=recent_completed,
-                expected_value=prev_completed,
-                deviation_pct=round((prev_completed - recent_completed) / prev_completed * 100, 1),
-                trend_direction="decreasing",
-                affected_area="review_workflow",
-                recommendation="Investigate potential bottlenecks in review pipeline",
-                detected_at=datetime.now(timezone.utc),
-            ))
+            signature = f"completion_rate_drop::{self.tenant_id}"
+            if self._should_emit(signature, recent_completed):
+                anomalies.append(AnomalyItem(
+                    anomaly_id=uuid.uuid4().hex[:12],
+                    category=AnomalyCategory.VOLUME,
+                    severity=AnomalySeverity.HIGH,
+                    title="Review completion rate drop",
+                    description=f"Completed reviews dropped from {prev_completed} to {recent_completed}",
+                    metric_name="reviews_completed",
+                    current_value=recent_completed,
+                    expected_value=prev_completed,
+                    deviation_pct=round((prev_completed - recent_completed) / prev_completed * 100, 1),
+                    trend_direction="decreasing",
+                    affected_area="review_workflow",
+                    recommendation="Investigate potential bottlenecks in review pipeline",
+                    detected_at=datetime.now(timezone.utc),
+                ))
 
         return anomalies
 
@@ -443,21 +480,23 @@ class AnomalyDetector:
         prev_critical = previous.scalar() or 0
 
         if recent_critical > prev_critical * 1.5 and prev_critical > 2:
-            anomalies.append(AnomalyItem(
-                anomaly_id=uuid.uuid4().hex[:12],
-                category=AnomalyCategory.RISK,
-                severity=AnomalySeverity.CRITICAL if recent_critical > prev_critical * 2 else AnomalySeverity.HIGH,
-                title="High-severity finding spike",
-                description=f"Critical/high findings increased from {prev_critical} to {recent_critical}",
-                metric_name="critical_findings",
-                current_value=recent_critical,
-                expected_value=prev_critical,
-                deviation_pct=round((recent_critical - prev_critical) / prev_critical * 100, 1),
-                trend_direction="increasing",
-                affected_area="contract_risk",
-                recommendation="Review recent contracts for systemic risk patterns",
-                detected_at=datetime.now(timezone.utc),
-            ))
+            signature = f"finding_spike::{self.tenant_id}"
+            if self._should_emit(signature, recent_critical):
+                anomalies.append(AnomalyItem(
+                    anomaly_id=uuid.uuid4().hex[:12],
+                    category=AnomalyCategory.RISK,
+                    severity=AnomalySeverity.CRITICAL if recent_critical > prev_critical * 2 else AnomalySeverity.HIGH,
+                    title="High-severity finding spike",
+                    description=f"Critical/high findings increased from {prev_critical} to {recent_critical}",
+                    metric_name="critical_findings",
+                    current_value=recent_critical,
+                    expected_value=prev_critical,
+                    deviation_pct=round((recent_critical - prev_critical) / prev_critical * 100, 1),
+                    trend_direction="increasing",
+                    affected_area="contract_risk",
+                    recommendation="Review recent contracts for systemic risk patterns",
+                    detected_at=datetime.now(timezone.utc),
+                ))
 
         return anomalies
 
@@ -494,21 +533,23 @@ class AnomalyDetector:
         prev_latency = previous.scalar() or 0.0
 
         if recent_latency > prev_latency * 1.5 and prev_latency > 100:
-            anomalies.append(AnomalyItem(
-                anomaly_id=uuid.uuid4().hex[:12],
-                category=AnomalyCategory.PERFORMANCE,
-                severity=AnomalySeverity.MEDIUM,
-                title="AI latency increase detected",
-                description=f"Average AI latency increased from {prev_latency:.0f}ms to {recent_latency:.0f}ms",
-                metric_name="ai_latency_ms",
-                current_value=round(recent_latency, 1),
-                expected_value=round(prev_latency, 1),
-                deviation_pct=round((recent_latency - prev_latency) / prev_latency * 100, 1),
-                trend_direction="increasing",
-                affected_area="ai_pipeline",
-                recommendation="Check AI provider status and queue depth",
-                detected_at=datetime.now(timezone.utc),
-            ))
+            signature = f"ai_latency_spike::{self.tenant_id}"
+            if self._should_emit(signature, recent_latency):
+                anomalies.append(AnomalyItem(
+                    anomaly_id=uuid.uuid4().hex[:12],
+                    category=AnomalyCategory.PERFORMANCE,
+                    severity=AnomalySeverity.MEDIUM,
+                    title="AI latency increase detected",
+                    description=f"Average AI latency increased from {prev_latency:.0f}ms to {recent_latency:.0f}ms",
+                    metric_name="ai_latency_ms",
+                    current_value=round(recent_latency, 1),
+                    expected_value=round(prev_latency, 1),
+                    deviation_pct=round((recent_latency - prev_latency) / prev_latency * 100, 1),
+                    trend_direction="increasing",
+                    affected_area="ai_pipeline",
+                    recommendation="Check AI provider status and queue depth",
+                    detected_at=datetime.now(timezone.utc),
+                ))
 
         return anomalies
 

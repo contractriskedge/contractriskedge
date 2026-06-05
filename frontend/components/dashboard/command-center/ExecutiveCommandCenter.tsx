@@ -38,6 +38,8 @@ import { AIQualityGateWidget } from "./widgets/AIQualityGateWidget";
 import { ContractExposureWidget } from "./widgets/ContractExposureWidget";
 import { AnomalyFeedWidget } from "./widgets/AnomalyFeedWidget";
 import { ReviewerLoadWidget } from "./widgets/ReviewerLoadWidget";
+import { BenchmarkAnalyticsWidget } from "./widgets/BenchmarkAnalyticsWidget";
+import { TrendVisualizationsWidget } from "./widgets/TrendVisualizationsWidget";
 import { ExecutiveAlertCenter } from "@/src/lib/alerts/ExecutiveAlertCenter";
 import { DashboardHeader } from "./DashboardHeader";
 
@@ -71,6 +73,7 @@ export function ExecutiveCommandCenter() {
     widgetData.cycleTime ?? undefined,
     widgetData.slaRisk ?? undefined,
     widgetData.bottlenecks ?? undefined,
+    widgetData.reviewerLoad ?? undefined,
   ), [widgetData]);
 
   const slaSummary = useMemo(() => extractSLARiskSummary(widgetData.slaRisk), [widgetData.slaRisk]);
@@ -79,9 +82,10 @@ export function ExecutiveCommandCenter() {
 
   // ── Role-based visibility ──
   const role = user?.role ?? "viewer";
-  const canSeeCostData = ["admin", "executive", "finance"].includes(role);
-  const canSeeQualityData = ["admin", "executive", "ai-engineer"].includes(role);
-  const canSeeAnomalies = ["admin", "executive", "operations"].includes(role);
+  const adminRoles = ["admin", "tenant_admin"];
+  const canSeeCostData = [...adminRoles, "executive", "finance"].includes(role);
+  const canSeeQualityData = [...adminRoles, "executive", "ai-engineer"].includes(role);
+  const canSeeAnomalies = [...adminRoles, "executive", "operations"].includes(role);
 
   // ── Widget configuration ──
   const widgets = useMemo(() => [
@@ -89,56 +93,101 @@ export function ExecutiveCommandCenter() {
       id: "tenant-health",
       title: "Tenant Health",
       component: <TenantHealthWidget healthScore={widgetData.healthScore} />,
-      roles: ["admin", "executive"],
+      roles: ["admin", "tenant_admin", "executive"],
       defaultVisible: true,
     },
     {
       id: "sla-risk",
       title: "SLA Risk Heatmap",
       component: <SLARiskHeatmapWidget slaRisk={widgetData.slaRisk} />,
-      roles: ["admin", "executive", "operations"],
+      roles: ["admin", "tenant_admin", "executive", "operations"],
       defaultVisible: true,
     },
     {
       id: "cost-governance",
       title: "Cost Governance",
-      component: <CostGovernanceSnapshotWidget />,
-      roles: ["admin", "executive", "finance"],
+      component: <CostGovernanceSnapshotWidget dashboard={widgetData.costGovernance ? (() => {
+        const used = widgetData.costGovernance.estimated_ai_cost;
+        const monthly = widgetData.costGovernance.monthly_projection;
+        const totalBudget = Math.max(monthly * 3, 1); // prevent NaN from division by zero
+        const remaining = Math.max(0, totalBudget - used);
+        return {
+          budgetUsed: used,
+          budgetRemaining: remaining,
+          totalBudget,
+          dailyBurnRate: widgetData.costGovernance.cost_per_contract > 0
+            ? widgetData.costGovernance.estimated_ai_cost / 30
+            : 0,
+          projectedOverageDate: undefined,
+          modelTierDistribution: { Standard: 100 },
+          isAlerting: false,
+        };
+      })() : null} />,
+      roles: ["admin", "tenant_admin", "executive", "finance"],
       defaultVisible: canSeeCostData,
     },
     {
       id: "ai-quality",
       title: "AI Quality Gate",
-      component: <AIQualityGateWidget />,
-      roles: ["admin", "executive", "ai-engineer"],
+      component: <AIQualityGateWidget summary={widgetData.aiQualityGate && widgetData.aiQualityGate.completed_runs + widgetData.aiQualityGate.failed_runs > 0 ? {
+        successRate: Math.round(widgetData.aiQualityGate.success_rate),
+        completedRuns: widgetData.aiQualityGate.completed_runs,
+        failedRuns: widgetData.aiQualityGate.failed_runs,
+        avgFindingsPerRun: widgetData.aiQualityGate.avg_findings,
+        avgProcessingSeconds: widgetData.aiQualityGate.avg_processing_seconds,
+        deploymentGateOpen: widgetData.aiQualityGate.success_rate >= 80,
+        blockReasons: widgetData.aiQualityGate.success_rate < 80
+          ? [`AI run success rate (${widgetData.aiQualityGate.success_rate.toFixed(1)}%) below 80% threshold`]
+          : [],
+      } : null} />,
+      roles: ["admin", "tenant_admin", "executive", "ai-engineer"],
       defaultVisible: canSeeQualityData,
     },
     {
       id: "contract-exposure",
       title: "Contract Exposure",
       component: <ContractExposureWidget exposure={widgetData.contractExposure} />,
-      roles: ["admin", "executive", "legal", "finance"],
+      roles: ["admin", "tenant_admin", "executive", "legal", "finance"],
       defaultVisible: true,
     },
     {
       id: "anomaly-feed",
       title: "Operational Anomalies",
       component: <AnomalyFeedWidget anomalies={anomalies} />,
-      roles: ["admin", "executive", "operations"],
+      roles: ["admin", "tenant_admin", "executive", "operations"],
       defaultVisible: canSeeAnomalies,
     },
     {
       id: "reviewer-load",
       title: "Reviewer Load & Escalations",
       component: <ReviewerLoadWidget reviewerData={widgetData.reviewerLoad} />,
-      roles: ["admin", "executive", "operations"],
+      roles: ["admin", "tenant_admin", "executive", "operations"],
+      defaultVisible: true,
+    },
+    {
+      id: "benchmark-analytics",
+      title: "Benchmark Analytics",
+      component: <BenchmarkAnalyticsWidget benchmark={widgetData.benchmarkAnalytics} />,
+      roles: ["admin", "tenant_admin", "executive", "operations"],
+      defaultVisible: true,
+    },
+    {
+      id: "trend-visualizations",
+      title: "Executive Trend Visualizations",
+      component: <TrendVisualizationsWidget
+        riskTrend={widgetData.riskScoreTrend}
+        volumeTrend={widgetData.reviewVolumeTrend}
+        exposureTrend={widgetData.contractExposure?.exposure_trend ?? []}
+        throughputTrend={widgetData.bottlenecks?.trend ?? []}
+      />,
+      roles: ["admin", "tenant_admin", "executive"],
       defaultVisible: true,
     },
     {
       id: "alert-center",
       title: "Executive Alert Center",
       component: <ExecutiveAlertCenter />,
-      roles: ["admin", "executive", "operations"],
+      roles: ["admin", "tenant_admin", "executive", "operations"],
       defaultVisible: true,
     },
   ].filter((w) => w.defaultVisible || w.roles.includes(role as any)), [widgetData, healthScore, anomalies, canSeeCostData, canSeeQualityData, canSeeAnomalies, role]);
