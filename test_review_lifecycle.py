@@ -354,30 +354,41 @@ def run_lifecycle_test():
         check("4b. List versions", f"HTTP {status}, versions={len(data) if isinstance(data, list) else data.get('total', 0)}",
               success, data)
 
-        # 4c. Download DOCX
-        print("\n  [4c] Downloading DOCX...")
-        try:
-            url = f"{API_URL}/reviews/{review_id}/export/docx"
-            req = urllib.request.Request(url, method="GET")
-            req.add_header("Authorization", f"Bearer {token}")
-            r = urllib.request.urlopen(req)
-            docx_bytes = r.read()
-            check("4c. Download DOCX", f"size={len(docx_bytes)} bytes", len(docx_bytes) > 100)
-        except Exception as e:
-            check("4c. Download DOCX", str(e), False)
+        # 4c. List versions first to get version_id for download
+        print("\n  [4c] Listing versions for download...")
+        version_id = None
+        success, status, data = api_request("GET", f"/reviews/{review_id}/versions", token)
+        if success:
+            versions = data if isinstance(data, list) else data.get("items", [])
+            if versions:
+                version_id = versions[0].get("version_id") or versions[0].get("id")
+                check("4c. Got version for download", f"version_id={version_id}", bool(version_id))
 
-        # 4d. Download tracked-changes DOCX
-        print("\n  [4d] Downloading tracked-changes DOCX...")
-        try:
-            url = f"{API_URL}/reviews/{review_id}/export/tracked-changes-docx"
-            req = urllib.request.Request(url, method="GET")
-            req.add_header("Authorization", f"Bearer {token}")
-            r = urllib.request.urlopen(req)
-            tracked_bytes = r.read()
-            check("4d. Download tracked-changes DOCX", f"size={len(tracked_bytes)} bytes",
-                  len(tracked_bytes) > 100)
-        except Exception as e:
-            check("4d. Download tracked-changes DOCX", str(e), False)
+        # 4d. Download DOCX via versions endpoint
+        if version_id:
+            print("\n  [4d] Downloading DOCX...")
+            try:
+                url = f"{API_URL}/reviews/{review_id}/versions/{version_id}/download"
+                req = urllib.request.Request(url, method="GET")
+                req.add_header("Authorization", f"Bearer {token}")
+                r = urllib.request.urlopen(req)
+                docx_bytes = r.read()
+                check("4d. Download DOCX", f"size={len(docx_bytes)} bytes", len(docx_bytes) > 100)
+            except Exception as e:
+                check("4d. Download DOCX", str(e), False)
+
+            # 4e. Download tracked-changes DOCX
+            print("\n  [4e] Downloading tracked-changes DOCX...")
+            try:
+                url = f"{API_URL}/reviews/{review_id}/versions/{version_id}/export-tracked"
+                req = urllib.request.Request(url, method="GET")
+                req.add_header("Authorization", f"Bearer {token}")
+                r = urllib.request.urlopen(req)
+                tracked_bytes = r.read()
+                check("4e. Download tracked-changes DOCX", f"size={len(tracked_bytes)} bytes",
+                      len(tracked_bytes) > 100)
+            except Exception as e:
+                check("4e. Download tracked-changes DOCX", str(e), False)
 
     # ── Phase 5: Audit & Timeline ────────────────────────────────────────
     print(f"\n{'─'*70}")
@@ -385,14 +396,14 @@ def run_lifecycle_test():
     print(f"{'─'*70}\n")
 
     if review_id:
-        # 5a. Get audit trail
-        print("  [5a] Fetching audit trail...")
-        success, status, data = api_request("GET", f"/reviews/{review_id}/audit", token)
-        check("5a. Audit trail", f"HTTP {status}, entries={len(data) if isinstance(data, list) else data.get('total', 0)}",
+        # 5a. Get activity/audit trail
+        print("  [5a] Fetching activity/audit trail...")
+        success, status, data = api_request("GET", f"/reviews/{review_id}/activity", token)
+        check("5a. Activity trail", f"HTTP {status}, entries={len(data) if isinstance(data, list) else data.get('total', 0)}",
               success, data)
         if success:
             entries = data if isinstance(data, list) else data.get("items", [])
-            check("   Audit entries found", f"count={len(entries)}", len(entries) > 0)
+            check("   Activity entries found", f"count={len(entries)}", len(entries) > 0)
 
     # ── Summary ──────────────────────────────────────────────────────────
     print(f"\n{'='*70}")

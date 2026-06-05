@@ -255,7 +255,40 @@ LEGACY_STATUS_MAP = {
     "archived": WorkflowState.ARCHIVED,
 }
 
+# Reverse map: WorkflowState → DB-persistable ReviewStatus string.
+# Some WorkflowState values cannot be stored directly in the DB because:
+#   - 'ai_reviewed' is not in the DB enum; use 'ai_analyzed' instead
+#   - 'negotiation' is not in the DB enum; negotiation is tracked via
+#     the separate negotiation_sessions table; persist as 'in_review'
+WORKFLOW_TO_DB_STATUS = {
+    WorkflowState.UPLOADED: "uploaded",
+    WorkflowState.ANALYZING: "analyzing",
+    WorkflowState.AI_REVIEWED: "ai_analyzed",       # mapped: ai_reviewed → ai_analyzed
+    WorkflowState.PROCUREMENT_REVIEW: "procurement_review",
+    WorkflowState.LEGAL_REVIEW: "legal_review",
+    WorkflowState.SECURITY_REVIEW: "security_review",
+    WorkflowState.NEGOTIATION: "in_review",          # mapped: negotiation → in_review
+    WorkflowState.IN_REVIEW: "in_review",
+    WorkflowState.ESCALATED: "escalated",
+    WorkflowState.EXEC_APPROVAL: "exec_approval",
+    WorkflowState.APPROVED: "approved",
+    WorkflowState.REJECTED: "rejected",
+    WorkflowState.FINALIZED: "finalized",
+    WorkflowState.EXECUTED: "executed",
+    WorkflowState.ARCHIVED: "archived",
+}
+
 
 def map_legacy_status(legacy_status: str) -> WorkflowState:
     """Map a legacy ReviewStatus string to the new WorkflowState."""
     return LEGACY_STATUS_MAP.get(legacy_status, WorkflowState.UPLOADED)
+
+
+def to_db_status(workflow_state: WorkflowState) -> str:
+    """Map a WorkflowState to a DB-persistable ReviewStatus string.
+
+    This is the reverse of map_legacy_status(). It ensures that
+    WorkflowState values not present in the PostgreSQL review_status
+    enum are mapped to equivalent DB values before persistence.
+    """
+    return WORKFLOW_TO_DB_STATUS.get(workflow_state, workflow_state.value)

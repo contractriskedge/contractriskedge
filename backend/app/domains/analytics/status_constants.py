@@ -63,9 +63,13 @@ from typing import Final
 
 ACTIVE_REVIEW_STATUSES: Final[list[str]] = [
     "draft",
+    "analyzing",
     "ai_analyzed",
     "in_review",
     "pending_approval",
+    "procurement_review",
+    "legal_review",
+    "security_review",
 ]
 
 # ── Terminal Review Statuses ───────────────────────────────────────

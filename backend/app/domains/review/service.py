@@ -31,6 +31,7 @@ from app.domains.review.workflow import (
     TransitionError,
     ImmutableReviewError,
     map_legacy_status,
+    to_db_status,
 )
 from app.domains.review.lock_guard import (
     assert_review_mutable,
@@ -178,9 +179,15 @@ class ReviewService:
         except TransitionError as e:
             raise ValueError(str(e))
 
+        # Map WorkflowState to DB-persistable ReviewStatus before writing.
+        # This handles aliases like ai_reviewed→ai_analyzed and
+        # negotiation→in_review that exist in WorkflowState but not
+        # in the PostgreSQL review_status enum.
+        db_status = to_db_status(target_state)
+
         # Perform the transition
         review = await self.review_repo.update_status(
-            review_id, self.tenant_id, ReviewStatus(new_status),
+            review_id, self.tenant_id, ReviewStatus(db_status),
             changed_by=self.user.id, reason=reason,
         )
 
@@ -192,7 +199,7 @@ class ReviewService:
         await self.audit_trail.record_transition(
             review_id=review_id,
             from_status=current_status,
-            to_status=new_status,
+            to_status=db_status,
             actor_id=self.user.id,
             reason=reason,
         )
