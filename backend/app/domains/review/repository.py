@@ -10,6 +10,7 @@ from typing import Optional
 
 from sqlalchemy import select, update, func, or_
 from sqlalchemy.dialects.postgresql import array
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.kernel.repository.base import BaseRepository
@@ -444,17 +445,49 @@ class ReviewRepository(BaseRepository):
     async def assign_reviewer(self, review_id: str, tenant_id: str,
                                assignee_id: str, assigned_by: str, role: str = "reviewer",
                                due_date: Optional[datetime] = None) -> ReviewAssignment:
+        # Check for existing active assignment first (idempotency).
+        # This handles the common case where the same reviewer is assigned twice.
+        existing = await self.get_existing_assignment(review_id, tenant_id, assignee_id)
+        if existing:
+            return existing
+
+        # If no existing assignment, attempt to create a new one.
+        # The UNIQUE(review_id, assignee_id) constraint prevents duplicates
+        # under concurrent requests (TOCTOU race condition).
         assignment = ReviewAssignment(
             review_id=review_id, tenant_id=tenant_id, assignee_id=assignee_id,
             assigned_by=assigned_by, role=role, due_date=due_date,
         )
         self.session.add(assignment)
+        try:
+            await self.session.flush()
+        except IntegrityError:
+            # Concurrent insert won the race. Rollback this attempt and return
+            # the existing assignment that was committed by the other request.
+            await self.session.rollback()
+            existing = await self.get_existing_assignment(review_id, tenant_id, assignee_id)
+            if existing:
+                return existing
+            # If still no existing (unlikely), re-raise.
+            raise
+
         await self.session.execute(
             update(ContractReview).where(ContractReview.review_id == review_id)
             .values(assigned_to=assignee_id, assigned_by=assigned_by)
         )
         await self.session.flush()
         return assignment
+
+    async def get_existing_assignment(self, review_id: str, tenant_id: str,
+                                       assignee_id: str) -> Optional[ReviewAssignment]:
+        """Check if an assignment already exists for this review+assignee pair."""
+        stmt = select(ReviewAssignment).where(
+            ReviewAssignment.review_id == review_id,
+            ReviewAssignment.tenant_id == tenant_id,
+            ReviewAssignment.assignee_id == assignee_id,
+        ).order_by(ReviewAssignment.created_at.desc()).limit(1)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
 
     async def get_assignments(self, review_id: str, tenant_id: str):
         stmt = select(ReviewAssignment).where(

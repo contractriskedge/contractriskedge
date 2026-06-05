@@ -32,6 +32,9 @@ from app.domains.review.lock_guard import (
     assert_can_edit_redlines, assert_can_resolve_findings,
     assert_can_reassign, assert_can_escalate, assert_can_approve_or_reject,
 )
+from app.domains.review.repository import ReviewRepository
+from app.domains.review.models import ReviewAssignment, ContractReview
+from sqlalchemy import select
 from app.domains.analytics.status_constants import (
     ACTIVE_REVIEW_STATUSES, TERMINAL_REVIEW_STATUSES,
 )
@@ -758,3 +761,124 @@ class TestEnumAlignment:
         else:
             print(f"\n  ✅ All {len(db_safe_values)} WORKFLOW_TO_DB_STATUS values are DB-safe")
         assert len(unsafe) == 0
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Assignment Idempotency Tests (Sprint 21 Task 4.4)
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestAssignmentIdempotency:
+    """Verify that duplicate assignments are handled correctly.
+
+    Tests the fix for the concurrency defect discovered in Task 4.3:
+    - POST /reviews/{id}/assign with same assignee_id must not create duplicates
+    - UNIQUE(review_id, assignee_id) constraint prevents DB-level duplicates
+    - get_existing_assignment() returns existing assignment on duplicate
+    - IntegrityError catch + rollback handles concurrent race condition
+    """
+
+    @pytest.mark.asyncio
+    async def test_duplicate_assignment_returns_existing(self, tenant_a_session, sample_review):
+        """Verify assigning the same reviewer twice returns the existing assignment."""
+        from app.domains.review.repository import ReviewRepository
+
+        repo = ReviewRepository(session=tenant_a_session, tenant_id=sample_review.tenant_id)
+
+        # First assignment should create a new record
+        first = await repo.assign_reviewer(
+            review_id=sample_review.review_id,
+            tenant_id=sample_review.tenant_id,
+            assignee_id="reviewer@test.com",
+            assigned_by="admin@test.com",
+            role="reviewer",
+        )
+        assert first is not None
+        first_id = first.assignment_id
+
+        # Second assignment (same reviewer, same review) should return the existing record
+        second = await repo.assign_reviewer(
+            review_id=sample_review.review_id,
+            tenant_id=sample_review.tenant_id,
+            assignee_id="reviewer@test.com",
+            assigned_by="admin@test.com",
+            role="reviewer",
+        )
+        assert second is not None
+        assert second.assignment_id == first_id, (
+            f"Expected existing assignment {first_id}, got new {second.assignment_id}"
+        )
+
+        # Verify only one row exists in the DB
+        stmt = select(ReviewAssignment).where(
+            ReviewAssignment.review_id == sample_review.review_id,
+            ReviewAssignment.assignee_id == "reviewer@test.com",
+        )
+        result = await tenant_a_session.execute(stmt)
+        rows = result.scalars().all()
+        assert len(rows) == 1, f"Expected 1 row, found {len(rows)}"
+
+        print(f"  ✅ Duplicate assignment returns existing: {first_id}")
+
+    @pytest.mark.asyncio
+    async def test_different_reviewers_both_succeed(self, tenant_a_session, sample_review):
+        """Verify assigning different reviewers to the same review both succeed."""
+        from app.domains.review.repository import ReviewRepository
+
+        repo = ReviewRepository(session=tenant_a_session, tenant_id=sample_review.tenant_id)
+
+        first = await repo.assign_reviewer(
+            review_id=sample_review.review_id,
+            tenant_id=sample_review.tenant_id,
+            assignee_id="reviewer1@test.com",
+            assigned_by="admin@test.com",
+            role="reviewer",
+        )
+        assert first is not None
+
+        second = await repo.assign_reviewer(
+            review_id=sample_review.review_id,
+            tenant_id=sample_review.tenant_id,
+            assignee_id="reviewer2@test.com",
+            assigned_by="admin@test.com",
+            role="reviewer",
+        )
+        assert second is not None
+        assert second.assignment_id != first.assignment_id, (
+            "Different reviewers should create different assignment records"
+        )
+
+        print(f"  ✅ Different reviewers both succeed: {first.assignment_id}, {second.assignment_id}")
+
+    @pytest.mark.asyncio
+    async def test_get_existing_assignment_returns_none_when_no_match(self, tenant_a_session, sample_review):
+        """Verify get_existing_assignment returns None when no assignment exists."""
+        from app.domains.review.repository import ReviewRepository
+
+        repo = ReviewRepository(session=tenant_a_session, tenant_id=sample_review.tenant_id)
+
+        result = await repo.get_existing_assignment(
+            review_id=sample_review.review_id,
+            tenant_id=sample_review.tenant_id,
+            assignee_id="nonexistent@test.com",
+        )
+        assert result is None
+
+        print(f"  ✅ get_existing_assignment returns None for unmatched reviewer")
+
+    def test_unique_constraint_exists(self):
+        """Verify the UNIQUE constraint is documented in the migration."""
+        # The constraint is added via migration l0m1n2o3p4q5, not in the model.
+        # Verify the migration file exists and contains the expected SQL.
+        import os
+        migration_path = os.path.join(
+            os.path.dirname(__file__),
+            "..", "alembic", "versions",
+            "l0m1n2o3p4q5_add_unique_review_assignee_constraint.py",
+        )
+        assert os.path.exists(migration_path), f"Migration file not found: {migration_path}"
+        with open(migration_path) as f:
+            content = f.read()
+        assert "uq_review_assignee" in content
+        assert "UNIQUE (review_id, assignee_id)" in content
+        print(f"  ✅ Migration l0m1n2o3p4q5 adds UNIQUE(review_id, assignee_id)")
