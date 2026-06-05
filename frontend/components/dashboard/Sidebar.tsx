@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { useAuth } from "@/components/auth/AuthProvider";
 import {
   LayoutDashboard,
   TrendingUp,
@@ -26,7 +27,6 @@ import {
   Eye,
   LayoutGrid,
   Briefcase,
-  PieChart,
   Users,
   FileCheck,
   Gavel,
@@ -35,9 +35,10 @@ import {
   Network,
   Sliders,
   Cpu,
+  ClipboardList,
 } from "lucide-react";
 
-type ViewType = "portfolio" | "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "executive-dashboard" | "policy" | "clause-intelligence" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center";
+type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "review-dashboard" | "executive-dashboard" | "policy" | "clause-intelligence" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center";
 
 interface SidebarProps {
   activeView: ViewType;
@@ -46,66 +47,98 @@ interface SidebarProps {
   onToggle: () => void;
 }
 
+interface NavItem {
+  id: ViewType;
+  label: string;
+  icon: React.ElementType;
+  /** Optional permission required to see this nav item. Default: visible to all. */
+  permission?: string | string[];
+  /** If true (default for arrays), ALL permissions required. If false, ANY. */
+  requireAll?: boolean;
+}
+
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
 // Enterprise navigation — organized by operational domain.
-// Role-based access control is enforced at the API level, not in the UI.
-const navGroups: { label: string; items: { id: ViewType; label: string; icon: React.ElementType }[] }[] = [
+// Items without a `permission` field are visible to all authenticated users.
+// Items with a `permission` field are filtered based on the user's permissions.
+const navGroups: NavGroup[] = [
   {
     label: "Contracts",
     items: [
-      { id: "ingestion", label: "Ingestion", icon: Upload },
-      { id: "contracts", label: "Contracts", icon: FileText },
-      { id: "clause-library", label: "Clause Library", icon: Library },
-      { id: "obligations", label: "Obligations", icon: ClipboardCheck },
+      { id: "ingestion", label: "Ingestion", icon: Upload, permission: "contracts:write" },
+      { id: "contracts", label: "Contracts", icon: FileText, permission: "contracts:read" },
+      { id: "clause-library", label: "Clause Library", icon: Library, permission: "contracts:read" },
+      { id: "obligations", label: "Obligations", icon: ClipboardCheck, permission: "contracts:read" },
     ],
   },
   {
     label: "AI Review",
     items: [
-      { id: "review", label: "Review Queue", icon: Eye },
-      { id: "negotiation", label: "Negotiation", icon: GitMerge },
-      { id: "clause-intelligence", label: "Clause Intel", icon: Network },
-      { id: "policy", label: "Policy Engine", icon: ScrollText },
+      { id: "review-dashboard", label: "Review Dashboard", icon: ClipboardList, permission: "contracts:read" },
+      { id: "review", label: "Review Queue", icon: Eye, permission: "contracts:read" },
+      { id: "negotiation", label: "Negotiation", icon: GitMerge, permission: "contracts:read" },
+      { id: "clause-intelligence", label: "Clause Intel", icon: Network, permission: "contracts:read" },
+      { id: "policy", label: "Policy Engine", icon: ScrollText, permission: "contracts:read" },
     ],
   },
   {
     label: "Operations",
     items: [
-      { id: "command-center", label: "Command Center", icon: LayoutDashboard },
-      { id: "reviewer-operations", label: "Reviewer Ops", icon: ClipboardCheck },
-      { id: "workflow-intelligence-dashboard", label: "Workflow Intel", icon: BarChart3 },
-      { id: "search", label: "Search & Discovery", icon: Search },
+      { id: "command-center", label: "Command Center", icon: LayoutDashboard, permission: "contracts:read" },
+      { id: "reviewer-operations", label: "Reviewer Ops", icon: ClipboardCheck, permission: "workflows:read" },
+      { id: "workflow-intelligence-dashboard", label: "Workflow Intel", icon: BarChart3, permission: "workflows:read" },
+      { id: "search", label: "Search & Discovery", icon: Search, permission: "contracts:read" },
     ],
   },
   {
     label: "Analytics",
     items: [
-      { id: "analytics", label: "Analytics", icon: TrendingUp },
-      { id: "benchmarks", label: "Benchmarks", icon: BarChart3 },
-      { id: "portfolio", label: "Portfolio", icon: PieChart },
-      { id: "executive-dashboard", label: "Executive", icon: LayoutDashboard },
+      { id: "analytics", label: "Analytics", icon: TrendingUp, permission: "contracts:read" },
+      { id: "benchmarks", label: "Benchmarks", icon: BarChart3, permission: "benchmarks:read" },
+      { id: "executive-dashboard", label: "Executive", icon: LayoutDashboard, permission: "contracts:read" },
     ],
   },
   {
     label: "Governance",
     items: [
-      { id: "compliance", label: "Compliance", icon: ShieldCheck },
-      { id: "governance-dashboard", label: "Governance", icon: ShieldCheck },
-      { id: "relationships", label: "Relationships", icon: Share2 },
-      { id: "workflows", label: "Workflows", icon: Workflow },
+      { id: "compliance", label: "Compliance", icon: ShieldCheck, permission: "contracts:read" },
+      { id: "governance-dashboard", label: "Governance", icon: ShieldCheck, permission: "audit:read" },
+      { id: "relationships", label: "Relationships", icon: Share2, permission: "contracts:read" },
+      { id: "workflows", label: "Workflows", icon: Workflow, permission: "workflows:read" },
     ],
   },
   {
     label: "Administration",
     items: [
-      { id: "admin", label: "Admin Console", icon: ShieldAlert },
-      { id: "settings", label: "Settings", icon: Settings },
-      { id: "tenant-settings", label: "Tenant Config", icon: Sliders },
-      { id: "ai-operations-dashboard", label: "AI Ops", icon: Cpu },
+      { id: "admin", label: "Admin Console", icon: ShieldAlert, permission: "admin:system" },
+      { id: "settings", label: "Settings", icon: Settings, permission: "admin:tenant" },
+      { id: "tenant-settings", label: "Tenant Config", icon: Sliders, permission: "admin:tenant" },
+      { id: "ai-operations-dashboard", label: "AI Ops", icon: Cpu, permission: "ai:view" },
     ],
   },
 ];
 
 export function Sidebar({ activeView, onViewChange, collapsed, onToggle }: SidebarProps) {
+  const { hasPermission } = useAuth();
+
+  // Filter nav items based on user permissions
+  const filteredGroups = navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => {
+        if (!item.permission) return true;
+        const perms = Array.isArray(item.permission) ? item.permission : [item.permission];
+        return item.requireAll !== false
+          ? perms.every((p) => hasPermission(p))
+          : perms.some((p) => hasPermission(p));
+      }),
+    }))
+    .filter((group) => group.items.length > 0);
+
   return (
     <aside
       className={`${
@@ -124,7 +157,7 @@ export function Sidebar({ activeView, onViewChange, collapsed, onToggle }: Sideb
 
       {/* Navigation */}
       <nav className="flex-1 py-2 px-2 overflow-y-auto space-y-3">
-        {navGroups.map((group) => (
+        {filteredGroups.map((group) => (
           <div key={group.label}>
             {!collapsed && (
               <div className="px-3 mb-1">

@@ -10,11 +10,12 @@ import { SearchHub } from "./search/SearchHub";
 import { IngestionCenter } from "./ingestion/IngestionCenter";
 import { ReviewWorkspace } from "@/components/review/ReviewWorkspace";
 import { ReviewQueue } from "@/components/review/ReviewQueue";
+import { ReviewDashboard } from "@/components/review/ReviewDashboard";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { AdminConsole } from "./AdminConsole";
 import { AiCopilot } from "@/components/ai-copilot/AiCopilot";
 import { copilotContext } from "@/components/ai-copilot/context";
 import { useReviews } from "@/services/hooks/useReviews";
-import { PortfolioDashboard } from "./PortfolioDashboard";
 import { CfoView } from "./CfoView";
 import { LegalView } from "./LegalView";
 import { ProcurementView } from "./ProcurementView";
@@ -67,7 +68,7 @@ function DashboardSkeleton() {
 // Full enterprise view types — all workspaces available in the sidebar.
 // Views without full backend integration show a placeholder indicating
 // the module is available but pending backend completion.
-type ViewType = "portfolio" | "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "executive-dashboard" | "policy" | "clause-intelligence" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard";
+        type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "review-dashboard" | "executive-dashboard" | "policy" | "clause-intelligence" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center";
 
 export function DashboardLayout() {
   const { user, logout } = useAuth();
@@ -122,20 +123,37 @@ export function DashboardLayout() {
         );
       case "review":
         return selectedReviewId ? (
-          <ReviewWorkspace
-            reviewId={selectedReviewId}
-            onBack={() => { setSelectedReviewId(null); setActiveView("ingestion"); }}
-          />
-        ) : (
-          <div className="max-w-5xl mx-auto">
-            <div className="mb-4">
-              <h2 className="text-lg font-bold text-navy-900">Review Queue</h2>
-              <p className="text-sm text-gray-500 mt-1">Manage and process contract reviews</p>
-            </div>
-            <ReviewQueue
-              onReviewSelect={(reviewId) => setSelectedReviewId(reviewId)}
+          <ProtectedRoute permission="contracts:read">
+            <ReviewWorkspace
+              reviewId={selectedReviewId}
+              onBack={() => { setSelectedReviewId(null); setActiveView("ingestion"); }}
             />
-          </div>
+          </ProtectedRoute>
+        ) : (
+          <ProtectedRoute permission="contracts:read">
+            <div className="max-w-5xl mx-auto">
+              <div className="mb-4">
+                <h2 className="text-lg font-bold text-navy-900">Review Queue</h2>
+                <p className="text-sm text-gray-500 mt-1">Manage and process contract reviews</p>
+              </div>
+              <ReviewQueue
+                onReviewSelect={(reviewId) => setSelectedReviewId(reviewId)}
+              />
+            </div>
+          </ProtectedRoute>
+        );
+      case "review-dashboard":
+        return (
+          <ProtectedRoute permission="contracts:read">
+            <div className="max-w-6xl mx-auto">
+              <ReviewDashboard
+                onReviewSelect={(reviewId) => {
+                  setSelectedReviewId(reviewId);
+                  setActiveView("review");
+                }}
+              />
+            </div>
+          </ProtectedRoute>
         );
 
       // ── Sprint 10 — Unified Dashboards ──
@@ -171,8 +189,6 @@ export function DashboardLayout() {
         );
 
       // ── Enterprise Workspaces ──
-      case "portfolio":
-        return <PortfolioDashboard />;
       case "executive-dashboard":
         return <ExecutiveDashboard />;
       case "cfo":
@@ -227,17 +243,37 @@ export function DashboardLayout() {
 
       // ── Sprint 7 — Enterprise Intelligence ──
       case "policy":
-        return <PolicyCenter />;
+        return (
+          <ProtectedRoute permission={["contracts:read", "ai:view"]} requireAll={false}>
+            <PolicyCenter />
+          </ProtectedRoute>
+        );
       case "clause-intelligence":
-        return <ClauseIntelligenceView />;
-      case "tenant-settings":
-        return user?.tenant_id ? <TenantSettings tenantId={user.tenant_id} /> : <SettingsPage />;
+        return (
+          <ProtectedRoute permission="contracts:read">
+            <ClauseIntelligenceView />
+          </ProtectedRoute>
+        );
 
       // ── Administration ──
       case "admin":
-        return <AdminConsole />;
+        return (
+          <ProtectedRoute permission="admin:system">
+            <AdminConsole />
+          </ProtectedRoute>
+        );
       case "settings":
-        return <SettingsPage />;
+        return (
+          <ProtectedRoute permission="admin:tenant">
+            <SettingsPage />
+          </ProtectedRoute>
+        );
+      case "tenant-settings":
+        return (
+          <ProtectedRoute permission="admin:tenant">
+            {user?.tenant_id ? <TenantSettings tenantId={user.tenant_id} /> : <SettingsPage />}
+          </ProtectedRoute>
+        );
 
       default:
         return <IngestionCenter onReviewNavigate={handleNavigateToReview} />;
@@ -255,7 +291,7 @@ export function DashboardLayout() {
     >
       <Sidebar
         activeView={activeView}
-        onViewChange={setActiveView}
+        onViewChange={(view: ViewType) => setActiveView(view)}
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
       />

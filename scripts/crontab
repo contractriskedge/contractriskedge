@@ -1,0 +1,22 @@
+# =============================================================================
+# ContractEdge Backup Crontab
+# =============================================================================
+# Install: crontab scripts/crontab
+# Verify:  crontab -l
+# Logs:    /Volumes/ContractEdge/ContractRiskEdge/backups/logs/
+#
+# Schedule:
+#   Daily  at 2:00 AM  — PostgreSQL + MinIO backup
+#   Hourly at :05      — Backup health check (lightweight validation)
+# =============================================================================
+
+# ── Daily Full Backup ────────────────────────────────────────────────────────
+# Runs PG dump (custom format, compressed), MinIO mirror, retention cleanup
+# Logs to: backups/logs/backup_YYYYMMDD_HHMMSS.log
+# JSON to: backups/logs/backup_YYYYMMDD_HHMMSS.json
+0 2 * * * /Volumes/ContractEdge/ContractRiskEdge/scripts/backup.sh >> /Volumes/ContractEdge/ContractRiskEdge/backups/logs/cron_daily.log 2>&1
+
+# ── Hourly Health Check ──────────────────────────────────────────────────────
+# Lightweight validation: checks backup freshness, file sizes, retention
+# Does NOT create new backups — only validates existing ones
+5 * * * * /Volumes/ContractEdge/ContractRiskEdge/scripts/backup.sh --validate-only >> /Volumes/ContractEdge/ContractRiskEdge/backups/logs/cron_health.log 2>&1

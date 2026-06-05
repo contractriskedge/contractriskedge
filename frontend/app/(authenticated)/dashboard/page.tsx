@@ -1,12 +1,11 @@
 /**
- * Dashboard route — portfolio overview and executive intelligence.
+ * Dashboard route — redirects to Executive Dashboard.
+ * Portfolio module was removed in Sprint 26.
+ * See: /executive for executive insights.
  */
 
-"use client";
-
-import React from "react";
-import { PortfolioDashboard } from "@/components/dashboard/PortfolioDashboard";
+import { redirect } from "next/navigation";
 
 export default function DashboardPage() {
-  return <PortfolioDashboard />;
+  redirect("/executive");
 }

@@ -11,12 +11,25 @@ env/
 *.env
 .env
 backend/.env
+.coverage
+.coverage.*
+backend/.coverage
+.pytest_cache/
+backend/.pytest_cache/
+*.pytest_cache
 
 # Node
 node_modules/
 .next/
 out/
 .cache/
+
+# Backup & artifacts
+backups/
+minio_backup/
+*.dump
+*.sql
+!scripts/*.sql
 
 # IDE
 .vscode/settings.json
@@ -88,3 +101,7 @@ tests/e2e_*
 sprint16_*
 *.tsbuildinfo
 backend/scripts/start-minio.sh
+backend/.coverage
+frontend/tsconfig.tsbuildinfo
+*.tsbuildinfo
+frontend/.next/

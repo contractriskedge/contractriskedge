@@ -21,6 +21,8 @@ from app.config import settings
 from app.kernel.dev_context import ensure_dev_tenant
 from app.kernel.database.session import TenantAwareSessionFactory
 from app.kernel.events.bus import EventBus
+from app.kernel.middleware.rate_limit import RateLimitMiddleware
+from app.kernel.middleware.security_headers import SecurityHeadersMiddleware
 from app.kernel.middleware.request_id import RequestIDMiddleware
 from app.kernel.middleware.tenant_context import TenantContextMiddleware
 from app.kernel.middleware.auth_context import AuthContextMiddleware
@@ -246,6 +248,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Security headers — applied to all responses (must be early in chain)
+    app.add_middleware(SecurityHeadersMiddleware)
     if settings.rate_limit_enabled:
         from app.kernel.middleware.rate_limit import RateLimitMiddleware
         app.add_middleware(RateLimitMiddleware)
@@ -419,6 +423,12 @@ def create_app() -> FastAPI:
     # ── Negotiation router ──
     from app.domains.negotiation.router import router as negotiation_router
     app.include_router(negotiation_router, prefix="/api/v1")
+    # ── Relationships Graph router ──
+    from app.domains.relationships.router import router as relationships_router
+    app.include_router(relationships_router, prefix="/api/v1")
+    # ── Tenant Configuration router (feature flags, policy packs, scoring, compliance) ──
+    from app.domains.tenant_config.router import router as tenant_config_router
+    app.include_router(tenant_config_router, prefix="/api/v1")
 
     # ── Prometheus metrics endpoint (no prefix, no auth) ──
     from app.kernel.telemetry.metrics import metrics_endpoint
