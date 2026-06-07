@@ -60,9 +60,9 @@ class TestReviewLifecycle:
         assert result is not None
         assert result["status"] == "in_review"
 
-        # Transition from in_review to legal_approval
+        # Transition from in_review to legal_approval (maps to legal_review in DB)
         result = await service.update_status(str(sample_review.review_id), "legal_approval")
-        assert result["status"] == "legal_approval"
+        assert result["status"] == "legal_review"
 
         # Transition from legal_approval to approved
         result = await service.update_status(str(sample_review.review_id), "approved")

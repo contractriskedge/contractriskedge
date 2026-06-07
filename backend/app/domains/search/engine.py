@@ -190,11 +190,11 @@ class HybridRetrievalEngine:
             SELECT c.chunk_id, c.upload_id, c.text, c.page_numbers,
                    c.section_heading, c.clause_type, c.token_count,
                    u.filename AS contract_name,
-                   1 - (c.embedding <=> :query_embedding::vector) AS similarity
+                   1 - (c.embedding <=> CAST(:query_embedding AS vector)) AS similarity
             FROM chunks c
             LEFT JOIN upload_sessions u ON u.upload_id = c.upload_id AND u.tenant_id = c.tenant_id
             WHERE {' AND '.join(where)}
-            ORDER BY c.embedding <=> :query_embedding::vector
+            ORDER BY c.embedding <=> CAST(:query_embedding AS vector)
             LIMIT :limit
         """
         result = await self.session.execute(text(sql), params)
@@ -297,10 +297,18 @@ class HybridRetrievalEngine:
         return results
 
     async def _embed_query(self, query: str) -> list[float]:
-        """Generate embedding for a search query using the configured provider."""
+        """Generate embedding for a search query using the configured provider.
+
+        Self-initializes the OpenAIEmbeddingProvider if the registry is empty
+        (e.g., on fresh application startup before any document ingestion).
+        """
         from app.domains.vectors.embeddings import OpenAIEmbeddingProvider, EmbeddingRequest, embedding_registry
 
-        provider = embedding_registry.get_default()
+        try:
+            provider = embedding_registry.get_default()
+        except ValueError:
+            provider = None
+
         if not isinstance(provider, OpenAIEmbeddingProvider):
             provider = OpenAIEmbeddingProvider(api_key=settings.openai_api_key)
             embedding_registry.register(provider)

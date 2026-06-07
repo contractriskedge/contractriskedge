@@ -229,8 +229,17 @@ export const negotiationsService = {
     api.get<NegotiationKpiData>(`${NEGOTIATIONS_BASE}/kpis`),
 
   // ── Sessions ─────────────────────────────────────────────────
-  listSessions: (params?: { stage?: string; search?: string; page?: number; page_size?: number }) =>
-    api.get<PaginatedResponse<NegotiationSessionSummary>>(`${NEGOTIATIONS_BASE}/`, params as Record<string, unknown>),
+  listSessions: (params?: { stage?: string; search?: string; page?: number; page_size?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.stage) query.set("stage", params.stage);
+    if (params?.search) query.set("search", params.search);
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.page_size) query.set("page_size", String(params.page_size));
+    const qs = query.toString();
+    return api.get<PaginatedResponse<NegotiationSessionSummary>>(
+      qs ? `${NEGOTIATIONS_BASE}/?${qs}` : `${NEGOTIATIONS_BASE}/`,
+    );
+  },
 
   getSession: (id: string) =>
     api.get<NegotiationSession>(`${NEGOTIATIONS_BASE}/${id}`),
@@ -245,8 +254,14 @@ export const negotiationsService = {
     api.delete<void>(`${NEGOTIATIONS_BASE}/${id}`),
 
   // ── Redlines ────────────────────────────────────────────────
-  listRedlines: (sessionId: string, clauseId?: string) =>
-    api.get<RedlineEntry[]>(`${NEGOTIATIONS_BASE}/${sessionId}/redlines`, clauseId ? { clauseId } as Record<string, unknown> : undefined),
+  listRedlines: (sessionId: string, clauseId?: string) => {
+    const query = new URLSearchParams();
+    if (clauseId) query.set("clauseId", clauseId);
+    const qs = query.toString();
+    return api.get<RedlineEntry[]>(
+      qs ? `${NEGOTIATIONS_BASE}/${sessionId}/redlines?${qs}` : `${NEGOTIATIONS_BASE}/${sessionId}/redlines`,
+    );
+  },
 
   createRedline: (sessionId: string, body: CreateRedlineRequest) =>
     api.post<RedlineEntry>(`${NEGOTIATIONS_BASE}/${sessionId}/redlines`, body),
@@ -265,8 +280,15 @@ export const negotiationsService = {
     api.patch<NegotiationIssue>(`${NEGOTIATIONS_BASE}/${sessionId}/issues/${issueId}`, body),
 
   // ── Comments ────────────────────────────────────────────────
-  listComments: (sessionId: string, params?: { redlineId?: string; issueId?: string }) =>
-    api.get<CommentItem[]>(`${NEGOTIATIONS_BASE}/${sessionId}/comments`, params as Record<string, unknown>),
+  listComments: (sessionId: string, params?: { redlineId?: string; issueId?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.redlineId) query.set("redlineId", params.redlineId);
+    if (params?.issueId) query.set("issueId", params.issueId);
+    const qs = query.toString();
+    return api.get<CommentItem[]>(
+      qs ? `${NEGOTIATIONS_BASE}/${sessionId}/comments?${qs}` : `${NEGOTIATIONS_BASE}/${sessionId}/comments`,
+    );
+  },
 
   createComment: (sessionId: string, body: CreateCommentRequest) =>
     api.post<CommentItem>(`${NEGOTIATIONS_BASE}/${sessionId}/comments`, body),

@@ -295,6 +295,7 @@ export interface MockRedlineItem {
   page: number;
   original_text: string;
   proposed_text: string;
+  redline_text?: string;
   status: "pending" | "accepted" | "rejected" | "modified";
   severity: string;
   finding_id: string | null;
@@ -305,6 +306,11 @@ export interface MockRedlineItem {
   version: number;
   review_notes?: string;
   modified_text?: string;
+  impact?: {
+    policyFixed?: string;
+    riskReduction?: number;
+    findingsResolved?: number;
+  };
 }
 
 export const MOCK_REDLINES: MockRedlineItem[] = [

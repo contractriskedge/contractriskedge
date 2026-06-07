@@ -284,3 +284,39 @@ class TestPersistenceChain:
         else:
             print(f"\n  ✅ All {len(db_values)} possible DB values are safe for PostgreSQL persistence")
         assert len(unsafe) == 0
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Sprint 22 Task 1.2B — Bucket Configuration Default
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestBucketConfigDefault:
+    """Verify the default S3 bucket configuration resolves correctly.
+
+    The Pydantic default was changed from 'contractedge-documents' to
+    'contractrisk-documents' to fix a silent NoSuchBucket failure when
+    the S3_BUCKET env var is not set.
+    """
+
+    def test_default_bucket_is_contractrisk_documents(self):
+        """Verify settings.s3_bucket defaults to 'contractrisk-documents'."""
+        from app.config import settings
+        assert settings.s3_bucket == "contractrisk-documents", (
+            f"Expected 'contractrisk-documents', got '{settings.s3_bucket}'. "
+            "The Pydantic default in config.py must match the canonical bucket name."
+        )
+        print(f"  ✅ Default bucket: {settings.s3_bucket}")
+
+    def test_default_bucket_matches_minio_bucket(self):
+        """Verify the default bucket matches the actual MinIO bucket."""
+        import os
+        from app.config import settings
+
+        # The env var may override, so check both the default and the override
+        env_bucket = os.getenv("S3_BUCKET", settings.s3_bucket)
+        assert env_bucket == "contractrisk-documents", (
+            f"Expected 'contractrisk-documents', got env='{env_bucket}' default='{settings.s3_bucket}'. "
+            "All environments must use the canonical bucket name."
+        )
+        print(f"  ✅ Resolved bucket: {env_bucket}")

@@ -18,9 +18,10 @@ import {
   Workflow, CheckCircle2, Clock, AlertTriangle, User,
   ArrowRight, Send, XCircle, SkipForward, ShieldAlert,
   BarChart3, TrendingUp, Users, ChevronDown, X, MessageSquare, Calendar, CheckCircle,
+  History,
 } from "lucide-react";
 import { useReviewContext } from "./ReviewContext";
-import { useReviewerWorkloads, useQueueMetrics, useAdvanceWorkflow } from "./hooks";
+import { useReviewerWorkloads, useQueueMetrics, useAdvanceWorkflow, useStageHistory, useActivityComments } from "./hooks";
 import { reviewService } from "@/services/api/reviews";
 
 export function WorkflowSection() {
@@ -28,6 +29,8 @@ export function WorkflowSection() {
   const { workflow, selectedReview, selectedReviewId } = ctx;
   const { data: reviewers } = useReviewerWorkloads();
   const { data: metrics } = useQueueMetrics();
+  const { data: stageHistory } = useStageHistory(selectedReviewId ?? "");
+  const { data: activityComments } = useActivityComments(selectedReviewId ?? "");
   const advanceMutation = useAdvanceWorkflow();
 
   const [showActions, setShowActions] = useState(false);
@@ -107,29 +110,51 @@ export function WorkflowSection() {
     rejected: { bg: "bg-red-100 dark:bg-red-900/20", dot: "bg-red-500", text: "text-red-700" },
   };
 
+  // ── Authoritative state from backend (single source of truth) ──
+  // Uses computed_status from the review detail API when available,
+  // falls back to local derivation only if backend value is missing.
+  const authStatus = selectedReview.computed_status || (() => {
+    const slaHours = workflow.sla_remaining_hours;
+    const isOverdue = slaHours !== undefined && slaHours < 0;
+    const isAssigned = !!selectedReview.assigned_to_name || !!selectedReview.assigned_to;
+    const isEscalated = workflow.escalation_level > 0;
+    const rawStatus = selectedReview.status;
+    const terminalStates = ["completed", "approved", "closed", "archived"] as readonly string[];
+    const isCompleted = terminalStates.includes(rawStatus);
+    return isCompleted ? "completed" : isEscalated ? "escalated" : isOverdue ? "overdue" : isAssigned ? "in_review" : "unassigned";
+  })();
+  const slaHours = workflow.sla_remaining_hours;
+  const isOverdue = authStatus === "overdue";
+  const isSlaWarning = slaHours !== undefined && slaHours >= 0 && slaHours <= 6;
+  const isAssigned = authStatus === "in_review" || authStatus === "assigned";
+  const isEscalated = authStatus === "escalated";
+  const isCompleted = authStatus === "completed" || authStatus === "approved" || authStatus === "closed";
+  const authSlaStatus = isCompleted ? "on_track" : isOverdue ? "overdue" : isSlaWarning ? "warning" : "on_track";
+  const slaColor = authSlaStatus === "overdue" ? "bg-red-100 text-red-700" : authSlaStatus === "warning" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700";
+
   return (
     <div className="p-4 space-y-4">
-      {/* ── SLA & Queue Health ──────────────────────────────────────────── */}
+      {/* ── SLA & Queue Health — SINGLE AUTHORITATIVE SOURCE ── */}
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-3">
           <div className="flex items-center gap-1.5 mb-2">
             <Clock className="w-3.5 h-3.5 text-blue-500" />
             <span className="text-[9px] font-semibold text-gray-500 uppercase">SLA Status</span>
           </div>
-          <div className={`px-2 py-1.5 rounded text-[11px] font-medium ${
-            selectedReview.sla_status === "critical_overdue" ? "bg-red-100 text-red-700" :
-            selectedReview.sla_status === "overdue" ? "bg-red-50 text-red-600" :
-            selectedReview.sla_status === "warning" ? "bg-amber-100 text-amber-700" :
-            "bg-green-100 text-green-700"
-          }`}>
+          <div className={`px-2 py-1.5 rounded text-[11px] font-medium ${slaColor}`}>
             <div className="flex items-center justify-between">
-              <span className="capitalize font-semibold">{selectedReview.sla_status.replace(/_/g, " ")}</span>
-              <span>{workflow.sla_remaining_hours > 0 ? `${Math.floor(workflow.sla_remaining_hours)}h remaining` : `${Math.floor(Math.abs(workflow.sla_remaining_hours))}h overdue`}</span>
+              <span className="capitalize font-semibold">{authSlaStatus}</span>
+              {slaHours !== undefined && (
+                <span>{isOverdue ? `${Math.floor(Math.abs(slaHours))}h overdue` : `${Math.floor(slaHours)}h remaining`}</span>
+              )}
             </div>
           </div>
           <div className="mt-2 space-y-1 text-[9px]">
-            <div className="flex justify-between"><span className="text-gray-400">Queue Position</span><span className="font-medium">{workflow.queue_position} of {workflow.queue_total}</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">Age in Queue</span><span className={`font-medium ${selectedReview.age_hours > 72 ? "text-red-600" : selectedReview.age_hours > 48 ? "text-amber-600" : ""}`}>{Math.round(selectedReview.age_hours)}h</span></div>
+            <div className="flex justify-between"><span className="text-gray-400">Computed Status</span><span className={`font-medium capitalize ${
+              authStatus === "overdue" ? "text-red-600" : authStatus === "escalated" ? "text-red-600" : authStatus === "unassigned" ? "text-amber-600" : "text-green-600"
+            }`}>{authStatus.replace(/_/g, " ")}</span></div>
+            <div className="flex justify-between"><span className="text-gray-400">Queue Position</span><span className="font-medium">{workflow.queue_position ?? "—"} of {workflow.queue_total ?? "—"}</span></div>
+            <div className="flex justify-between"><span className="text-gray-400">Age in Queue</span><span className={`font-medium ${(selectedReview.age_hours ?? 0) > 72 ? "text-red-600" : (selectedReview.age_hours ?? 0) > 48 ? "text-amber-600" : ""}`}>{selectedReview.age_hours ? `${Math.round(selectedReview.age_hours)}h` : "—"}</span></div>
             <div className="flex justify-between"><span className="text-gray-400">Escalation</span><span className={`font-medium ${workflow.escalation_level > 0 ? "text-red-600" : ""}`}>{workflow.escalation_level > 0 ? `Level ${workflow.escalation_level}` : "None"}</span></div>
           </div>
         </div>
@@ -139,14 +164,16 @@ export function WorkflowSection() {
             <BarChart3 className="w-3.5 h-3.5 text-purple-500" />
             <span className="text-[9px] font-semibold text-gray-500 uppercase">Queue Metrics</span>
           </div>
-          {metrics && (
+          {metrics ? (
             <div className="space-y-1 text-[9px]">
               <div className="flex justify-between"><span className="text-gray-400">Total in Queue</span><span className="font-medium">{metrics.total}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Unassigned in Queue</span><span className="font-medium text-amber-600">{metrics.unassigned}</span></div>
-              <div className="flex justify-between"><span className="text-gray-400">Overdue</span><span className="font-medium text-red-600">{metrics.overdue + metrics.critical_overdue}</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">Overdue</span><span className="font-medium text-red-600">{(metrics.overdue ?? 0) + (metrics.critical_overdue ?? 0)}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">SLA at Risk</span><span className="font-medium text-amber-600">{metrics.sla_at_risk}</span></div>
               <div className="flex justify-between"><span className="text-gray-400">Completed Today</span><span className="font-medium text-green-600">{metrics.completed_today}</span></div>
             </div>
+          ) : (
+            <p className="text-[9px] text-gray-400 py-2 text-center">Queue metrics loading...</p>
           )}
         </div>
       </div>
@@ -158,25 +185,22 @@ export function WorkflowSection() {
           <span className="text-[9px] font-semibold text-gray-500 uppercase">Review Ownership</span>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          {/* Current Owner */}
+          {/* Current Owner — hide if unassigned */}
           <div className="p-2 rounded bg-gray-50 dark:bg-navy-750">
             <span className="text-[7px] font-semibold text-gray-500 uppercase">Current Owner</span>
             <div className="flex items-center gap-1.5 mt-1">
-              {selectedReview.assigned_to_name ? (
+              {isAssigned ? (
                 <>
                   <div className="w-6 h-6 rounded-full bg-navy-200 dark:bg-navy-600 flex items-center justify-center text-[8px] font-bold text-navy-700 flex-shrink-0">
-                    {selectedReview.assigned_to_name.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                    {(selectedReview.assigned_to_name || selectedReview.assigned_to || "??").split(" ").map(n => n[0]).join("").slice(0, 2)}
                   </div>
                   <div>
-                    <p className="text-[10px] font-medium text-navy-900 dark:text-white">{selectedReview.assigned_to_name}</p>
-                    <p className="text-[7px] text-gray-400">{workflow.reviewers.find(r => r.user_id === selectedReview.assigned_to)?.role || "—"}</p>
+                    <p className="text-[10px] font-medium text-navy-900 dark:text-white">{selectedReview.assigned_to_name || selectedReview.assigned_to}</p>
+                    <p className="text-[7px] text-gray-400">{workflow.reviewers?.find(r => r.user_id === selectedReview.assigned_to)?.role || ""}</p>
                   </div>
                 </>
               ) : (
-                <div className="flex items-center gap-1.5 text-amber-600">
-                  <AlertTriangle className="w-3 h-3" />
-                  <p className="text-[10px] font-medium">Awaiting assignment — stage: {workflow.current_stage.replace(/_/g, " ")}</p>
-                </div>
+                <p className="text-[10px] text-gray-400 italic">No owner assigned</p>
               )}
             </div>
           </div>
@@ -186,46 +210,40 @@ export function WorkflowSection() {
             <span className="text-[7px] font-semibold text-gray-500 uppercase">Next Approver</span>
             <div className="flex items-center gap-1.5 mt-1">
               <div className="w-6 h-6 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center text-[8px] font-bold text-amber-700 flex-shrink-0">
-                {workflow.stages.find(s => s.status === "current")?.label.slice(0, 2).toUpperCase() || "—"}
+                {workflow.stages?.find(s => s.status === "current")?.label.slice(0, 2).toUpperCase() || "—"}
               </div>
               <div>
                 <p className="text-[10px] font-medium text-amber-700 dark:text-amber-300">
-                  {workflow.stages.find(s => s.status === "current")?.label || "—"}
+                  {workflow.stages?.find(s => s.status === "current")?.label || "—"}
                 </p>
-                <p className="text-[7px] text-gray-400">
-                  {workflow.sla_remaining_hours > 0
-                    ? `${Math.floor(workflow.sla_remaining_hours)}h remaining`
-                    : `${Math.floor(Math.abs(workflow.sla_remaining_hours))}h overdue`}
-                </p>
+                {!isCompleted && slaHours !== undefined && (
+                  <p className="text-[7px] text-gray-400">
+                    {isOverdue ? `${Math.floor(Math.abs(slaHours))}h overdue` : `${Math.floor(slaHours)}h remaining`}
+                  </p>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Days Remaining */}
+          {/* Days Remaining — hide if unassigned or completed */}
+          {isAssigned && !isCompleted && (
           <div className="p-2 rounded bg-gray-50 dark:bg-navy-750">
             <span className="text-[7px] font-semibold text-gray-500 uppercase">Days Remaining</span>
-            <p className={`text-sm font-bold mt-1 ${
-              selectedReview.sla_status === "critical_overdue" ? "text-red-600" :
-              selectedReview.sla_status === "overdue" ? "text-red-500" :
-              selectedReview.sla_status === "warning" ? "text-amber-600" : "text-green-600"
-            }`}>
-              {workflow.sla_remaining_hours > 0
-                ? `${Math.ceil(workflow.sla_remaining_hours / 24)}d`
-                : "Overdue"}
+            <p className={`text-sm font-bold mt-1 ${isOverdue ? "text-red-600" : isSlaWarning ? "text-amber-600" : "text-green-600"}`}>
+              {slaHours !== undefined ? (isOverdue ? "Overdue" : `${Math.ceil(slaHours / 24)}d`) : "—"}
             </p>
           </div>
+          )}
 
-          {/* Escalation Threshold */}
+          {/* Escalation Threshold — hide if normal and not assigned */}
+          {(isEscalated || (isAssigned && slaHours !== undefined && slaHours < 6)) && (
           <div className="p-2 rounded bg-gray-50 dark:bg-navy-750">
             <span className="text-[7px] font-semibold text-gray-500 uppercase">Escalation Threshold</span>
-            <p className={`text-sm font-bold mt-1 ${workflow.escalation_level > 0 ? "text-red-600" : "text-gray-500"}`}>
-              {workflow.escalation_level > 0
-                ? `Level ${workflow.escalation_level}`
-                : workflow.sla_remaining_hours < 6
-                  ? "Imminent"
-                  : "Normal"}
+            <p className={`text-sm font-bold mt-1 ${isEscalated ? "text-red-600" : "text-amber-600"}`}>
+              {isEscalated ? `Level ${workflow.escalation_level}` : slaHours !== undefined && slaHours < 6 ? "Imminent" : "Normal"}
             </p>
           </div>
+          )}
         </div>
       </div>
 
@@ -290,49 +308,66 @@ export function WorkflowSection() {
 
         <div className="mt-2 flex items-center justify-between">
           <span className="text-[9px] text-gray-500 capitalize">Current: <strong>{workflow.current_stage.replace(/_/g, " ")}</strong></span>
-          {workflow.available_actions.length > 0 && (
-            <div className="relative">
-              <button onClick={() => setShowActions(!showActions)} className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-navy-600 text-white hover:bg-navy-700 transition-colors">
-                Actions <Send className="w-2.5 h-2.5" />
-              </button>
-              {showActions && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setShowActions(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-20 bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-700 rounded-lg shadow-lg py-1 w-44">
-                    {workflow.available_actions.map(action => (
-                      <button key={action} onClick={() => { setShowActions(false); setAdvanceModal({ action }); }}
+          <div className="flex items-center gap-1.5">
+            {/* ── Workflow Action Center ── */}
+            {/* Escalate */}
+            <button onClick={() => { setAdvanceModal({ action: "escalate" }); }}
+              className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-red-600 text-white hover:bg-red-700 transition-colors shadow-sm">
+              <ShieldAlert className="w-2.5 h-2.5" /> Escalate
+            </button>
+            {/* Approve */}
+            <button onClick={() => { setAdvanceModal({ action: "approve" }); }}
+              className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-green-600 text-white hover:bg-green-700 transition-colors shadow-sm">
+              <CheckCircle className="w-2.5 h-2.5" /> Approve
+            </button>
+            {/* Close */}
+            <button onClick={() => { setAdvanceModal({ action: "close" }); }}
+              className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-navy-700 text-white hover:bg-navy-800 transition-colors shadow-sm">
+              <XCircle className="w-2.5 h-2.5" /> Close
+            </button>
+            {/* Stage Actions dropdown */}
+            {workflow.available_actions.length > 0 && (
+              <div className="relative">
+                <button onClick={() => setShowActions(!showActions)} className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-navy-600 text-white hover:bg-navy-700 transition-colors">
+                  Actions <Send className="w-2.5 h-2.5" />
+                </button>
+                {showActions && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setShowActions(false)} />
+                    <div className="absolute right-0 top-full mt-1 z-20 bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-700 rounded-lg shadow-lg py-1 w-44">
+                      {workflow.available_actions.map(action => (
+                        <button key={action} onClick={() => { setShowActions(false); setAdvanceModal({ action }); }}
+                          className="w-full text-left px-3 py-1.5 text-[9px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-700 flex items-center gap-1.5">
+                          <Send className="w-2.5 h-2.5" /> {action.replace(/_/g, " ")}
+                        </button>
+                      ))}
+                      <div className="border-t border-gray-100 dark:border-navy-700 my-1" />
+                      <button onClick={() => { setShowActions(false); setReassignModal(true); }}
                         className="w-full text-left px-3 py-1.5 text-[9px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-700 flex items-center gap-1.5">
-                        <Send className="w-2.5 h-2.5" /> {action.replace(/_/g, " ")}
+                        <User className="w-2.5 h-2.5" /> Reassign
                       </button>
-                    ))}
-                    <div className="border-t border-gray-100 dark:border-navy-700 my-1" />
-                    <button onClick={() => { setShowActions(false); setReassignModal(true); }}
-                      className="w-full text-left px-3 py-1.5 text-[9px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-700 flex items-center gap-1.5">
-                      <User className="w-2.5 h-2.5" /> Reassign
-                    </button>
-                    <button onClick={() => { setShowActions(false); setDueDateModal(true); }}
-                      className="w-full text-left px-3 py-1.5 text-[9px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-700 flex items-center gap-1.5">
-                      <Clock className="w-2.5 h-2.5" /> Set Due Date
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
+                      <button onClick={() => { setShowActions(false); setDueDateModal(true); }}
+                        className="w-full text-left px-3 py-1.5 text-[9px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-700 flex items-center gap-1.5">
+                        <Clock className="w-2.5 h-2.5" /> Set Due Date
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Due Dates */}
         <div className="mt-2 pt-2 border-t border-gray-100 dark:border-navy-700 grid grid-cols-3 gap-2 text-[8px]">
           <div>
             <span className="text-gray-400">SLA Deadline</span>
-            <p className={`font-medium mt-0.5 ${
-              selectedReview.sla_status === "critical_overdue" ? "text-red-600" :
-              selectedReview.sla_status === "overdue" ? "text-red-500" :
-              selectedReview.sla_status === "warning" ? "text-amber-600" : "text-green-600"
-            }`}>
-              {workflow.sla_remaining_hours > 0
-                ? `${Math.floor(workflow.sla_remaining_hours)}h remaining`
-                : `${Math.floor(Math.abs(workflow.sla_remaining_hours))}h overdue`}
+            <p className={`font-medium mt-0.5 ${slaColor}`}>
+              {slaHours !== undefined
+                ? (isOverdue
+                  ? `${Math.floor(Math.abs(slaHours))}h overdue`
+                  : `${Math.floor(slaHours)}h remaining`)
+                : "—"}
             </p>
           </div>
           <div>
@@ -458,6 +493,102 @@ export function WorkflowSection() {
           </div>
         </div>
       )}
+
+      {/* ── Stage Transition History (evidence) ──────────────────────────── */}
+      <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-3">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-1.5">
+            <History className="w-3.5 h-3.5 text-navy-500" />
+            <span className="text-[9px] font-semibold text-gray-500 uppercase">Stage Transition History</span>
+          </div>
+          <span className="text-[7px] text-gray-400">
+            {(stageHistory?.history?.length ?? 0)} transition{(stageHistory?.history?.length ?? 0) === 1 ? "" : "s"}
+          </span>
+        </div>
+        {stageHistory?.history && stageHistory.history.length > 0 ? (
+          <div className="space-y-1.5 max-h-32 overflow-y-auto">
+            {stageHistory.history.slice(0, 8).map((h, idx) => (
+              <div key={`${h.from_status}-${h.to_status}-${h.created_at}-${idx}`}
+                className="flex items-start gap-2 p-1.5 rounded bg-gray-50 dark:bg-navy-750">
+                <div className="flex flex-col items-center flex-shrink-0">
+                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                  {idx < Math.min(stageHistory.history.length - 1, 7) && (
+                    <div className="w-px h-4 bg-gray-200 dark:bg-navy-600 mt-0.5" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1 text-[9px]">
+                    <span className="font-medium text-navy-900 dark:text-white capitalize">
+                      {h.from_status?.replace(/_/g, " ") || "—"}
+                    </span>
+                    <ArrowRight className="w-2.5 h-2.5 text-gray-400" />
+                    <span className="font-semibold text-blue-700 dark:text-blue-300 capitalize">
+                      {h.to_status?.replace(/_/g, " ") || "—"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-0.5 text-[7px] text-gray-500">
+                    <span>by {h.changed_by || "system"}</span>
+                    <span>·</span>
+                    <span>{new Date(h.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                  </div>
+                  {h.reason && (
+                    <p className="text-[8px] text-gray-600 dark:text-gray-300 mt-0.5 italic truncate" title={h.reason}>
+                      "{h.reason}"
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[9px] text-gray-400 py-2 text-center">No transitions recorded yet</p>
+        )}
+      </div>
+
+      {/* ── Reviewer Comments / Activity ─────────────────────────────────── */}
+      <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-3">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-1.5">
+            <MessageSquare className="w-3.5 h-3.5 text-teal-500" />
+            <span className="text-[9px] font-semibold text-gray-500 uppercase">Reviewer Comments</span>
+          </div>
+          <span className="text-[7px] text-gray-400">
+            {(activityComments?.comments?.length ?? 0)} comment{(activityComments?.comments?.length ?? 0) === 1 ? "" : "s"}
+          </span>
+        </div>
+        {activityComments?.comments && activityComments.comments.length > 0 ? (
+          <div className="space-y-1.5 max-h-28 overflow-y-auto">
+            {activityComments.comments.slice(0, 5).map((c, idx) => {
+              const body = String((c as any).body || (c as any).content || "");
+              const author = String((c as any).created_by || (c as any).author || "system");
+              const created = String((c as any).created_at || "");
+              return (
+                <div key={String((c as any).comment_id || idx)} className="flex items-start gap-2 p-1.5 rounded bg-teal-50/50 dark:bg-teal-900/10">
+                  <div className="w-5 h-5 rounded-full bg-teal-200 dark:bg-teal-800 flex items-center justify-center text-[7px] font-bold text-teal-700 flex-shrink-0">
+                    {author.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 text-[7px] text-gray-500">
+                      <span className="font-medium text-navy-900 dark:text-white">{author}</span>
+                      {created && (
+                        <>
+                          <span>·</span>
+                          <span>{new Date(created).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                        </>
+                      )}
+                    </div>
+                    <p className="text-[8px] text-gray-700 dark:text-gray-300 mt-0.5 line-clamp-2" title={body}>
+                      {body}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-[9px] text-gray-400 py-2 text-center">No reviewer comments yet</p>
+        )}
+      </div>
 
       {/* ── Reviewer Workload ────────────────────────────────────────────── */}
       <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-3">

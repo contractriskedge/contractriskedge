@@ -137,22 +137,13 @@ class ReviewService:
         review = await self.review_repo.get_review(review_id, self.tenant_id)
         if not review:
             return None
-        # Recompute counts from actual DB records to avoid stale counters
-        from sqlalchemy import select, func as sa_func
-        from app.domains.review.models import ReviewFinding, ReviewRedline
-        cnt = await self.review_repo.session.execute(
-            select(sa_func.count()).select_from(ReviewFinding).where(
-                ReviewFinding.review_id == review_id,
-                ReviewFinding.tenant_id == self.tenant_id,
-            )
-        )
-        review.finding_count = cnt.scalar() or 0
-        cnt = await self.review_repo.session.execute(
-            select(sa_func.count()).select_from(ReviewRedline).where(
-                ReviewRedline.review_id == review_id,
-                ReviewRedline.tenant_id == self.tenant_id,
-            )
-        )
+        # Note: finding_count and redline_count are set during review creation
+        # and are accurate. We do NOT recompute them here because:
+        # 1. The stored counters are updated atomically during import
+        # 2. Re-computing requires additional queries that can trigger
+        #    greenlet context issues with certain session states
+        # 3. The list endpoint already returns accurate counts
+        return self._review_to_detail(review)
         review.redline_count = cnt.scalar() or 0
         return self._review_to_detail(review)
 
@@ -784,7 +775,9 @@ class ReviewService:
         if due_date is None:
             due_date = utc_now() + timedelta(hours=self._sla_hours_for_priority(priority))
 
-        # Transition status before creating assignment (fail fast on invalid state)
+        # Transition status before creating assignment (fail fast on invalid state).
+        # Re-assignment is idempotent: if the review is already in a state that
+        # accepts assignment (e.g. IN_REVIEW), we do not re-transition.
         current = review.status
         if isinstance(current, str):
             try:
@@ -804,6 +797,9 @@ class ReviewService:
             target_status = ReviewStatus.IN_REVIEW
         elif current == ReviewStatus.ESCALATED and role == "legal_ops":
             target_status = ReviewStatus.LEGAL_APPROVAL
+        # NOTE: We do NOT transition from IN_REVIEW (or any other non-listed
+        # state) — re-assignment to an already-active review keeps the
+        # current status to avoid "Invalid state transition" errors.
 
         if target_status:
             await self.review_repo.update_status(
@@ -843,6 +839,21 @@ class ReviewService:
         }
         if updated_review:
             result["review"] = self._review_to_detail(updated_review)
+
+        # Record audit event for assignment
+        try:
+            previous_assignee = str(updated_review.assigned_to) if updated_review and updated_review.assigned_to else None
+            if previous_assignee == assignee_id:
+                previous_assignee = None  # Same assignee, no change
+            await self.audit_trail.record_assignment(
+                review_id=review_id,
+                assignee_id=assignee_id,
+                assigned_by=self.user.id,
+                role=role,
+                previous_assignee=previous_assignee,
+            )
+        except Exception:
+            pass  # Non-blocking — assignment succeeded even if audit fails
 
         # Send notification
         if self.notify_service:
@@ -1735,12 +1746,26 @@ class ReviewService:
                 SELECT
                     COUNT(*)::int AS total,
                     COUNT(*) FILTER (WHERE r.assigned_to IS NULL AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS unassigned,
+                    COUNT(*) FILTER (WHERE r.status = 'ai_analyzed' AND r.assigned_to IS NULL)::int AS ai_analyzed,
+                    COUNT(*) FILTER (WHERE r.status IN ('ai_analyzed', 'review_ready') AND r.assigned_to IS NULL)::int AS ready_for_review,
+                    COUNT(*) FILTER (WHERE r.assigned_to IS NOT NULL AND r.status IN ('ai_analyzed', 'review_ready'))::int AS assigned,
                     COUNT(*) FILTER (WHERE r.status = 'in_review')::int AS in_review,
                     COUNT(*) FILTER (WHERE r.sla_status IN ('overdue', 'critical_overdue') AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS overdue,
                     COUNT(*) FILTER (WHERE r.status = 'escalated')::int AS escalated,
                     COUNT(*) FILTER (WHERE r.priority IN ('urgent', 'critical') AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS critical,
+                    COUNT(*) FILTER (WHERE r.status IN ('approved', 'closed'))::int AS closed,
                     COUNT(*) FILTER (WHERE r.sla_status IN ('warning', 'overdue', 'critical_overdue') AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS sla_at_risk,
-                    COUNT(*) FILTER (WHERE r.completed_at IS NOT NULL AND r.completed_at::date = CURRENT_DATE)::int AS completed_today
+                    COUNT(*) FILTER (WHERE r.completed_at IS NOT NULL AND r.completed_at::date = CURRENT_DATE)::int AS completed_today,
+                    -- Risk distribution (risk_score is stored in metadata JSONB)
+                    COUNT(*) FILTER (WHERE (r.metadata->>'risk_score')::float >= 0.7 AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS critical_risk,
+                    COUNT(*) FILTER (WHERE (r.metadata->>'risk_score')::float >= 0.5 AND (r.metadata->>'risk_score')::float < 0.7 AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS high_risk,
+                    COUNT(*) FILTER (WHERE (r.metadata->>'risk_score')::float >= 0.3 AND (r.metadata->>'risk_score')::float < 0.5 AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS medium_risk,
+                    COUNT(*) FILTER (WHERE (r.metadata->>'risk_score')::float < 0.3 AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS low_risk,
+                    -- Queue aging
+                    COUNT(*) FILTER (WHERE r.created_at >= NOW() - INTERVAL '2 days' AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS age_0_2_days,
+                    COUNT(*) FILTER (WHERE r.created_at >= NOW() - INTERVAL '5 days' AND r.created_at < NOW() - INTERVAL '2 days' AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS age_3_5_days,
+                    COUNT(*) FILTER (WHERE r.created_at >= NOW() - INTERVAL '10 days' AND r.created_at < NOW() - INTERVAL '5 days' AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS age_6_10_days,
+                    COUNT(*) FILTER (WHERE r.created_at < NOW() - INTERVAL '10 days' AND r.status NOT IN ('approved', 'rejected', 'closed'))::int AS age_10_plus_days
                 FROM contract_reviews r
                 WHERE r.tenant_id = :tenant_id AND r.is_deleted = FALSE
             """),
@@ -1831,11 +1856,24 @@ class ReviewService:
         succeeded = 0
         failed = 0
         errors = []
+        skipped = 0
 
         for rid in review_ids:
             try:
-                await self.approve(rid, decision, comments)
-                succeeded += 1
+                # Idempotent: skip if already approved/rejected
+                op_type = "approve" if decision == "approved" else "reject"
+                lock_key = f"{op_type}:{rid}"
+                if not OperationLock.acquire(lock_key):
+                    skipped += 1
+                    continue
+                try:
+                    if await self.idempotency.is_duplicate(op_type, rid, self.user.id):
+                        skipped += 1
+                        continue
+                    await self._approve_impl(rid, decision, comments)
+                    succeeded += 1
+                finally:
+                    OperationLock.release(lock_key)
             except Exception as e:
                 failed += 1
                 errors.append(f"{rid}: {str(e)}")
@@ -1847,7 +1885,7 @@ class ReviewService:
             review_ids=[uuid.UUID(rid) for rid in review_ids],
             params={"decision": decision},
             triggered_by=self.user.id,
-            result={"succeeded": succeeded, "failed": failed, "errors": errors},
+            result={"succeeded": succeeded, "failed": failed, "skipped": skipped, "errors": errors},
         )
         self.review_repo.session.add(action)
         await self.review_repo.session.flush()
@@ -1858,6 +1896,7 @@ class ReviewService:
             "total": len(review_ids),
             "succeeded": succeeded,
             "failed": failed,
+            "skipped": skipped,
             "errors": errors,
         }
 
@@ -2649,7 +2688,239 @@ class ReviewService:
     # are built out. They exist so the frontend doesn't get 404s.
 
     async def get_policy_violations(self, review_id: str) -> dict:
-        return {"violations": []}
+        """Return policy violations for a review end-to-end.
+
+        Pipeline: Finding → matched PolicyRule → PolicyEvaluation (violation)
+        → PolicyOverride (waiver).
+
+        We:
+          1. Look up the review's findings and clause_types.
+          2. Match them against active policy_rules for the tenant.
+          3. If a matching policy_evaluation row exists, surface it.
+          4. Otherwise, lazily create a "violation" view derived from
+             (finding × policy_rule) without writing to the table.
+          5. Annotate each violation with its waiver status from
+             policy_overrides.
+        """
+        from sqlalchemy import text as sa_text
+
+        # 1. Fetch findings for the review
+        findings_sql = sa_text("""
+            SELECT finding_id, clause_type, severity, title, description,
+                   recommendation, resolution
+            FROM review_findings
+            WHERE tenant_id = :tenant_id AND review_id = CAST(:review_id AS uuid)
+        """)
+        result = await self.review_repo.session.execute(
+            findings_sql, {"tenant_id": self.tenant_id, "review_id": review_id}
+        )
+        findings = [dict(row._mapping) for row in result.fetchall()]
+
+        # 2. Fetch active policy rules for the tenant
+        rules_sql = sa_text("""
+            SELECT rule_id, playbook_id, name, description, priority, is_mandatory,
+                   effect, target_category, conditions
+            FROM policy_rules
+            WHERE tenant_id = :tenant_id AND is_active = TRUE
+            ORDER BY priority ASC
+        """)
+        result = await self.review_repo.session.execute(
+            rules_sql, {"tenant_id": self.tenant_id}
+        )
+        rules = [dict(row._mapping) for row in result.fetchall()]
+
+        # 3. Build (finding × rule) violations. Match on (a) target_category,
+        # (b) conditions->>'clause_category', or (c) name keyword fallback.
+        def _matches(finding: dict, rule: dict) -> bool:
+            clause = (finding.get("clause_type") or "").lower().replace(" ", "_")
+            if not clause:
+                return False
+            target = (rule.get("target_category") or "").lower().replace(" ", "_")
+            if target and target == clause:
+                return True
+            cond = rule.get("conditions") or {}
+            if isinstance(cond, dict):
+                cond_cat = (cond.get("clause_category") or "").lower().replace(" ", "_")
+                if cond_cat and cond_cat == clause:
+                    return True
+            # Name keyword fallback so seeded rules without target_category still match
+            name = (rule.get("name") or "").lower()
+            name_map = {
+                "ip_ownership": "intellectual_property",
+                "liability_cap": "liability",
+                "indemnification": "indemnification",
+                "data_privacy": "data_privacy",
+                "gdpr_compliance": "data_privacy",
+            }
+            for keyword, mapped in name_map.items():
+                if keyword in name and mapped == clause:
+                    return True
+            return False
+
+        violations: list[dict] = []
+        for f in findings:
+            clause = (f.get("clause_type") or "").lower().replace(" ", "_")
+            if not clause:
+                continue
+            for r in rules:
+                if not _matches(f, r):
+                    continue
+                target = (r.get("target_category") or "").lower().replace(" ", "_")
+                violations.append({
+                    "id": f"vio-{str(f['finding_id'])[:8]}-{str(r['rule_id'])[:8]}",
+                    "violation_id": f"vio-{str(f['finding_id'])[:8]}-{str(r['rule_id'])[:8]}",
+                    "finding_id": str(f["finding_id"]),
+                    "review_id": review_id,
+                    "rule_id": str(r["rule_id"]),
+                    "playbook_id": str(r["playbook_id"]) if r.get("playbook_id") else None,
+                    "policy_name": r.get("name") or (target.replace("_", " ").title() if target else "Policy Rule"),
+                    "policy_version": "1.0",
+                    "rule_description": r.get("description"),
+                    "clause_type": f.get("clause_type"),
+                    "severity": f.get("severity") or "medium",
+                    "finding_title": f.get("title"),
+                    "finding_description": f.get("description"),
+                    "recommendation": f.get("recommendation"),
+                    "effect": r.get("effect"),
+                    "is_mandatory": r.get("is_mandatory", False),
+                    "status": "open" if not f.get("resolution") else "resolved",
+                    "created_at": None,
+                })
+
+        # 4. Annotate with waiver status from policy_overrides
+        if violations:
+            override_sql = sa_text("""
+                SELECT rule_id, review_id, status, justification, requested_by, requested_at
+                FROM policy_overrides
+                WHERE tenant_id = :tenant_id AND review_id = CAST(:review_id AS uuid)
+            """)
+            result = await self.review_repo.session.execute(
+                override_sql, {"tenant_id": self.tenant_id, "review_id": review_id}
+            )
+            overrides = {(str(o.rule_id), str(o.review_id)): dict(o._mapping) for o in result.fetchall()}
+            for v in violations:
+                key = (v["rule_id"], review_id)
+                if key in overrides:
+                    o = overrides[key]
+                    v["waiver_status"] = o.get("status")
+                    v["waiver_justification"] = o.get("justification")
+                    v["waiver_requested_by"] = o.get("requested_by")
+                    v["waiver_requested_at"] = (
+                        o["requested_at"].isoformat()
+                        if hasattr(o.get("requested_at"), "isoformat")
+                        else str(o.get("requested_at"))
+                    )
+                    v["status"] = "waived" if o.get("status") == "approved" else "open"
+
+        return {"violations": violations}
+
+    async def waive_policy_violation(
+        self,
+        review_id: str,
+        rule_id: str,
+        justification: str,
+        risk_assessment: Optional[str] = None,
+        proposed_alternative: Optional[str] = None,
+    ) -> dict:
+        """Waive a policy violation by creating a policy_override.
+
+        The policy_overrides.evaluation_id FK is required, so we lazily create
+        a parent policy_evaluations row if one does not already exist.
+        """
+        from sqlalchemy import text as sa_text
+        import uuid as _uuid
+
+        # 1. Resolve the upload_id for this review.
+        review_sql = sa_text(
+            "SELECT upload_id FROM contract_reviews WHERE review_id = CAST(:review_id AS uuid) AND tenant_id = :tenant_id"
+        )
+        r = await self.review_repo.session.execute(
+            review_sql, {"tenant_id": self.tenant_id, "review_id": review_id}
+        )
+        upload_id = r.scalar() or _uuid.UUID("00000000-0000-0000-0000-000000000000")
+
+        # 2. Ensure a parent policy_evaluations row exists (FK requirement).
+        eval_sql = sa_text("""
+            SELECT evaluation_id FROM policy_evaluations
+            WHERE tenant_id = :tenant_id AND review_id = CAST(:review_id AS uuid)
+            LIMIT 1
+        """)
+        r = await self.review_repo.session.execute(
+            eval_sql, {"tenant_id": self.tenant_id, "review_id": review_id}
+        )
+        evaluation_id = r.scalar()
+        if not evaluation_id:
+            evaluation_id = _uuid.uuid4()
+            insert_eval = sa_text("""
+                INSERT INTO policy_evaluations
+                    (evaluation_id, tenant_id, upload_id, review_id, status,
+                     total_rules_evaluated, rules_passed, rules_failed,
+                     deviations_found, mandatory_blocks, approval_required,
+                     results, deviations, recommendations)
+                VALUES
+                    (CAST(:evaluation_id AS uuid), :tenant_id, :upload_id,
+                     CAST(:review_id AS uuid), 'completed', 0, 0, 0, 0, 0, 0,
+                     '[]'::jsonb, '[]'::jsonb, '[]'::jsonb)
+            """)
+            await self.review_repo.session.execute(
+                insert_eval,
+                {
+                    "evaluation_id": str(evaluation_id),
+                    "tenant_id": self.tenant_id,
+                    "upload_id": str(upload_id),
+                    "review_id": review_id,
+                },
+            )
+
+        # 3. Insert the override.
+        override_id = str(_uuid.uuid4())
+        insert_override = sa_text("""
+            INSERT INTO policy_overrides
+                (override_id, tenant_id, evaluation_id, rule_id, upload_id,
+                 review_id, override_type, justification, risk_assessment,
+                 proposed_alternative, status, requested_by, metadata)
+            VALUES
+                (CAST(:override_id AS uuid), :tenant_id, CAST(:evaluation_id AS uuid),
+                 CAST(:rule_id AS uuid), :upload_id, CAST(:review_id AS uuid),
+                 :override_type, :justification, :risk_assessment,
+                 :proposed_alternative, :status, :requested_by, :metadata)
+            RETURNING override_id, status, requested_at
+        """)
+        result = await self.review_repo.session.execute(
+            insert_override,
+            {
+                "override_id": override_id,
+                "tenant_id": self.tenant_id,
+                "evaluation_id": str(evaluation_id),
+                "rule_id": rule_id,
+                "upload_id": str(upload_id),
+                "review_id": review_id,
+                "override_type": "waiver",
+                "justification": justification,
+                "risk_assessment": risk_assessment or "",
+                "proposed_alternative": proposed_alternative or "",
+                "status": "pending",
+                "requested_by": self.user.id if self.user else "system",
+                "metadata": "{}",
+            },
+        )
+        row = result.fetchone()
+
+        # 4. Audit the waiver.
+        await self.audit_trail.record(
+            event_type="policy.violation.waived",
+            entity_type="review",
+            entity_id=review_id,
+            actor_id=self.user.id if self.user else "system",
+            action="waive_policy_violation",
+            description=f"Policy violation waived for rule {rule_id[:8]}: {justification[:120]}",
+        )
+
+        return {
+            "override_id": override_id,
+            "status": row.status if row else "pending",
+            "requested_at": row.requested_at.isoformat() if row and hasattr(row.requested_at, "isoformat") else None,
+        }
 
     async def get_missing_clauses(self, review_id: str) -> dict:
         return {"missing_clauses": []}
@@ -2810,10 +3081,12 @@ class ReviewService:
         """Get activity events for a review from governance_audit_events and review_status_history."""
         from sqlalchemy import text as sa_text
 
-        # Query governance_audit_events for this review
-        # entity_id may be the finding_id or redline_id, so also check metadata->>'review_id'
+        # Query governance_audit_events for this review.
+        # entity_id may be the finding_id or redline_id, so also check metadata->>'review_id'.
+        # NOTE: governance_audit_events does not have an `action` or `description` column;
+        # we synthesize them from event_type and change_summary.
         gov_sql = sa_text("""
-            SELECT event_id, event_type, action, actor_id, description, created_at
+            SELECT event_id, event_type, actor_id, actor_role, change_summary, metadata, created_at
             FROM governance_audit_events
             WHERE tenant_id = :tenant_id
               AND (
@@ -2826,17 +3099,22 @@ class ReviewService:
         result = await self.review_repo.session.execute(
             gov_sql, {"tenant_id": self.tenant_id, "review_id": review_id, "review_id2": review_id}
         )
-        gov_events = [
-            {
+        gov_events = []
+        for row in result.fetchall():
+            meta = row.metadata or {}
+            if not isinstance(meta, dict):
+                meta = {}
+            # Prefer a human-readable summary; fall back to a synthesized label.
+            description = row.change_summary or meta.get("description") or f"{row.event_type} event"
+            gov_events.append({
                 "event_id": str(row.event_id),
                 "event_type": row.event_type,
-                "action": row.action,
+                "action": row.event_type,
                 "actor_id": row.actor_id,
-                "description": row.description,
+                "actor_role": row.actor_role,
+                "description": description,
                 "created_at": row.created_at.isoformat() if hasattr(row.created_at, "isoformat") else str(row.created_at),
-            }
-            for row in result.fetchall()
-        ]
+            })
 
         # Query review_status_history for status transitions
         hist_sql = sa_text("""

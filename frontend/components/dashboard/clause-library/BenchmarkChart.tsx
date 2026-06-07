@@ -36,7 +36,7 @@ export function BenchmarkChart({ data }: { data: BenchmarkData[] }) {
       </div>
       <div className="p-4">
         <div className="w-full h-72">
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height={190}>
             <BarChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
               <XAxis dataKey="name" tick={{ fontSize: 8, fill: "#6B7280" }} axisLine={false} tickLine={false} angle={-25} textAnchor="end" height={50} interval={0} />

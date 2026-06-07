@@ -13,7 +13,7 @@
 "use client";
 
 import React, { useState, useCallback, useEffect } from "react";
-import { ArrowLeft, RefreshCw, PanelLeft, PanelRight, FileText, BookOpen, Lock } from "lucide-react";
+import { ArrowLeft, RefreshCw, PanelLeft, PanelRight, FileText, BookOpen, Lock, CheckCircle, XCircle, Edit3 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -38,6 +38,7 @@ import { ImmutableBanner } from "./ImmutableBanner";
 import { isImmutable, getStatusLabel } from "@/lib/workflow";
 import { locateRedline, findTextInChunk } from "@/lib/locateRedline";
 import type { RedlineItem } from "@/services/api/client";
+import { PageHeader } from "@/components/shared/PageHeader";
 
 interface ReviewWorkspaceProps {
   reviewId: string;
@@ -205,29 +206,26 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
   return (
     <div className="flex h-full min-h-[calc(100vh-10rem)] flex-col">
       {/* ── Navigation Bar ── */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex-shrink-0">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 flex-shrink-0">
         <div className="flex items-center gap-3">
           {onBack && (
             <button
               onClick={onBack}
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-navy-700"
             >
               <ArrowLeft className="h-4 w-4" />
               Back
             </button>
           )}
-          <div>
-            <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-              {review?.document_name || review?.original_filename || "Review Detail"}
-            </h1>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {review?.document_name ? `${review.document_name}` : `${reviewId.slice(0, 12)}...`}
-            </p>
-          </div>
+          <PageHeader
+            title={review?.document_name || review?.original_filename || "Review Detail"}
+            description="Analyze findings, policy violations, redlines, and approval decisions in the AI Review Workspace."
+            className="!block"
+          />
           {/* Toggle left pane */}
           <button
             onClick={() => setShowLeftPane(!showLeftPane)}
-            className="ml-2 p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-navy-700"
             title={showLeftPane ? "Hide contract viewer" : "Show contract viewer"}
           >
             {showLeftPane ? <PanelLeft className="w-4 h-4" /> : <PanelRight className="w-4 h-4" />}
@@ -238,7 +236,7 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
           <button
             onClick={handleReAnalyze}
             disabled={reAnalyzeMutation.isPending || (review ? isImmutable(review.status) : false)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-navy-600 dark:text-gray-200 dark:hover:bg-navy-700"
             title={review && isImmutable(review.status) ? `Cannot re-analyze in '${getStatusLabel(review.status)}' state` : "Re-analyze contract"}
           >
             <RefreshCw className={`h-4 w-4 ${reAnalyzeMutation.isPending ? "animate-spin" : ""}`} />
@@ -251,7 +249,7 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
       <div className="flex-1 flex min-h-0">
         {/* LEFT PANE: Contract Viewer / Evidence Browser */}
         {showLeftPane && (
-          <div className="w-1/2 min-w-0 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-y-auto">
+          <div className="w-1/2 min-w-0 border-r border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 overflow-y-auto">
             <div className="p-4">
               <div className="flex items-center gap-2 mb-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                 <BookOpen className="w-3.5 h-3.5" />
@@ -314,7 +312,7 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
                         className={`rounded-lg border p-3 transition-all duration-500 ${
                           isHighlighted
                             ? "border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/20 shadow-md"
-                            : "border-gray-200 hover:border-gray-300 dark:border-gray-700 dark:hover:border-gray-600"
+                            : "border-gray-200 hover:border-gray-300 dark:border-navy-700 dark:hover:border-gray-600"
                         }`}
                       >
                         <div className="flex items-center gap-2 mb-1.5 text-[10px] text-gray-400">
@@ -332,12 +330,12 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
                             </>
                           )}
                           {chunk.clause_type && (
-                            <span className="ml-auto rounded-full bg-gray-100 px-1.5 py-0.5 dark:bg-gray-700">
+                            <span className="ml-auto rounded-full bg-gray-100 px-1.5 py-0.5 dark:bg-navy-700">
                               {chunk.clause_type.replace(/_/g, " ")}
                             </span>
                           )}
                         </div>
-                        <p className="text-xs leading-relaxed text-gray-700 dark:text-gray-300">
+                        <p className="text-xs leading-relaxed text-gray-700 dark:text-gray-200">
                           {displayText ? (
                             !showFullChunk && chunk.text.length > 500
                               ? `${chunk.text.slice(0, 500)}...`
@@ -387,6 +385,44 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
                   {/* Immutable state banner for finalized/approved/rejected/archived */}
                   <ImmutableBanner status={review.status} />
 
+                  {/* KPI Cards — risk score, risk level, findings count, redlines count */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="p-3 rounded-lg border border-gray-200 bg-white shadow-sm">
+                      <p className="text-xs text-gray-500 mb-0.5">Risk Score</p>
+                      <p className="text-xl font-bold text-gray-900">
+                        {review.risk_score != null
+                          ? `${(review.risk_score * 100).toFixed(0)}%`
+                          : "—"}
+                      </p>
+                    </div>
+                    <div className="p-3 rounded-lg border border-gray-200 bg-white shadow-sm">
+                      <p className="text-xs text-gray-500 mb-0.5">Risk Level</p>
+                      <p className={`text-xl font-bold ${
+                        review.risk_score == null ? "text-gray-400" :
+                        review.risk_score >= 0.81 ? "text-red-600" :
+                        review.risk_score >= 0.61 ? "text-orange-600" :
+                        review.risk_score >= 0.41 ? "text-amber-600" :
+                        review.risk_score >= 0.21 ? "text-yellow-600" :
+                        "text-green-600"
+                      }`}>
+                        {review.risk_score == null ? "—" :
+                          review.risk_score >= 0.81 ? "Critical" :
+                          review.risk_score >= 0.61 ? "High" :
+                          review.risk_score >= 0.41 ? "Elevated" :
+                          review.risk_score >= 0.21 ? "Moderate" :
+                          "Minimal"}
+                      </p>
+                    </div>
+                    <div className="p-3 rounded-lg border border-gray-200 bg-white shadow-sm">
+                      <p className="text-xs text-gray-500 mb-0.5">Findings</p>
+                      <p className="text-xl font-bold text-gray-900">{actualFindingCount}</p>
+                    </div>
+                    <div className="p-3 rounded-lg border border-gray-200 bg-white shadow-sm">
+                      <p className="text-xs text-gray-500 mb-0.5">Redlines</p>
+                      <p className="text-xl font-bold text-gray-900">{actualRedlineCount}</p>
+                    </div>
+                  </div>
+
                   <ContractSummary
                     review={review}
                     status={status}
@@ -413,7 +449,7 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
                   )}
 
                   {/* Tab Navigation */}
-                  <div className="border-b border-gray-200 dark:border-gray-700">
+                  <div className="border-b border-gray-200 dark:border-navy-700">
                     <nav className="-mb-px flex gap-6" aria-label="Review sections">
                       {tabs.map((tab) => (
                         <button
@@ -422,7 +458,7 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
                           className={`relative whitespace-nowrap pb-3 text-sm font-medium transition-colors ${
                             activeTab === tab.id
                               ? "text-blue-600 dark:text-blue-400"
-                              : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                              : "text-gray-500 hover:text-gray-700 dark:text-gray-300 dark:hover:text-gray-300"
                           }`}
                         >
                           {tab.label}
@@ -430,7 +466,7 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
                             <span className={`ml-1.5 rounded-full px-2 py-0.5 text-xs ${
                               activeTab === tab.id
                                 ? "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"
-                                : "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400"
+                                : "bg-gray-100 text-gray-500 dark:bg-navy-700 dark:text-gray-300"
                             }`}>
                               {tab.count}
                             </span>

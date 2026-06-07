@@ -3,11 +3,17 @@
 Review population (ContractReview + review_findings + review_redlines)
 now happens inside ``AIService.analyze()`` to ensure it runs in the same
 session/transaction as the AI analysis.
+
+Concurrent analysis limiting:
+- Uses Redis INCR/DECR with 300s TTL to track active analyses per tenant.
+- Prevents double-decrement via ``acquired_slot`` boolean guard.
+- Falls back gracefully if Redis is unavailable (allows analysis through).
 """
 
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 from app.config import settings
 from app.domains.ai.llm import OpenAIProvider
@@ -23,6 +29,73 @@ from workers.worker_loop import worker_loop
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
+
+# Redis key prefix for active analysis tracking
+_ACTIVE_ANALYSIS_KEY = "ai_active:{}"
+_CONCURRENCY_TTL = 300  # 5 minutes — safety release for crashed workers
+
+
+class MaxConcurrentAnalysisError(Exception):
+    """Raised when tenant has reached the maximum number of concurrent analyses."""
+
+
+async def _acquire_concurrency_slot(tenant_id: str) -> bool:
+    """Try to acquire a concurrency slot for this tenant.
+
+    Uses Redis INCR + EXPIRE in a pipeline. Returns True if slot acquired,
+    False if at capacity. Falls back to True if Redis is unavailable.
+    """
+    try:
+        import redis.asyncio as aioredis
+        r = aioredis.from_url(
+            settings.redis_url,
+            encoding="utf-8",
+            decode_responses=True,
+            socket_connect_timeout=2,
+        )
+        key = _ACTIVE_ANALYSIS_KEY.format(tenant_id)
+        pipe = r.pipeline()
+        pipe.incr(key)
+        pipe.expire(key, _CONCURRENCY_TTL)
+        results = await pipe.execute()
+        count = results[0]
+        max_concurrent = settings.effective_max_concurrent
+        if count > max_concurrent:
+            # Slot not available — decrement the counter we just incremented
+            await r.decr(key)
+            await r.close()
+            logger.info(
+                "Concurrency slot full for tenant %s: %d active (max=%d).",
+                tenant_id, count - 1, max_concurrent,
+            )
+            return False
+
+        logger.info(
+            "Concurrency slot acquired for tenant %s: %d/%d active.",
+            tenant_id, count, max_concurrent,
+        )
+        await r.close()
+        return True
+    except Exception as exc:
+        logger.warning("Redis unavailable for concurrency tracking: %s — allowing analysis through", exc)
+        return True  # Fail open: allow analysis if Redis is down
+
+
+async def _release_concurrency_slot(tenant_id: str) -> None:
+    """Release a concurrency slot. Safe to call even if slot was not acquired."""
+    try:
+        import redis.asyncio as aioredis
+        r = aioredis.from_url(
+            settings.redis_url,
+            encoding="utf-8",
+            decode_responses=True,
+            socket_connect_timeout=2,
+        )
+        key = _ACTIVE_ANALYSIS_KEY.format(tenant_id)
+        await r.decr(key)
+        await r.close()
+    except Exception:
+        pass  # Non-critical: slot will expire via TTL
 
 
 from app.kernel.database.orm_registry import register_orm_models
@@ -46,10 +119,9 @@ def analyze_contract_task(self, upload_id: str, tenant_id: str,
                            preserve_finding_ids: list = None):
     """Execute AI analysis on a contract's chunks.
 
-    Triggered after EMBEDDING_PENDING → ANALYSIS_PENDING state.
-    Transitions to REVIEW_READY or FAILED.
-    After successful analysis, auto-creates/updates the ContractReview
-    and populates review_findings / review_redlines.
+    Enforces per-tenant concurrent analysis limit using Redis INCR/DECR.
+    If the limit is reached, the task retries after ``ai_concurrency_retry_seconds``.
+    Uses ``acquired_slot`` boolean to prevent double-decrement on error paths.
     """
     helper = WorkerAsyncHelper()
     return helper.run(_analyze_contract(helper, self, upload_id, tenant_id, user_id, analysis_type,
@@ -60,9 +132,24 @@ async def _analyze_contract(helper: WorkerAsyncHelper, task, upload_id: str, ten
                              user_id: str = None, analysis_type: str = "full",
                              preserve_redline_ids: list = None,
                              preserve_finding_ids: list = None):
+    acquired_slot = False
     session = await worker_loop.create_session(tenant_id, user_id or "system", "api")
     async with helper.session_scope(session):
         try:
+            # ── Concurrent analysis limit ─────────────────────────
+            acquired_slot = await _acquire_concurrency_slot(tenant_id)
+            if not acquired_slot:
+                logger.info(
+                    "Concurrent analysis limit reached for tenant %s "
+                    "(max=%d). Using exponential backoff.",
+                    tenant_id,
+                    settings.effective_max_concurrent,
+                )
+                raise MaxConcurrentAnalysisError(
+                    f"Tenant {tenant_id} has reached max concurrent analyses "
+                    f"({settings.effective_max_concurrent})."
+                )
+
             provider = OpenAIProvider(api_key=settings.openai_api_key)
             llm_registry.register(provider)
 
@@ -86,6 +173,21 @@ async def _analyze_contract(helper: WorkerAsyncHelper, task, upload_id: str, ten
 
             logger.info("AI analysis complete: upload=%s risk=%.4f findings=%d redlines=%d",
                          upload_id, result.risk_score, len(result.findings), len(result.redlines))
+
+        except MaxConcurrentAnalysisError:
+            await session.rollback()
+            # Exponential backoff: 5s, 10s, 20s, capped at max
+            retries = getattr(task, "request", None)
+            attempt = retries.retries if retries else 0
+            backoff = min(5 * (2 ** attempt), settings.ai_concurrency_retry_seconds)
+            logger.info(
+                "Concurrency slot unavailable for tenant %s "
+                "(attempt=%d, backoff=%ds, max=%d, active_slots=%s).",
+                tenant_id, attempt + 1, backoff,
+                settings.effective_max_concurrent,
+                _ACTIVE_ANALYSIS_KEY.format(tenant_id),
+            )
+            raise task.retry(countdown=backoff)
 
         except Exception as exc:
             await session.rollback()
@@ -116,3 +218,11 @@ async def _analyze_contract(helper: WorkerAsyncHelper, task, upload_id: str, ten
                     except Exception:
                         pass
             raise
+
+        finally:
+            # ── Release concurrency slot ──────────────────────────
+            # Only DECR if we actually acquired the slot.
+            # The acquired_slot boolean prevents double-decrement when
+            # MaxConcurrentAnalysisError is caught and re-raised via retry().
+            if acquired_slot:
+                await _release_concurrency_slot(tenant_id)

@@ -98,13 +98,29 @@ export function useCreateClause() {
   });
 }
 
-export function useUpdateClause(id: string) {
+export function useUpdateClause(id?: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: ClauseUpdateRequest) =>
-      clauseIntelligenceService.updateClause(id, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: clauseIntelligenceKeys.detail(id) });
+    mutationFn: (vars: { id?: string; body: ClauseUpdateRequest }) => {
+      // Prefer the id passed at call time (so we can update any clause
+      // from a list-level favorite toggle), falling back to the id captured
+      // at hook creation time (e.g. the currently-open detail drawer).
+      const targetId = vars.id ?? id;
+      if (!targetId) {
+        // Translate a missing id into a typed error so callers can show a
+        // helpful message instead of letting the request hit a bare
+        // /clauses/ endpoint and get back a 405 from the backend.
+        const err = new Error("Cannot update clause: missing id");
+        (err as Error & { status_code?: number }).status_code = 400;
+        return Promise.reject(err);
+      }
+      return clauseIntelligenceService.updateClause(targetId, vars.body);
+    },
+    onSuccess: (_data, vars) => {
+      const targetId = vars.id ?? id;
+      if (targetId) {
+        qc.invalidateQueries({ queryKey: clauseIntelligenceKeys.detail(targetId) });
+      }
       qc.invalidateQueries({ queryKey: clauseIntelligenceKeys.lists() });
     },
   });

@@ -134,6 +134,22 @@ export function ContractSummary({
             </div>
           </div>
 
+          {/* Priority */}
+          <div>
+            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+              <AlertTriangle className="h-4 w-4" />
+              <span>Priority</span>
+            </div>
+            <span className={`mt-0.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-sm font-medium ${
+              review.priority === "critical" ? "bg-red-100 text-red-700" :
+              review.priority === "high" ? "bg-orange-100 text-orange-700" :
+              review.priority === "medium" ? "bg-amber-100 text-amber-700" :
+              "bg-gray-100 text-gray-600"
+            }`}>
+              {(review.priority ?? "normal").replace(/_/g, " ")}
+            </span>
+          </div>
+
           {/* Reviewer */}
           <div>
             <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -142,6 +158,17 @@ export function ContractSummary({
             </div>
             <p className="mt-0.5 font-medium text-gray-900 dark:text-gray-100">
               {review.assigned_to || "Unassigned"}
+            </p>
+          </div>
+
+          {/* Created By */}
+          <div>
+            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+              <User className="h-4 w-4" />
+              <span>Created By</span>
+            </div>
+            <p className="mt-0.5 font-medium text-gray-900 dark:text-gray-100">
+              {review.created_by || "—"}
             </p>
           </div>
 

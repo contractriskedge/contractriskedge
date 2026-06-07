@@ -363,7 +363,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // ── Permission check ───────────────────────────────────────────
   const hasPermission = useCallback(
-    (permission: string) => user?.permissions?.includes(permission) ?? false,
+    (permission: string) => {
+      const perms = user?.permissions;
+      if (!perms) return false;
+      // Wildcard — super admin bypass (matches backend resolve_permissions logic)
+      if (perms.includes("*")) return true;
+      return perms.includes(permission);
+    },
     [user],
   );
 

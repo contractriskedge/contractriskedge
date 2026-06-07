@@ -3,10 +3,12 @@
 import React, { useState, useMemo } from "react";
 import {
   FileText, ChevronLeft, ChevronRight, ArrowUpDown, MoreHorizontal,
-  Columns, Eye, AlertTriangle, CheckCircle, XCircle, Clock,
+  Columns, Eye, AlertTriangle, CheckCircle, XCircle, Clock, Star, Filter as FilterIcon,
 } from "lucide-react";
 import type { ContractRecord, RiskLevel, AiFlag } from "./types";
 import { RISK_BG, RISK_TEXT, RISK_BG_LIGHT, RISK_DARK_BG, RISK_DARK_TEXT, AI_FLAG_CONFIG, STATUS_CONFIG, WORKFLOW_STAGES } from "./types";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { useFavorites } from "@/hooks/useFavorites";
 
 // ── Risk Badge ──────────────────────────────────────────────────────────────
 
@@ -31,6 +33,42 @@ function AiFlagBadge({ flag }: { flag: AiFlag }) {
 function StatusBadge({ status }: { status: string }) {
   const c = STATUS_CONFIG[status] || STATUS_CONFIG.draft;
   return <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${c.bg} ${c.color} ${c.darkBg} ${c.darkColor}`}>{c.label}</span>;
+}
+
+// ── Lifecycle Badge (Captured / Extracted / Available) ──────────────────────
+//
+// Lifecycle replaces the previously-empty Vendor / Counterparty / Business Unit
+// columns with the three signals that always have data:
+//   Captured  — uploaded, awaiting AI extraction
+//   Extracted — text + clauses extracted, AI analysis running
+//   Available — analyzed, ready for review or already in review
+//
+type LifecycleStage = "captured" | "extracted" | "available" | "analyzed" | "under_review" | "active" | "expired";
+
+const LIFECYCLE_CONFIG: Record<LifecycleStage, { label: string; color: string; bg: string }> = {
+  captured:    { label: "Captured",   color: "text-slate-700",   bg: "bg-slate-100" },
+  extracted:   { label: "Extracted",  color: "text-blue-700",    bg: "bg-blue-100" },
+  available:   { label: "Available",  color: "text-emerald-700", bg: "bg-emerald-100" },
+  analyzed:    { label: "Analyzed",   color: "text-violet-700",  bg: "bg-violet-100" },
+  under_review:{ label: "In Review",  color: "text-amber-700",   bg: "bg-amber-100" },
+  active:      { label: "Active",     color: "text-green-700",   bg: "bg-green-100" },
+  expired:     { label: "Expired",    color: "text-red-700",     bg: "bg-red-100" },
+};
+
+function lifecycleFor(c: ContractRecord): LifecycleStage {
+  const wf = (c.workflowStage || "").toLowerCase();
+  const st = (c.status || "").toLowerCase();
+  if (st === "expired" || wf === "archived") return "expired";
+  if (wf === "executed" || st === "active") return "active";
+  if (st === "under_review" || wf === "review" || wf === "approval" || wf === "negotiation") return "under_review";
+  if ((c.aiConfidence || 0) > 0 && wf !== "draft") return "analyzed";
+  if ((c.clauseCount || 0) > 0) return "extracted";
+  return "captured";
+}
+
+function LifecycleBadge({ stage }: { stage: LifecycleStage }) {
+  const c = LIFECYCLE_CONFIG[stage] || LIFECYCLE_CONFIG.captured;
+  return <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${c.bg} ${c.color}`}>{c.label}</span>;
 }
 
 // ── Renewal Risk Indicator ──────────────────────────────────────────────────
@@ -64,13 +102,38 @@ function AiStatus({ confidence, findings }: { confidence: number; findings: numb
 
 // ── Quick Actions Menu ──────────────────────────────────────────────────────
 
-function QuickActions({ onClose }: { onClose: () => void }) {
+type ActionType = "view-details" | "analyze-risks" | "generate-redlines" | "assign-reviewer" | "add-tags" | "request-approval" | "export-pdf" | "archive";
+
+interface QuickActionsProps {
+  contractId: string;
+  onClose: () => void;
+  onAction: (contractId: string, action: ActionType) => void;
+}
+
+const ACTION_LABELS: { key: ActionType; label: string }[] = [
+  { key: "view-details", label: "View Details" },
+  { key: "analyze-risks", label: "Analyze Risks" },
+  { key: "generate-redlines", label: "Generate Redlines" },
+  { key: "assign-reviewer", label: "Assign Reviewer" },
+  { key: "add-tags", label: "Add Tags" },
+  { key: "request-approval", label: "Request Approval" },
+  { key: "export-pdf", label: "Export PDF" },
+  { key: "archive", label: "Archive" },
+];
+
+function QuickActions({ contractId, onClose, onAction }: QuickActionsProps) {
   return (
     <>
       <div className="fixed inset-0 z-30" onClick={onClose} />
       <div className="absolute right-0 top-full mt-1 z-40 w-44 bg-white dark:bg-navy-800 rounded-lg border border-gray-200 dark:border-navy-700 shadow-lg py-1">
-        {["View Details", "Analyze Risks", "Generate Redlines", "Assign Reviewer", "Add Tags", "Request Approval", "Export PDF", "Archive"].map((action) => (
-          <button key={action} onClick={onClose} className="w-full text-left px-3 py-1.5 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors">{action}</button>
+        {ACTION_LABELS.map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={(e) => { e.stopPropagation(); onAction(contractId, key); onClose(); }}
+            className="w-full text-left px-3 py-1.5 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors"
+          >
+            {label}
+          </button>
         ))}
       </div>
     </>
@@ -81,7 +144,7 @@ function QuickActions({ onClose }: { onClose: () => void }) {
 
 const ALL_COLUMNS = [
   { key: "name", label: "Contract Name", default: true },
-  { key: "vendor", label: "Vendor", default: true },
+  { key: "lifecycle", label: "Lifecycle", default: true },
   { key: "contractType", label: "Agreement Type", default: true },
   { key: "owner", label: "Owner", default: true },
   { key: "effectiveDate", label: "Effective", default: true },
@@ -93,6 +156,7 @@ const ALL_COLUMNS = [
   { key: "lastActivity", label: "Last Activity", default: false },
   { key: "financialValue", label: "Value", default: false },
   { key: "workflowStage", label: "Workflow", default: false },
+  { key: "vendor", label: "Vendor", default: false },
 ];
 
 // ── Main Table ──────────────────────────────────────────────────────────────
@@ -100,11 +164,15 @@ const ALL_COLUMNS = [
 interface ContractsTableProps {
   contracts: ContractRecord[];
   onSelectContract: (contract: ContractRecord) => void;
+  onAction?: (contractId: string, action: ActionType) => void;
 }
 
 type SortKey = "riskScore" | "financialValue" | "name" | "vendor" | "renewalDate" | "aiConfidence" | "lastModified" | "effectiveDate" | "expirationDate";
 
-export function ContractsTable({ contracts, onSelectContract }: ContractsTableProps) {
+export function ContractsTable({ contracts, onSelectContract, onAction }: ContractsTableProps) {
+  const { user } = useAuth();
+  const favorites = useFavorites(user?.tenant_id, user?.sub);
+
   const [sortKey, setSortKey] = useState<SortKey>("riskScore");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
@@ -112,7 +180,7 @@ export function ContractsTable({ contracts, onSelectContract }: ContractsTablePr
   const [openActions, setOpenActions] = useState<string | null>(null);
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set(ALL_COLUMNS.filter(c => c.default).map(c => c.key)));
   const [showColumnChooser, setShowColumnChooser] = useState(false);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const pageSize = 15;
 
   const handleSort = (k: SortKey) => {
@@ -121,7 +189,18 @@ export function ContractsTable({ contracts, onSelectContract }: ContractsTablePr
   };
 
   const sorted = useMemo(() => {
-    const list = [...contracts];
+    let list = [...contracts];
+    if (favoritesOnly) {
+      list = list.filter((c) => favorites.isFavorite(c.id));
+    }
+    // Sort favorites first when not sorting by another key — feels natural.
+    if (favoritesOnly === false) {
+      list = list.slice().sort((a, b) => {
+        const aFav = favorites.isFavorite(a.id) ? 1 : 0;
+        const bFav = favorites.isFavorite(b.id) ? 1 : 0;
+        return bFav - aFav;
+      });
+    }
     list.sort((a, b) => {
       const d = sortDir === "asc" ? 1 : -1;
       if (sortKey === "riskScore") return (a.riskScore - b.riskScore) * d;
@@ -136,7 +215,7 @@ export function ContractsTable({ contracts, onSelectContract }: ContractsTablePr
       return a[sortKey].localeCompare(b[sortKey]) * d;
     });
     return list;
-  }, [contracts, sortKey, sortDir]);
+  }, [contracts, sortKey, sortDir, favoritesOnly, favorites]);
 
   const totalPages = Math.ceil(sorted.length / pageSize);
   const pageContracts = sorted.slice(page * pageSize, (page + 1) * pageSize);
@@ -160,6 +239,7 @@ export function ContractsTable({ contracts, onSelectContract }: ContractsTablePr
   const colClass = (key: string) => {
     if (key === "name") return "flex-1 min-w-[240px] max-w-[35%]";
     if (key === "vendor") return "w-28";
+    if (key === "lifecycle") return "w-24";
     if (key === "contractType") return "w-24";
     if (key === "owner") return "w-20";
     if (key === "effectiveDate" || key === "expirationDate") return "w-22";
@@ -192,6 +272,41 @@ export function ContractsTable({ contracts, onSelectContract }: ContractsTablePr
           </div>
         </div>
       )}
+
+      {/* Favorites toolbar */}
+      <div className="px-3 py-1.5 bg-white dark:bg-navy-800 border-b border-gray-100 dark:border-navy-700 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setFavoritesOnly((v) => !v)}
+          aria-pressed={favoritesOnly}
+          data-testid="favorites-filter"
+          className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full transition-colors ${
+            favoritesOnly
+              ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+              : "bg-gray-100 text-gray-600 dark:bg-navy-700 dark:text-gray-300 hover:bg-amber-50 hover:text-amber-700 dark:hover:bg-amber-900/20"
+          }`}
+        >
+          <Star className={`w-3 h-3 ${favoritesOnly ? "fill-current" : ""}`} />
+          Favorites
+          {favorites.count > 0 && (
+            <span className="text-[9px] font-bold tabular-nums">({favorites.count})</span>
+          )}
+        </button>
+        {favoritesOnly && (
+          <button
+            type="button"
+            onClick={() => setFavoritesOnly(false)}
+            className="text-[10px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          >
+            Clear
+          </button>
+        )}
+        <span className="flex-1" />
+        <span className="text-[9px] text-gray-400 dark:text-gray-500 inline-flex items-center gap-1">
+          <FilterIcon className="w-2.5 h-2.5" />
+          {sorted.length} of {contracts.length} shown
+        </span>
+      </div>
 
       {/* Table */}
       <div className="overflow-x-auto">
@@ -235,13 +350,10 @@ export function ContractsTable({ contracts, onSelectContract }: ContractsTablePr
           <tbody className="divide-y divide-gray-50 dark:divide-navy-800">
             {pageContracts.map((c) => {
               const isSelected = selectedIds.has(c.id);
-              const isHovered = hoveredId === c.id;
               return (
                 <tr key={c.id}
-                  className={`transition-colors cursor-pointer group ${isSelected ? "bg-blue-50/30 dark:bg-blue-900/10" : isHovered ? "bg-gray-50 dark:bg-navy-800/50" : "bg-white dark:bg-navy-800"}`}
+                  className={`transition-colors cursor-pointer group ${isSelected ? "bg-blue-50/30 dark:bg-blue-900/10" : "bg-white hover:bg-gray-50 dark:bg-navy-800 dark:hover:bg-navy-800/50"}`}
                   onClick={() => onSelectContract(c)}
-                  onMouseEnter={() => setHoveredId(c.id)}
-                  onMouseLeave={() => setHoveredId(null)}
                 >
                   <td className="py-2 px-2" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={isSelected}
@@ -251,13 +363,27 @@ export function ContractsTable({ contracts, onSelectContract }: ContractsTablePr
                   {visibleColumns.has("name") && (
                     <td className="py-2 px-2">
                       <div className="flex items-start gap-2">
-                        <div className={`w-7 h-7 rounded flex items-center justify-center flex-shrink-0 mt-0.5 ${isHovered ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600' : 'bg-gray-100 dark:bg-navy-700 text-gray-400 dark:text-navy-400'}`}>
+                        <button
+                          type="button"
+                          aria-label={favorites.isFavorite(c.id) ? "Unfavorite contract" : "Favorite contract"}
+                          aria-pressed={favorites.isFavorite(c.id)}
+                          data-testid="favorites-toggle"
+                          onClick={(e) => { e.stopPropagation(); favorites.toggle(c.id); }}
+                          className={`flex-shrink-0 mt-0.5 p-0.5 rounded transition-colors ${
+                            favorites.isFavorite(c.id)
+                              ? "text-amber-500 hover:text-amber-600"
+                              : "text-gray-300 dark:text-navy-500 hover:text-amber-500"
+                          }`}
+                        >
+                          <Star className={`w-3.5 h-3.5 ${favorites.isFavorite(c.id) ? "fill-current" : ""}`} />
+                        </button>
+                        <div className="w-7 h-7 rounded flex items-center justify-center flex-shrink-0 mt-0.5 bg-gray-100 dark:bg-navy-700 text-gray-400 dark:text-navy-400 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/20 group-hover:text-blue-600 transition-colors">
                           <FileText className="w-3.5 h-3.5" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
                             <span className="text-[12px] font-semibold text-navy-900 dark:text-white truncate max-w-[280px] block">{c.name}</span>
-                            {isHovered && <Eye className="w-3 h-3 text-blue-500 flex-shrink-0" />}
+                            <Eye className="w-3 h-3 text-blue-500 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                           </div>
                           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                             {c.aiFlags.slice(0, 2).map((flag) => <AiFlagBadge key={flag} flag={flag} />)}
@@ -268,8 +394,24 @@ export function ContractsTable({ contracts, onSelectContract }: ContractsTablePr
                     </td>
                   )}
                   {visibleColumns.has("vendor") && <td className="py-2 px-2 text-[11px] text-gray-700 dark:text-gray-200 font-medium">{c.vendor || '—'}</td>}
-                  {visibleColumns.has("contractType") && <td className="py-2 px-2"><span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-navy-700 text-gray-600 dark:text-gray-300">{c.contractType}</span></td>}
-                  {visibleColumns.has("owner") && <td className="py-2 px-2 text-[11px] text-gray-600 dark:text-gray-300">{c.owner || '—'}</td>}
+                  {visibleColumns.has("lifecycle") && (
+                    <td className="py-2 px-2"><LifecycleBadge stage={lifecycleFor(c)} /></td>
+                  )}
+                  {visibleColumns.has("contractType") && <td className="py-2 px-2"><span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-navy-700 text-gray-600 dark:text-gray-300">{c.contractType || "—"}</span></td>}
+                  {visibleColumns.has("owner") && (
+                    <td className="py-2 px-2 text-[11px] text-gray-600 dark:text-gray-300">
+                      {c.owner ? (
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-5 h-5 rounded-full bg-navy-100 dark:bg-navy-700 text-navy-700 dark:text-navy-200 flex items-center justify-center text-[8px] font-bold">
+                            {String(c.owner).split(" ").map(p => p[0]).slice(0, 2).join("").toUpperCase()}
+                          </div>
+                          <span className="truncate max-w-[60px]">{c.owner}</span>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400 italic">Unassigned</span>
+                      )}
+                    </td>
+                  )}
                   {visibleColumns.has("effectiveDate") && <td className="py-2 px-2 text-[11px] text-gray-600 dark:text-gray-400 tabular-nums">{c.effectiveDate || '—'}</td>}
                   {visibleColumns.has("expirationDate") && (
                     <td className={`py-2 px-2 text-[11px] tabular-nums ${c.status === "expiring_soon" || c.status === "renewal_at_risk" ? "text-orange-600 dark:text-orange-400 font-medium" : "text-gray-600 dark:text-gray-400"}`}>
@@ -285,10 +427,10 @@ export function ContractsTable({ contracts, onSelectContract }: ContractsTablePr
                   {visibleColumns.has("workflowStage") && <td className="py-2 px-2"><span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-navy-700 text-gray-600 dark:text-gray-300">{(WORKFLOW_STAGES[c.workflowStage as keyof typeof WORKFLOW_STAGES] || WORKFLOW_STAGES.draft).label}</span></td>}
                   <td className="py-2 px-2 relative" onClick={(e) => e.stopPropagation()}>
                     <button onClick={() => setOpenActions(openActions === c.id ? null : c.id)}
-                      className={`p-0.5 rounded transition-colors ${isHovered ? 'text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-navy-700' : 'text-gray-300 dark:text-navy-500 opacity-0 group-hover:opacity-100'}`}>
+                      className="p-0.5 rounded transition-colors text-gray-300 dark:text-navy-500 opacity-0 group-hover:opacity-100 hover:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-navy-700">
                       <MoreHorizontal className="w-3 h-3" />
                     </button>
-                    {openActions === c.id && <QuickActions onClose={() => setOpenActions(null)} />}
+                    {openActions === c.id && <QuickActions contractId={c.id} onClose={() => setOpenActions(null)} onAction={(id, action) => onAction?.(id, action)} />}
                   </td>
                 </tr>
               );

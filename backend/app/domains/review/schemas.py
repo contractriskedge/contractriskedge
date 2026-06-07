@@ -333,6 +333,9 @@ class ReviewStatusResponse(BaseModel):
 
     Provides a unified view of where a review is in its lifecycle,
     including ingestion, AI analysis, and review stages.
+
+    The computed_status field is the SINGLE AUTHORITATIVE status.
+    All frontend components must use this field for display.
     """
     review_id: str
     upload_id: str
@@ -348,6 +351,15 @@ class ReviewStatusResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: Optional[datetime] = None
+    # ── Authoritative computed status (Phase 1) ──
+    computed_status: str = Field(
+        default="unassigned",
+        description="Single authoritative status: unassigned|assigned|in_review|pending_approval|approved|rejected|escalated|overdue|completed"
+    )
+    sla_status: str = Field(default="on_track", description="green|amber|red")
+    sla_remaining_hours: Optional[float] = None
+    age_hours: Optional[float] = Field(None, description="Hours since review creation")
+    assignment_status: Optional[str] = Field(None, description="assigned|unassigned|self_assigned")
 
 
 # ── Re-analysis ────────────────────────────────────────────────────

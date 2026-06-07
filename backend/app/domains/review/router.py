@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Optional
+from pydantic import BaseModel
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from fastapi.responses import Response
@@ -665,13 +666,66 @@ async def get_review_status(
         ai_error=ai_error,
     )
 
+    # ── Compute authoritative status (Phase 1: OVERDUE supersedes all) ──
+    from datetime import datetime as _dt
+    raw_status = _enum_value(review.status)
+    is_completed = raw_status in ("completed", "approved", "closed")
+    is_overdue = bool(review.overdue_hours and review.overdue_hours > 0) and not is_completed
+    is_escalated = raw_status == "escalated"
+    is_assigned = bool(review.assigned_to)
+    is_in_review = raw_status in ("in_review", "ai_analyzed", "review_ready")
+
+    if is_completed:
+        computed_status = "completed"
+    elif is_escalated:
+        computed_status = "escalated"
+    elif is_overdue:
+        computed_status = "overdue"
+    elif is_in_review and is_assigned:
+        computed_status = "in_review"
+    elif is_assigned:
+        computed_status = "assigned"
+    else:
+        computed_status = "unassigned"
+
+    # ── SLA status (Phase 2) ──
+    sla_remaining = None
+    sla_status = "on_track"
+    if review.sla_deadline and not is_completed:
+        now = _dt.now(tz=review.sla_deadline.tzinfo) if review.sla_deadline.tzinfo else _dt.utcnow()
+        remaining = (review.sla_deadline - now).total_seconds() / 3600
+        sla_remaining = max(0, remaining)
+        total_sla = 72  # default 72h; could be computed from priority
+        if review.priority == "critical":
+            total_sla = 4
+        elif review.priority == "high":
+            total_sla = 24
+        elif review.priority == "medium":
+            total_sla = 48
+        pct_remaining = (sla_remaining / total_sla * 100) if total_sla > 0 else 0
+        if remaining <= 0:
+            sla_status = "red"
+        elif pct_remaining <= 25:
+            sla_status = "amber"
+        else:
+            sla_status = "green"
+    elif is_completed:
+        sla_status = "on_track"
+
+    # ── Age in queue ──
+    now_utc = _dt.now(tz=review.created_at.tzinfo) if review.created_at and review.created_at.tzinfo else _dt.utcnow()
+    age_hours = (now_utc - review.created_at).total_seconds() / 3600 if review.created_at else None
+
+    # ── Assignment status ──
+    assignment_status = "assigned" if review.assigned_to else "unassigned"
+
     return ReviewStatusResponse(
         review_id=str(review.review_id),
         upload_id=str(review.upload_id),
         status=overall_status,
         ingestion_state=ingestion_state,
         ai_status=ai_status,
-        review_status=_enum_value(review.status),
+        review_status=raw_status,
         progress=progress,
         current_step=current_step,
         error=error,
@@ -680,6 +734,11 @@ async def get_review_status(
         created_at=review.created_at,
         updated_at=review.updated_at,
         completed_at=review.completed_at,
+        computed_status=computed_status,
+        sla_status=sla_status,
+        sla_remaining_hours=sla_remaining,
+        age_hours=age_hours,
+        assignment_status=assignment_status,
     )
 
 
@@ -2186,8 +2245,36 @@ async def list_policy_violations(
     """List policy violations for a review."""
     try:
         return await service.get_policy_violations(review_id)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning(
+            "list_policy_violations failed for review %s: %s", review_id, exc, exc_info=True
+        )
         return {"violations": []}
+
+
+class WaiveViolationRequest(BaseModel):
+    rule_id: str
+    justification: str
+    risk_assessment: Optional[str] = None
+    proposed_alternative: Optional[str] = None
+
+
+@router.post("/{review_id}/policy-violations/waive")
+async def waive_policy_violation(
+    review_id: str,
+    body: WaiveViolationRequest,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Waive a policy violation by recording a policy_override."""
+    return await service.waive_policy_violation(
+        review_id=review_id,
+        rule_id=body.rule_id,
+        justification=body.justification,
+        risk_assessment=body.risk_assessment,
+        proposed_alternative=body.proposed_alternative,
+    )
 
 
 # ── Missing Clauses ───────────────────────────────────────────────
@@ -2262,8 +2349,40 @@ async def apply_recommendation(
         raise HTTPException(status_code=404, detail=f"Recommendation {recommendation_id} not found")
 
     # Generate a mitigation redline from this finding's recommendation
-    clause_category = target_finding.clause_type or "other"
-    mitigation_type = f"applying_recommendation_{clause_category}"
+    from app.domains.review.mitigation_effectiveness import MITIGATION_EFFECTIVENESS_REGISTRY
+
+    raw_category = target_finding.clause_type or "other"
+
+    # Map the finding's clause_type to a valid category key in the registry.
+    # The registry uses compound keys like "liability_indemnity", "intellectual_property".
+    # We try an exact match first, then a prefix match, then fall back to "other".
+    category_map = {
+        "liability": "liability_indemnity",
+        "indemnification": "liability_indemnity",
+        "confidentiality": "confidentiality",
+        "data_privacy": "data_privacy",
+        "data_protection": "data_privacy",
+        "intellectual_property": "intellectual_property",
+        "sla": "service_levels",
+        "termination": "termination",
+        "governing_law": "governing_law",
+        "insurance": "insurance",
+        "non_compete": "non_compete",
+        "payment": "payment_terms",
+        "limitation_of_liability": "liability_indemnity",
+        "indemnification": "liability_indemnity",
+    }
+    clause_category = category_map.get(raw_category, raw_category)
+
+    # Pick the first available mitigation type for this category as the default
+    category_effects = MITIGATION_EFFECTIVENESS_REGISTRY.get(clause_category, {})
+    if category_effects:
+        # Use the first mitigation type as the default for generic apply actions
+        first_type = next(iter(category_effects.keys()))
+        mitigation_type = first_type
+    else:
+        # Fallback: construct a generic type
+        mitigation_type = f"applying_recommendation_{raw_category}"
 
     redline_result = await service.generate_mitigation_redline(
         review_id=review_id,
@@ -2527,7 +2646,11 @@ async def list_activity(
     """List activity events for a review."""
     try:
         return await service.get_activity(review_id)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning(
+            "list_activity failed for review %s: %s", review_id, exc, exc_info=True
+        )
         return {"events": []}
 
 

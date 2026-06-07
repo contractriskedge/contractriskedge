@@ -1,0 +1,56 @@
+#!/bin/bash
+# ContractEdge Automated Backup Script
+# Usage: ./scripts/backup.sh
+# Run daily via cron: 0 2 * * * /Volumes/ContractEdge/ContractRiskEdge/scripts/backup.sh
+
+set -euo pipefail
+
+PG_DUMP="/opt/homebrew/opt/postgresql@16/bin/pg_dump"
+PSQL="/opt/homebrew/opt/postgresql@16/bin/psql"
+BACKUP_DIR="/Volumes/ContractEdge/ContractRiskEdge"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+DB_URL="postgresql://dev_user:dev_password@localhost:5432/contract_risk_dev"
+RETENTION_DAYS=7
+
+echo "[$(date)] Starting backup..."
+
+# 1. Full backup (custom format, compressed)
+$PG_DUMP \
+  --dbname="$DB_URL" \
+  --format=custom \
+  --compress=9 \
+  --file="$BACKUP_DIR/contractedge_${TIMESTAMP}.dump" \
+  --verbose
+
+# 2. Schema-only backup (for git/diff)
+$PG_DUMP \
+  --dbname="$DB_URL" \
+  --schema-only \
+  --file="$BACKUP_DIR/contractedge_schema_${TIMESTAMP}.sql"
+
+# 3. Verify backup is non-empty
+if [ ! -s "$BACKUP_DIR/contractedge_${TIMESTAMP}.dump" ]; then
+  echo "ERROR: Backup file is empty!"
+  exit 1
+fi
+
+# 4. Remove backups older than RETENTION_DAYS
+find "$BACKUP_DIR" -name "contractedge_*.dump" -mtime +$RETENTION_DAYS -delete
+find "$BACKUP_DIR" -name "contractedge_schema_*.sql" -mtime +$RETENTION_DAYS -delete
+
+# 5. MinIO/S3 backup (object storage)
+MINIO_BACKUP_DIR="$BACKUP_DIR/minio_${TIMESTAMP}"
+if command -v mc &> /dev/null; then
+  echo "[$(date)] Starting MinIO backup..."
+  mc alias set contractedge-minio http://127.0.0.1:9000 pgskannan "Welcome2ibm$" 2>/dev/null
+  mc mirror contractedge-minio/contractrisk-documents "$MINIO_BACKUP_DIR" 2>/dev/null
+  echo "[$(date)] MinIO backup complete: $(find "$MINIO_BACKUP_DIR" -type f | wc -l) files"
+  # Remove old MinIO backups
+  find "$BACKUP_DIR" -name "minio_*" -type d -mtime +$RETENTION_DAYS -exec rm -rf {} + 2>/dev/null
+else
+  echo "[$(date)] WARNING: mc not found. Skipping MinIO backup."
+fi
+
+# 6. Log backup info
+echo "[$(date)] Backup complete: contractedge_${TIMESTAMP}.dump"
+ls -lh "$BACKUP_DIR/contractedge_${TIMESTAMP}.dump"

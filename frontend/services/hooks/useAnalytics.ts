@@ -249,3 +249,48 @@ export function useBatchSlaBreaches(limit?: number) {
     gcTime: 5 * 60_000,
   });
 }
+
+// ── Additional Analytics Hooks ──────────────────────────────────
+
+export function useSlaBreachTrend() {
+  return useQuery({
+    queryKey: [...analyticsKeys.all, "sla-breach-trend"],
+    queryFn: () => api.get<Array<{ date: string; count: number; critical: number }>>("/analytics/sla-breach-trend"),
+    staleTime: 120_000,
+    gcTime: 10 * 60_000,
+  });
+}
+
+export function useReviewMetrics() {
+  return useQuery({
+    queryKey: analyticsKeys.metrics(),
+    queryFn: () => api.get<{
+      total_reviews: number;
+      completed_reviews: number;
+      pending_reviews: number;
+      avg_completion_time_hours: number;
+      reviews_per_day: number;
+      findings_per_review: number;
+    }>("/analytics/metrics"),
+    staleTime: 120_000,
+    gcTime: 10 * 60_000,
+  });
+}
+
+export function useWorkflowHealthTrend() {
+  return useQuery({
+    queryKey: [...analyticsKeys.all, "health-score", "trend"],
+    queryFn: () => api.get<Array<{ date: string; score: number; status: string }>>("/analytics/health-score/trend"),
+    staleTime: 120_000,
+    gcTime: 10 * 60_000,
+  });
+}
+
+export function useReviewTrend() {
+  return useQuery({
+    queryKey: [...analyticsKeys.all, "review-trend"],
+    queryFn: () => api.get<Array<{ date: string; created: number; completed: number; in_progress: number }>>("/analytics/review-trend"),
+    staleTime: 120_000,
+    gcTime: 10 * 60_000,
+  });
+}

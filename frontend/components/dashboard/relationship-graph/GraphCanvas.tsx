@@ -25,16 +25,25 @@ export function GraphCanvas({ data, mode, onNodeSelect, selectedNodeId, filterVe
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
 
-  // Filter nodes
+  // Filter nodes based on metadata fields
   const filteredData = React.useMemo(() => {
     let nodes = data.nodes;
     let edges = data.edges;
-    if (filterVendor) nodes = nodes.filter((n) => !n.vendor || n.vendor === filterVendor);
+    if (filterVendor) {
+      nodes = nodes.filter((n) => {
+        const vendor = n.metadata?.counterparty as string || n.metadata?.vendor_name as string || n.metadata?.name as string || "";
+        return vendor.toLowerCase().includes(filterVendor.toLowerCase());
+      });
+    }
     if (filterType) nodes = nodes.filter((n) => n.type === filterType);
     if (filterRisk) {
-      if (filterRisk === "critical") nodes = nodes.filter((n) => n.riskLevel === "critical");
-      else if (filterRisk === "high") nodes = nodes.filter((n) => n.riskLevel === "high" || n.riskLevel === "critical");
-      else if (filterRisk === "medium") nodes = nodes.filter((n) => n.riskLevel === "medium" || n.riskLevel === "high" || n.riskLevel === "critical");
+      nodes = nodes.filter((n) => {
+        const severity = (n.metadata?.severity as string || n.metadata?.risk_level as string || "info").toLowerCase();
+        if (filterRisk === "critical") return severity === "critical";
+        if (filterRisk === "high") return severity === "critical" || severity === "high";
+        if (filterRisk === "medium") return severity === "critical" || severity === "high" || severity === "medium";
+        return true;
+      });
     }
     const nodeIds = new Set(nodes.map((n) => n.id));
     edges = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
@@ -82,34 +91,28 @@ export function GraphCanvas({ data, mode, onNodeSelect, selectedNodeId, filterVe
       .style("box-shadow", "0 4px 12px rgba(0,0,0,0.1)").style("pointer-events", "none")
       .style("opacity", "0").style("z-index", "1000").style("max-width", "280px");
 
-    // Node sizing based on mode
+    // Node sizing based on type
     const nodeRadius = (d: GraphNodeData) => {
-      if (d.type === "master_service_agreement") return 28;
+      if (d.type === "review") return 26;
       if (d.type === "vendor") return 24;
+      if (d.type === "upload") return 22;
+      if (d.type === "finding") return 18;
+      if (d.type === "negotiation") return 20;
       if (d.type === "obligation") return 18;
-      if (d.type === "amendment" || d.type === "statement_of_work") return 20;
       return 16;
     };
 
     const nodeColor = (d: GraphNodeData) => {
       if (mode === "risk_propagation") {
-        return d.riskLevel === "critical" ? "#EF4444" : d.riskLevel === "high" ? "#F97316" : d.riskLevel === "medium" ? "#EAB308" : "#22C55E";
-      }
-      if (mode === "financial_exposure") {
-        return d.financialValue && d.financialValue > 4 ? "#DC2626" : d.financialValue && d.financialValue > 2 ? "#F97316" : "#22C55E";
+        const sev = (d.metadata?.severity as string || d.metadata?.risk_level as string || "info").toLowerCase();
+        return sev === "critical" ? "#EF4444" : sev === "high" ? "#F97316" : sev === "medium" ? "#EAB308" : "#22C55E";
       }
       return NODE_COLORS[d.type] || "#6B7280";
     };
 
-    const edgeWidth = (d: GraphEdgeData) => {
-      if (mode === "risk_propagation") return d.type === "dependency" ? 3 : 1.5;
-      if (mode === "financial_exposure") return d.type === "financial_exposure" ? 3 : 1.5;
-      return d.strength * 3;
-    };
+    const edgeWidth = (_d: GraphEdgeData) => 1.5;
 
     const edgeColor = (d: GraphEdgeData) => {
-      if (mode === "risk_propagation") return d.type === "dependency" ? "#EF4444" : EDGE_COLORS[d.type] || "#94A3B8";
-      if (mode === "financial_exposure") return d.type === "financial_exposure" ? "#DC2626" : EDGE_COLORS[d.type] || "#94A3B8";
       return EDGE_COLORS[d.type] || "#94A3B8";
     };
 
@@ -127,7 +130,7 @@ export function GraphCanvas({ data, mode, onNodeSelect, selectedNodeId, filterVe
       .attr("stroke", (d) => edgeColor(d))
       .attr("stroke-width", (d) => edgeWidth(d))
       .attr("stroke-opacity", 0.5)
-      .attr("stroke-dasharray", (d) => d.type === "amendment" || d.type === "dependency" ? "6,4" : "none")
+      .attr("stroke-dasharray", (d) => d.type === "vendor_for" ? "6,4" : "none")
       .attr("marker-end", "url(#arrowhead)");
 
     // Edge labels
@@ -141,13 +144,17 @@ export function GraphCanvas({ data, mode, onNodeSelect, selectedNodeId, filterVe
       .data(filteredData.nodes).join("g")
       .style("cursor", "pointer")
       .on("mouseover", function (event, d) {
+        const status = (d.metadata?.status as string) || (d.metadata?.resolution as string) || "";
+        const severity = (d.metadata?.severity as string) || (d.metadata?.risk_level as string) || "";
+        const counterparty = (d.metadata?.counterparty as string) || (d.metadata?.vendor_name as string) || (d.metadata?.name as string) || "";
+        const stage = (d.metadata?.stage as string) || (d.metadata?.workflow_stage as string) || "";
         tooltip.style("opacity", "1").html(`
           <strong style="color:#1B3A6B">${d.label}</strong><br/>
-          <span style="color:#6B7280">Type: ${d.type.replace(/_/g, " ")}</span><br/>
-          <span style="color:#6B7280">Risk: ${d.riskScore}/10 (${d.riskLevel})</span><br/>
-          <span style="color:#6B7280">Status: ${d.status}</span>
-          ${d.vendor ? `<br/><span style="color:#6B7280">Vendor: ${d.vendor}</span>` : ""}
-          ${d.financialValue ? `<br/><span style="color:#6B7280">Value: $${d.financialValue}M</span>` : ""}
+          <span style="color:#6B7280">Type: ${d.type}</span><br/>
+          ${severity ? `<span style="color:#6B7280">Severity: ${severity}</span><br/>` : ""}
+          ${status ? `<span style="color:#6B7280">Status: ${status}</span><br/>` : ""}
+          ${stage ? `<span style="color:#6B7280">Stage: ${stage}</span><br/>` : ""}
+          ${counterparty ? `<span style="color:#6B7280">Counterparty: ${counterparty}</span>` : ""}
         `);
         d3.select(this).select("circle").transition().duration(200).attr("r", (dd: any) => nodeRadius(dd) + 4);
       })
@@ -187,7 +194,7 @@ export function GraphCanvas({ data, mode, onNodeSelect, selectedNodeId, filterVe
       .attr("fill", "#4B5563").attr("font-size", "8px");
 
     // Pulse animation for high-risk nodes
-    const pulseNodes = filteredData.nodes.filter((n) => n.riskLevel === "critical");
+    const pulseNodes = filteredData.nodes.filter((n) => (n.metadata?.severity as string) === "critical" || (n.metadata?.risk_level as string) === "critical");
     pulseNodes.forEach((d) => {
       const idx = filteredData.nodes.indexOf(d);
       const circle = node.filter((_, i) => i === idx).select("circle");

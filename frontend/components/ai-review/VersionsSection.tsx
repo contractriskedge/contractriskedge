@@ -99,7 +99,7 @@ export function VersionsSection() {
     );
   }
 
-  const items = versions ?? [];
+  const items: DocumentVersion[] = (versions as DocumentVersion[] | undefined) ?? [];
 
   return (
     <div className="p-4 space-y-4">
@@ -117,6 +117,34 @@ export function VersionsSection() {
           </button>
         )}
       </div>
+
+      {/* ── Version Summary Stats (density) ───────────────────────────── */}
+      {items.length > 0 && (
+        <div className="grid grid-cols-4 gap-2">
+          <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-2 text-center">
+            <p className="text-sm font-bold text-navy-900 dark:text-white">{items.length}</p>
+            <p className="text-[7px] text-gray-500 uppercase">Versions</p>
+          </div>
+          <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-2 text-center">
+            <p className="text-sm font-bold text-green-700">
+              {items.filter(v => v.status === "current" || v.status === "finalized" || v.status === "approved_redlines").length}
+            </p>
+            <p className="text-[7px] text-gray-500 uppercase">Finalized</p>
+          </div>
+          <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-2 text-center">
+            <p className="text-sm font-bold text-purple-700">
+              {items.reduce((sum, v) => sum + (v.accepted_redline_ids?.length || 0), 0)}
+            </p>
+            <p className="text-[7px] text-gray-500 uppercase">Redlines</p>
+          </div>
+          <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-2 text-center">
+            <p className="text-sm font-bold text-amber-700">
+              {formatFileSize(items.reduce((sum, v) => sum + (v.file_size_bytes || 0), 0))}
+            </p>
+            <p className="text-[7px] text-gray-500 uppercase">Total Size</p>
+          </div>
+        </div>
+      )}
 
       {/* ── Visual Timeline ────────────────────────────────────────────── */}
       <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-3">

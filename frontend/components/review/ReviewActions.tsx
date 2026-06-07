@@ -57,7 +57,7 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
   const canRouteToLegal = hasPermission("workflows:approve") || hasPermission("workflows:escalate");
   const canRouteToProcurement = hasPermission("workflows:write");
   const canRouteToSecurity = hasPermission("workflows:write") || hasPermission("audit:read");
-  const canExport = hasPermission("reviews:export") || hasPermission("audit:export");
+  const canExport = hasPermission("audit:export");
   const canDelete = hasPermission("contracts:delete");
 
   // Mutations

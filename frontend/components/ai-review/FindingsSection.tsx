@@ -19,10 +19,12 @@ import {
   ChevronDown, ChevronUp, Search, Filter, Target, TrendingUp,
   TrendingDown, Minus, BookOpen, FileText, ExternalLink,
   BarChart3, Cpu, ThumbsUp, ThumbsDown, HelpCircle, Loader2,
-  SkipForward, Zap, GitCompare, Edit3,
+  SkipForward, Zap, GitCompare, Edit3, GitBranch,
 } from "lucide-react";
 import { useReviewContext } from "./ReviewContext";
 import { useResolveFinding, useSubmitFeedback, useReviewRedlinesData } from "./hooks";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/services/api/client";
 import type { Finding, AiFeedback } from "./types";
 
 export function FindingsSection() {
@@ -36,6 +38,73 @@ export function FindingsSection() {
   const resolveMutation = useResolveFinding();
   const feedbackMutation = useSubmitFeedback();
   const { data: redlines = [] } = useReviewRedlinesData(selectedReviewId ?? "");
+  const queryClient = useQueryClient();
+
+  // ── Map finding category → backend mitigation type ────────────────────
+  const getMitigationParams = useCallback((finding: Finding) => {
+    // Map clause_type to canonical category key
+    const categoryMap: Record<string, string> = {
+      liability: "liability_indemnity",
+      indemnification: "liability_indemnity",
+      data_protection: "data_protection",
+      confidentiality: "confidentiality",
+      ip: "intellectual_property",
+      intellectual_property: "intellectual_property",
+      term: "term_termination",
+      termination: "term_termination",
+      payment: "payment_audit",
+      audit: "payment_audit",
+      sla: "sla_support",
+      support: "sla_support",
+      assignment: "assignment_change_control",
+      force_majeure: "force_majeure",
+      governing_law: "governing_law_jurisdiction",
+      jurisdiction: "governing_law_jurisdiction",
+      insurance: "insurance",
+      non_compete: "non_compete_exclusivity",
+      exclusivity: "non_compete_exclusivity",
+    };
+    // Map clause_type to a default mitigation type
+    const mitMap: Record<string, string> = {
+      liability: "adding_liability_cap",
+      indemnification: "narrowing_indemnity_scope",
+      data_protection: "adding_dpa",
+      confidentiality: "broadening_confidentiality",
+      ip: "restricting_derivative_works",
+      intellectual_property: "restricting_derivative_works",
+      term: "extending_notice_period",
+      sla: "adding_sla_guarantees",
+      assignment: "adding_change_of_control",
+    };
+    const clauseType = (finding.clause_type || "").toLowerCase();
+    return {
+      mitigation_type: mitMap[clauseType] || "adding_liability_cap",
+      clause_category: categoryMap[clauseType] || "liability_indemnity",
+    };
+  }, []);
+
+  const generateRedlineMutation = useMutation({
+    mutationFn: (finding: Finding) => {
+      const { mitigation_type, clause_category } = getMitigationParams(finding);
+      return api.post(`/reviews/${selectedReviewId}/generate-mitigation-redline`, {
+        mitigation_type,
+        clause_category,
+        finding_ids: [finding.finding_id],
+      });
+    },
+    onSuccess: (data, finding) => {
+      queryClient.invalidateQueries({ queryKey: ["review-redlines", selectedReviewId] });
+      // ── Risk Reduction ↔ Redline Integration ──
+      // Step 1: Resolve the finding (marks it as resolved in backend)
+      resolveMutation.mutate({ reviewId: selectedReviewId!, findingId: finding.finding_id, resolution: "resolved" });
+      // Step 2: Invalidate findings to reflect resolved status
+      queryClient.invalidateQueries({ queryKey: ["review-findings", selectedReviewId] });
+      // Step 3: Invalidate risk data so RiskReductionSection picks up the change
+      queryClient.invalidateQueries({ queryKey: ["review-risk", selectedReviewId] });
+      // Step 4: Invalidate audit trail for the new audit record
+      queryClient.invalidateQueries({ queryKey: ["review-audit", selectedReviewId] });
+    },
+  });
 
   // ── Build finding → redline lookup ───────────────────────────────────
 
@@ -243,6 +312,9 @@ export function FindingsSection() {
                           (finding.status || "open") === "accepted" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" :
                           (finding.status || "open") === "rejected" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300" :
                           (finding.status || "open") === "modified" ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300" :
+                          (finding.status || "open") === "waived" ? "bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300" :
+                          (finding.status || "open") === "escalated" ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300" :
+                          (finding.status || "open") === "mitigated" ? "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300" :
                           "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
                         }`}>
                           {(finding.status || "open") === "open" && "Pending"}
@@ -251,7 +323,10 @@ export function FindingsSection() {
                           {(finding.status || "open") === "accepted" && "Accepted"}
                           {(finding.status || "open") === "rejected" && "Rejected"}
                           {(finding.status || "open") === "modified" && "Modified"}
-                          {!["open", "resolved", "dismissed", "accepted", "rejected", "modified"].includes(finding.status || "open") && (finding.status || "open").replace(/_/g, " ")}
+                          {(finding.status || "open") === "waived" && "Waived"}
+                          {(finding.status || "open") === "escalated" && "Escalated"}
+                          {(finding.status || "open") === "mitigated" && "Mitigated"}
+                          {!["open", "resolved", "dismissed", "accepted", "rejected", "modified", "waived", "escalated", "mitigated"].includes(finding.status || "open") && (finding.status || "open").replace(/_/g, " ")}
                         </span>
                         {/* Finding → Redline badge */}
                         {redlineByFinding.has(finding.finding_id) && (
@@ -277,7 +352,9 @@ export function FindingsSection() {
                   </button>
 
                   {/* Expanded: Description + Explainability + Actions */}
-                  {isExpanded && (
+                  {isExpanded && (() => {
+                    const linkedRedline = redlineByFinding.get(finding.finding_id);
+                    return (
                     <div className="px-3 pb-3 space-y-2.5 border-t border-gray-50 dark:border-navy-750 pt-2">
                       {/* Description */}
                       <p className="text-[10px] text-gray-700 dark:text-gray-300 leading-relaxed">{finding.description}</p>
@@ -339,109 +416,161 @@ export function FindingsSection() {
 
                       {/* ── Finding → Redline Traceability ────────────────── */}
                       {(() => {
-                        const linkedRedline = redlineByFinding.get(finding.finding_id);
-                        if (!linkedRedline) return null;
+                        const lr = redlineByFinding.get(finding.finding_id);
+                        if (!lr) return null;
                         return (
                           <div className="flex items-center gap-2 p-2 rounded-lg bg-purple-50 dark:bg-purple-900/10 border border-purple-200 dark:border-purple-800">
                             <Edit3 className="w-3 h-3 text-purple-500 flex-shrink-0" />
                             <div className="flex-1 min-w-0">
                               <p className="text-[8px] font-semibold text-purple-700 dark:text-purple-300">Finding → Redline Generated</p>
                               <p className="text-[8px] text-purple-600 dark:text-purple-400 truncate">
-                                {linkedRedline.clause_type} §{linkedRedline.section} · {linkedRedline.status}
+                                {lr.clause_type} §{lr.section} · {lr.status}
                               </p>
                             </div>
                             <span className={`text-[7px] font-medium px-1.5 py-0.5 rounded-full ${
-                              linkedRedline.status === "accepted" ? "bg-green-100 text-green-700" :
-                              linkedRedline.status === "rejected" ? "bg-gray-100 text-gray-500" :
-                              linkedRedline.status === "modified" ? "bg-purple-100 text-purple-700" :
+                              lr.status === "accepted" ? "bg-green-100 text-green-700" :
+                              lr.status === "rejected" ? "bg-gray-100 text-gray-500" :
+                              lr.status === "modified" ? "bg-purple-100 text-purple-700" :
                               "bg-amber-100 text-amber-700"
-                            }`}>{linkedRedline.status}</span>
+                            }`}>{lr.status}</span>
                           </div>
                         );
                       })()}
 
-                      {/* ── Inline Explainability ────────────────────────── */}
+                      {/* ── AI Explainability — Redesigned: Source → Reason → Policy → Benchmark → Fix ── */}
                       <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-gray-50 dark:bg-navy-850 overflow-hidden">
                         <div className="px-2.5 py-1.5 bg-gray-100 dark:bg-navy-800 flex items-center gap-1.5">
                           <Brain className="w-3 h-3 text-purple-500" />
                           <span className="text-[9px] font-semibold text-gray-600 dark:text-gray-400 uppercase">AI Explainability</span>
+                          {/* Confidence — compact secondary badge */}
+                          {finding.confidence != null && (
+                            <span className={`ml-auto text-[7px] font-medium px-1.5 py-0.5 rounded-full ${
+                              finding.confidence >= 0.8 ? 'bg-green-100 text-green-700' :
+                              finding.confidence >= 0.6 ? 'bg-amber-100 text-amber-700' :
+                              'bg-red-100 text-red-700'
+                            }`}>
+                              {(finding.confidence * 100).toFixed(0)}% confidence
+                            </span>
+                          )}
                         </div>
                         <div className="p-2.5 space-y-2">
-                          {/* Reasoning */}
+                          {/* 1. Source Text */}
+                          {finding.clause_text && (
+                            <div className="rounded bg-white dark:bg-navy-800 p-2 border border-gray-150 dark:border-navy-700">
+                              <p className="text-[7px] font-semibold text-gray-500 uppercase mb-0.5 flex items-center gap-1">
+                                <FileText className="w-2.5 h-2.5" /> Source Text
+                              </p>
+                              <p className="text-[9px] text-gray-700 dark:text-gray-300 leading-relaxed font-mono">{finding.clause_text}</p>
+                            </div>
+                          )}
+
+                          {/* 2. Reason */}
                           {finding.reasoning && (
                             <div>
-                              <p className="text-[8px] font-semibold text-gray-500 uppercase mb-0.5">Reasoning</p>
+                              <p className="text-[7px] font-semibold text-gray-500 uppercase mb-0.5 flex items-center gap-1">
+                                <Lightbulb className="w-2.5 h-2.5" /> Reason
+                              </p>
                               <p className="text-[9px] text-gray-700 dark:text-gray-300 leading-relaxed">{finding.reasoning}</p>
                             </div>
                           )}
 
-                          {/* Confidence Breakdown */}
+                          {/* 3. Policy Trigger */}
                           <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <p className="text-[8px] font-semibold text-gray-500 uppercase mb-1">Confidence</p>
-                              <div className="space-y-0.5">
-                                {[
-                                  { label: "Semantic", value: finding.confidence_semantic },
-                                  { label: "Structural", value: finding.confidence_structural },
-                                  { label: "Linguistic", value: finding.confidence_linguistic },
-                                  { label: "Reference", value: finding.confidence_reference },
-                                ].map(c => c.value != null ? (
-                                  <div key={c.label} className="flex items-center gap-1.5">
-                                    <span className="text-[8px] text-gray-400 w-14 text-right">{c.label}</span>
-                                    <div className="flex-1 h-1.5 bg-gray-200 dark:bg-navy-700 rounded-full overflow-hidden">
-                                      <div className={`h-full rounded-full ${c.value >= 0.8 ? "bg-green-500" : c.value >= 0.6 ? "bg-amber-500" : "bg-red-500"}`}
-                                        style={{ width: `${c.value * 100}%` }} />
-                                    </div>
-                                    <span className="text-[8px] font-medium text-gray-600 w-6">{(c.value * 100).toFixed(0)}%</span>
-                                  </div>
-                                ) : null)}
-                              </div>
-                            </div>
-                            <div>
-                              <p className="text-[8px] font-semibold text-gray-500 uppercase mb-1">Benchmark</p>
-                              <div className="space-y-1.5">
-                                {finding.similarity_score != null && (
-                                  <div className="flex items-center justify-between text-[9px]">
-                                    <span className="text-gray-400">Similarity</span>
-                                    <span className={`font-semibold ${finding.similarity_score >= 0.8 ? "text-green-600" : finding.similarity_score >= 0.6 ? "text-amber-600" : "text-red-600"}`}>
-                                      {(finding.similarity_score * 100).toFixed(0)}%
-                                    </span>
-                                  </div>
-                                )}
-                                {finding.benchmark_deviation != null && (
-                                  <div className="flex items-center justify-between text-[9px]">
-                                    <span className="text-gray-400">Deviation</span>
-                                    <div className="flex items-center gap-0.5">
-                                      {finding.benchmark_deviation > 0 ? <TrendingUp className="w-2.5 h-2.5 text-red-500" /> : <TrendingDown className="w-2.5 h-2.5 text-green-500" />}
-                                      <span className={`font-semibold ${Math.abs(finding.benchmark_deviation) > 0.3 ? "text-red-600" : "text-amber-600"}`}>
+                            <div className="rounded bg-white dark:bg-navy-800 p-2 border border-gray-150 dark:border-navy-700">
+                              <p className="text-[7px] font-semibold text-gray-500 uppercase mb-0.5 flex items-center gap-1">
+                                <BookOpen className="w-2.5 h-2.5" /> Policy Trigger
+                              </p>
+                              {finding.matched_corpus ? (
+                                <div>
+                                  <p className="text-[9px] font-medium text-navy-900 dark:text-white truncate" title={finding.matched_corpus}>{finding.matched_corpus}</p>
+                                  {finding.benchmark_deviation != null && (
+                                    <p className="text-[8px] text-gray-500 mt-0.5">
+                                      Deviation: <span className={`font-medium ${Math.abs(finding.benchmark_deviation) > 0.3 ? "text-red-600" : "text-amber-600"}`}>
                                         {(finding.benchmark_deviation * 100).toFixed(1)}%
                                       </span>
-                                    </div>
-                                  </div>
-                                )}
-                                {finding.matched_corpus && (
-                                  <div className="text-[8px] text-gray-400 truncate" title={finding.matched_corpus}>
-                                    <BookOpen className="w-2 h-2 inline mr-0.5" />{finding.matched_corpus}
-                                  </div>
-                                )}
-                              </div>
+                                    </p>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-[9px] text-gray-400 italic">No policy match</p>
+                              )}
+                            </div>
+                            <div className="rounded bg-white dark:bg-navy-800 p-2 border border-gray-150 dark:border-navy-700">
+                              <p className="text-[7px] font-semibold text-gray-500 uppercase mb-0.5 flex items-center gap-1">
+                                <BarChart3 className="w-2.5 h-2.5" /> Industry Benchmark
+                              </p>
+                              {finding.similarity_score != null ? (
+                                <div>
+                                  <p className="text-[9px] font-medium text-navy-900 dark:text-white">
+                                    Similarity: <span className={`${finding.similarity_score >= 0.8 ? "text-green-600" : finding.similarity_score >= 0.6 ? "text-amber-600" : "text-red-600"}`}>
+                                      {(finding.similarity_score * 100).toFixed(0)}%
+                                    </span>
+                                  </p>
+                                  {finding.benchmark_deviation != null && (
+                                    <p className="text-[8px] text-gray-500 mt-0.5 flex items-center gap-0.5">
+                                      {finding.benchmark_deviation > 0 ? <TrendingUp className="w-2 h-2 text-red-500" /> : <TrendingDown className="w-2 h-2 text-green-500" />}
+                                      {(finding.benchmark_deviation * 100).toFixed(1)}% from market
+                                    </p>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-[9px] text-gray-400 italic">No benchmark data</p>
+                              )}
                             </div>
                           </div>
 
-                          {/* Supporting Evidence */}
+                          {/* 4. Recommended Fix */}
+                          {finding.recommended_mitigation && (
+                            <div className="rounded bg-blue-50 dark:bg-blue-900/10 p-2 border border-blue-100 dark:border-blue-800">
+                              <p className="text-[7px] font-semibold text-blue-600 dark:text-blue-400 uppercase mb-0.5 flex items-center gap-1">
+                                <Target className="w-2.5 h-2.5" /> Recommended Fix
+                              </p>
+                              <p className="text-[9px] text-blue-700 dark:text-blue-300 leading-relaxed">{finding.recommended_mitigation}</p>
+                            </div>
+                          )}
+
+                          {/* 5. Supporting Evidence — collapsed under expand */}
                           {finding.supporting_evidence?.length > 0 && (
-                            <div>
-                              <p className="text-[8px] font-semibold text-gray-500 uppercase mb-0.5">Evidence</p>
-                              <ul className="space-y-0.5">
-                                {finding.supporting_evidence?.map((ev, i) => (
+                            <details className="group">
+                              <summary className="text-[7px] font-semibold text-gray-400 uppercase cursor-pointer hover:text-gray-600 flex items-center gap-1">
+                                <ChevronDown className="w-2.5 h-2.5 group-open:rotate-180 transition-transform" />
+                                Supporting Evidence ({finding.supporting_evidence.length})
+                              </summary>
+                              <ul className="mt-1 space-y-0.5 pl-3">
+                                {finding.supporting_evidence.map((ev, i) => (
                                   <li key={i} className="flex items-start gap-1 text-[8px] text-gray-500">
                                     <FileText className="w-2 h-2 mt-0.5 flex-shrink-0" />
                                     {ev}
                                   </li>
                                 ))}
                               </ul>
-                            </div>
+                            </details>
                           )}
+
+                          {/* Confidence breakdown — subtle, secondary */}
+                          <details className="group">
+                            <summary className="text-[7px] font-semibold text-gray-400 uppercase cursor-pointer hover:text-gray-600 flex items-center gap-1">
+                              <ChevronDown className="w-2.5 h-2.5 group-open:rotate-180 transition-transform" />
+                              Confidence Breakdown
+                            </summary>
+                            <div className="mt-1 space-y-0.5 pl-1">
+                              {[
+                                { label: "Semantic", value: finding.confidence_semantic },
+                                { label: "Structural", value: finding.confidence_structural },
+                                { label: "Linguistic", value: finding.confidence_linguistic },
+                                { label: "Reference", value: finding.confidence_reference },
+                              ].map(c => c.value != null ? (
+                                <div key={c.label} className="flex items-center gap-1.5">
+                                  <span className="text-[7px] text-gray-400 w-12 text-right">{c.label}</span>
+                                  <div className="flex-1 h-1 bg-gray-200 dark:bg-navy-700 rounded-full overflow-hidden">
+                                    <div className={`h-full rounded-full ${c.value >= 0.8 ? "bg-green-400" : c.value >= 0.6 ? "bg-amber-400" : "bg-red-400"}`}
+                                      style={{ width: `${c.value * 100}%` }} />
+                                  </div>
+                                  <span className="text-[7px] font-medium text-gray-500 w-5">{(c.value * 100).toFixed(0)}%</span>
+                                </div>
+                              ) : null)}
+                            </div>
+                          </details>
                         </div>
                       </div>
 
@@ -624,6 +753,55 @@ export function FindingsSection() {
                         </div>
                       )}
 
+                      {/* ── Finding → Redline → Policy Linkage ── */}
+                      {linkedRedline && (
+                        <div className="mt-2 p-2 rounded-md bg-indigo-50/70 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800/40">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <GitBranch className="w-3 h-3 text-indigo-500" />
+                            <span className="text-[8px] font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Linked Redline</span>
+                            <span className={`ml-auto text-[7px] font-medium px-1.5 py-0.5 rounded-full ${
+                              linkedRedline.status === 'accepted' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                              linkedRedline.status === 'pending' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
+                              'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                            }`}>
+                              {linkedRedline.status || 'Pending'}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-1.5 text-[8px]">
+                            <div className="flex flex-col">
+                              <span className="text-gray-400 dark:text-gray-500">Policy Fixed</span>
+                              <span className="font-medium text-gray-700 dark:text-gray-300">
+                                {linkedRedline.impact?.policyFixed ?? '—'}
+                              </span>
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="text-gray-400 dark:text-gray-500">Risk Reduction</span>
+                              <span className={`font-medium ${
+                                (linkedRedline.impact?.riskReduction ?? 0) >= 70 ? 'text-green-600' :
+                                (linkedRedline.impact?.riskReduction ?? 0) >= 40 ? 'text-amber-600' :
+                                'text-gray-600'
+                              }`}>
+                                {linkedRedline.impact?.riskReduction != null ? `${linkedRedline.impact.riskReduction}%` : '—'}
+                              </span>
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="text-gray-400 dark:text-gray-500">Findings Resolved</span>
+                              <span className="font-medium text-gray-700 dark:text-gray-300">
+                                {linkedRedline.impact?.findingsResolved ?? '—'}
+                              </span>
+                            </div>
+                          </div>
+                          {linkedRedline.redline_text && (
+                            <div className="mt-1.5 pt-1.5 border-t border-indigo-200/50 dark:border-indigo-800/30">
+                              <span className="text-[7px] text-gray-400 dark:text-gray-500">Redline Preview</span>
+                              <p className="text-[8px] text-gray-600 dark:text-gray-400 mt-0.5 line-clamp-2 leading-relaxed">
+                                {linkedRedline.redline_text}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {/* ── Primary Actions: Locate, Generate Redline, Dismiss, Resolve ── */}
                       {(finding.status || "open") === "open" && (
                         <div className="flex items-center gap-2 pt-1 flex-wrap">
@@ -642,8 +820,11 @@ export function FindingsSection() {
                           </button>
 
                           {/* Generate Redline */}
-                          <button className="flex items-center gap-1 px-2.5 py-1 text-[9px] font-medium rounded bg-purple-600 text-white hover:bg-purple-700 border border-purple-700 transition-colors shadow-sm">
-                            <Zap className="w-3 h-3" /> Generate Redline
+                          <button onClick={() => generateRedlineMutation.mutate(finding)}
+                            disabled={generateRedlineMutation.isPending}
+                            className="flex items-center gap-1 px-2.5 py-1 text-[9px] font-medium rounded bg-purple-600 text-white hover:bg-purple-700 border border-purple-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                            {generateRedlineMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                            {generateRedlineMutation.isPending ? "Generating..." : "Generate Redline"}
                           </button>
 
                           {/* Spacer */}
@@ -655,6 +836,16 @@ export function FindingsSection() {
                             <CheckCircle2 className="w-3 h-3" /> Resolve
                           </button>
 
+                          {/* Escalate */}
+                          <button onClick={() => handleResolve(finding.finding_id)}
+                            className="flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded bg-red-100 text-red-700 hover:bg-red-200 border border-red-200 transition-colors">
+                            <AlertTriangle className="w-3 h-3" /> Escalate
+                          </button>
+                          {/* Waive */}
+                          <button onClick={() => handleResolve(finding.finding_id)}
+                            className="flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200 transition-colors">
+                            <XCircle className="w-3 h-3" /> Waive
+                          </button>
                           {/* Dismiss */}
                           <button className="flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200 transition-colors">
                             <XCircle className="w-3 h-3" /> Dismiss
@@ -662,7 +853,8 @@ export function FindingsSection() {
                         </div>
                       )}
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
               );
             })}

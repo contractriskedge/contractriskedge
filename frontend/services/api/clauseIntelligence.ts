@@ -276,8 +276,19 @@ export const clauseIntelligenceService = {
   // ── List / Paginated ──────────────────────────────────────────
 
   /** List clauses with pagination and filtering */
-  listClauses: (params?: ClauseListParams) =>
-    api.get<PaginatedClauses>(`${CLAUSES_BASE}/`, params as Record<string, unknown>),
+  listClauses: (params?: ClauseListParams) => {
+    const searchParams = new URLSearchParams();
+    if (params?.page) searchParams.set("page", String(params.page));
+    if (params?.page_size) searchParams.set("page_size", String(params.page_size));
+    if (params?.category) searchParams.set("category", params.category);
+    if (params?.search) searchParams.set("search", params.search);
+    if (params?.approval_status) searchParams.set("approval_status", params.approval_status);
+    if (params?.risk_level) searchParams.set("risk_level", params.risk_level);
+    if (params?.sort_by) searchParams.set("sort_by", params.sort_by);
+    if (params?.sort_order) searchParams.set("sort_order", params.sort_order);
+    const qs = searchParams.toString();
+    return api.get<PaginatedClauses>(`${CLAUSES_BASE}/${qs ? `?${qs}` : ""}`);
+  },
 
   // ── KPIs / Analytics ──────────────────────────────────────────
 

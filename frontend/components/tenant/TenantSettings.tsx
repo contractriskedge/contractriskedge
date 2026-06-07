@@ -1,53 +1,94 @@
 /**
  * TenantSettings — Tenant customization and configuration UI.
  *
- * Sprint 7 Priority 5.
+ * Sprint 23 Task 2.7 — Complete Settings module.
  *
- * Provides:
- * - White-label branding (logo, colors, favicon, custom CSS)
- * - Feature flag toggles per tenant
- * - Custom risk weight configuration
- * - Workflow builder (visual workflow editor)
- * - Compliance pack selector (regional packs)
- * - Custom routing rules editor
- *
- * Status: Scaffold — pending Sprint 7 implementation.
+ * Tabs:
+ *   General       — Branding, AI config, risk thresholds, SLA, email redirect
+ *   Features      — Feature flag toggle list with override support
+ *   Policy Packs  — Manage bundled policy/threshold/clause overrides
+ *   Scoring       — Per-clause-type scoring overrides
+ *   Compliance    — Regional compliance packs
+ *   Summary       — Configuration overview with health indicators
  */
 
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
+import { motion } from "framer-motion";
+import { Settings2, Flag, Package, Gauge, Shield, BarChart3 } from "lucide-react";
+import { GeneralSettingsForm } from "./GeneralSettingsForm";
+import { FeatureFlagList } from "./FeatureFlagList";
+import { PolicyPackList } from "./PolicyPackList";
+import { ScoringOverrideList } from "./ScoringOverrideList";
+import { CompliancePackList } from "./CompliancePackList";
+import { TenantSummary } from "./TenantSummary";
 
 interface TenantSettingsProps {
   tenantId: string;
 }
 
+type SettingsTab = "general" | "features" | "policy-packs" | "scoring" | "compliance" | "summary";
+
+const tabs: { id: SettingsTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: "general", label: "General", icon: Settings2 },
+  { id: "features", label: "Features", icon: Flag },
+  { id: "policy-packs", label: "Policy Packs", icon: Package },
+  { id: "scoring", label: "Scoring", icon: Gauge },
+  { id: "compliance", label: "Compliance", icon: Shield },
+  { id: "summary", label: "Summary", icon: BarChart3 },
+];
+
 export function TenantSettings({ tenantId }: TenantSettingsProps) {
+  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+
   return (
-    <div className="p-6">
-      <div className="bg-gradient-to-br from-sky-50 to-blue-50 dark:from-sky-900/20 dark:to-blue-900/20 rounded-xl border border-sky-200 dark:border-sky-800 p-8 text-center">
-        <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-sky-100 dark:bg-sky-800 flex items-center justify-center">
-          <svg className="w-8 h-8 text-sky-600 dark:text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-        </div>
-        <h2 className="text-xl font-bold text-navy-900 dark:text-white mb-2">Tenant Customization</h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 max-w-md mx-auto">
-          Configure tenant-specific branding, risk models, workflows, feature flags,
-          compliance packs, and routing rules. Each tenant operates with its own profile.
+    <div className="space-y-6 animate-fade-in">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-navy-900">Tenant Settings</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          Configure tenant-specific branding, AI, risk thresholds, SLA targets, feature flags,
+          policy packs, scoring overrides, compliance packs, and more
         </p>
-        <div className="flex items-center justify-center gap-2">
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-sky-100 text-sky-700 dark:bg-sky-800 dark:text-sky-300">
-            Sprint 7
-          </span>
-          <span className="text-xs text-gray-400">|</span>
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700 dark:bg-yellow-800 dark:text-yellow-300">
-            <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
-            In Development
-          </span>
-        </div>
       </div>
+
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                isActive
+                  ? "border-gold-500 text-gold-700"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Tab content */}
+      <motion.div
+        key={activeTab}
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.15 }}
+      >
+        {activeTab === "general" && <GeneralSettingsForm />}
+        {activeTab === "features" && <FeatureFlagList tenantId={tenantId} />}
+        {activeTab === "policy-packs" && <PolicyPackList />}
+        {activeTab === "scoring" && <ScoringOverrideList />}
+        {activeTab === "compliance" && <CompliancePackList />}
+        {activeTab === "summary" && <TenantSummary />}
+      </motion.div>
     </div>
   );
 }

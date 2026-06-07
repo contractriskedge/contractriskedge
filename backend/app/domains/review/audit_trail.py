@@ -190,6 +190,31 @@ class AuditTrailService:
             },
         )
 
+    async def record_assignment(
+        self,
+        review_id: str,
+        assignee_id: str,
+        assigned_by: str,
+        role: str = "reviewer",
+        previous_assignee: Optional[str] = None,
+    ) -> None:
+        """Record a reviewer assignment event."""
+        await self.record(
+            event_type="review.assigned",
+            entity_type="review",
+            entity_id=review_id,
+            actor_id=assigned_by,
+            action="assigned",
+            before_state={"assignee": previous_assignee} if previous_assignee else None,
+            after_state={"assignee": assignee_id, "role": role},
+            description=f"Assigned {assignee_id} as {role}",
+            metadata={
+                "assignee_id": assignee_id,
+                "role": role,
+                "previous_assignee": previous_assignee,
+            },
+        )
+
     async def record_redline_action(
         self,
         redline_id: str,

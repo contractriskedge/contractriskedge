@@ -80,6 +80,18 @@ async def _chunk_document(helper: WorkerAsyncHelper, upload_id: str, tenant_id: 
                 await session.commit()
                 return
 
+            # ── Idempotency check: skip if chunks already exist ──
+            existing_chunks = await vector_repo.get_chunks_by_upload(upload_id, tenant_id)
+            if existing_chunks:
+                logger.info(
+                    "Chunks already exist for %s (%d chunks). Skipping chunking.",
+                    upload_id, len(existing_chunks),
+                )
+                await ingest_repo.update_state(upload_id, tenant_id, IngestionState.EMBEDDING_PENDING)
+                await session.commit()
+                generate_embeddings_task.delay(upload_id, tenant_id, user_id)
+                return
+
             page_dicts = [{"page_number": p.page_number, "text": p.text} for p in pages]
 
             # Chunk
@@ -100,6 +112,26 @@ async def _chunk_document(helper: WorkerAsyncHelper, upload_id: str, tenant_id: 
 
         except Exception as exc:
             await session.rollback()
+            error_msg = str(exc)
+            # Handle unique constraint violation gracefully — chunks exist from
+            # a previous chunking attempt. Advance the workflow instead of failing.
+            if "uq_chunk_per_upload" in error_msg or "unique constraint" in error_msg.lower():
+                logger.warning(
+                    "Duplicate chunk detected for %s (workflow race). "
+                    "Chunks already exist — advancing to EMBEDDING_PENDING.",
+                    upload_id,
+                )
+                try:
+                    ingest_repo = IngestionRepository(session, tenant_id=tenant_id)
+                    await ingest_repo.update_state(
+                        upload_id, tenant_id, IngestionState.EMBEDDING_PENDING
+                    )
+                    await session.commit()
+                    generate_embeddings_task.delay(upload_id, tenant_id, user_id)
+                except Exception:
+                    pass
+                return
+
             logger.error("Chunking failed for %s: %s", upload_id, exc)
             try:
                 ingest_repo = IngestionRepository(session, tenant_id=tenant_id)

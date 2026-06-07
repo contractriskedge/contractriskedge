@@ -38,14 +38,14 @@ function MiniSparkline({
   if (data.length === 0) {
     return (
       <div className="flex items-center justify-center text-[10px] text-gray-400" style={{ height }}>
-        Collecting historical data
+        Minimum 2 data points required
       </div>
     );
   }
   if (data.length < 2) {
     return (
       <div className="flex items-center justify-center text-[10px] text-gray-400" style={{ height }}>
-        Need at least 2 periods to calculate trend
+        Collecting historical data — {data.length}/2 periods
       </div>
     );
   }

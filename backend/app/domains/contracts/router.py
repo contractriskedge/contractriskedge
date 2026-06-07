@@ -38,46 +38,72 @@ class ContractSummary:
     """Lightweight contract view mapped from review data.
 
     Fields align with the frontend PortfolioContract interface.
-    Risk scores are stored as 0-1 floats in document_metadata JSONB
+    Risk scores are stored as 0-1 floats in metadata JSONB
     and converted to 0-10 integers for display.
     """
     def __init__(self, review, filename: str = "") -> None:
-        self.id = str(review.review_id)
-        self.name = filename or "Untitled"
+        # Support both dict and object access patterns
+        def _get(key: str, default=None):
+            if isinstance(review, dict):
+                return review.get(key, default)
+            return getattr(review, key, default)
+
+        self.id = str(_get('review_id', ''))
+        self.name = filename or _get('document_name', 'Untitled') or "Untitled"
         self.vendor = ""
         self.contractType = "contract"
         self.businessUnit = ""
-        # risk_score is stored in document_metadata (JSONB) as 0-1 float
-        metadata = getattr(review, 'document_metadata', None) or {}
-        raw_risk = metadata.get('risk_score') if isinstance(metadata, dict) else None
+        # risk_score is a top-level field in the review response (0-1 float)
+        raw_risk = _get('risk_score', None)
+        if raw_risk is None:
+            # Fallback: check document_metadata JSONB
+            doc_md = _get('document_metadata', None) or _get('metadata', None) or {}
+            if isinstance(doc_md, dict):
+                raw_risk = doc_md.get('risk_score', None)
         self.riskScore = min(10, round((raw_risk or 0) * 10))
         self.riskLevel = _risk_level(self.riskScore)
         self.financialValue = 0
         self.currency = "USD"
-        status = getattr(review, 'status', None)
+        status = _get('status', None)
         status_str = status.value if hasattr(status, 'value') else str(status or 'draft')
         self.status = _map_status(status_str)
         self.expiryDate = ""
         self.topRisk = ""
-        self.aiConfidence = min(100, max(0, self.riskScore * 10))
-        self.owner = getattr(review, 'assigned_to', None) or getattr(review, 'created_by', '') or ""
-        self.workflowStage = getattr(review, 'workflow_stage', None) or _map_workflow(status_str)
-        self.lastModified = _fmt_date(getattr(review, 'updated_at', None))
+        self.aiConfidence = min(100, max(0, round((raw_risk or 0) * 100)))
+        self.owner = _get('assigned_to', None) or _get('created_by', '') or ""
+        self.workflowStage = _get('workflow_stage', None) or _map_workflow(status_str)
+        self.lastModified = _fmt_date(_get('updated_at', None))
         self.tags = []
         self.geography = ""
         self.department = ""
         self.description = ""
-        self.aiSummary = ""
-        self.clauseCount = 0
+        self.clauseCount = _get('finding_count', 0) or 0
+        self.aiFindingsCount = _get('finding_count', 0) or 0
         self.missingClauses = []
         self.aiFlags = _derive_flags(raw_risk)
         self.obligationsDue = 0
-        self.slaCompliant = True
-        self.hasRedlines = bool(getattr(review, 'redline_count', 0))
+        self.slaCompliant = _get('sla_breached', False) is not True
+        self.hasRedlines = bool(_get('redline_count', 0))
+        # Compose AI summary from available data
+        finding_count = self.clauseCount
+        redline_count = _get('redline_count', 0) or 0
+        risk_label = self.riskLevel
+        score_pct = round((raw_risk or 0) * 100)
+        parts = []
+        if finding_count > 0:
+            parts.append(f"AI analysis identified {finding_count} clause finding{'s' if finding_count != 1 else ''}")
+        if redline_count > 0:
+            parts.append(f"and generated {redline_count} proposed redline{'s' if redline_count != 1 else ''}")
+        if raw_risk and raw_risk > 0:
+            parts.append(f"with an overall risk score of {score_pct}% ({risk_label})")
+        if parts:
+            self.aiSummary = ". ".join(parts) + "."
+        else:
+            self.aiSummary = "Contract has been uploaded and is pending AI analysis."
         self.hasDpa = False
         self.autoRenew = False
-        self.totalPages = 0
-        self.createdAt = _fmt_date(getattr(review, 'created_at', None))
+        self.totalPages = _get('total_pages', 0) or 0
+        self.createdAt = _fmt_date(_get('created_at', None))
 
 
 def _risk_level(score: int) -> str:

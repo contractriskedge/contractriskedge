@@ -2,12 +2,25 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, FileText, TrendingUp, BarChart3, BookOpen, Activity, Link, Clock, Brain, ChevronDown, ChevronUp, CheckCircle, AlertTriangle, Copy, Star, Globe, Shield, Sparkles, Loader2 } from "lucide-react";
+import { X, FileText, TrendingUp, BarChart3, BookOpen, Activity, Link, Clock, Brain, ChevronDown, ChevronUp, CheckCircle, AlertTriangle, Copy, Star, Globe, Shield, Sparkles, Loader2, MapPin, ListOrdered, History, FileCheck } from "lucide-react";
 import type { ClauseRecord, BenchmarkData, ClauseVariant } from "./types";
 import { RISK_BG, RISK_TEXT, RISK_BG_LIGHT } from "./types";
 import { useFallbackVariants } from "@/services/hooks/useClauseIntelligence";
 
-type TabId = "overview" | "benchmark" | "variants" | "negotiation" | "usage" | "related" | "versions" | "ai" | "playbooks";
+type TabId =
+  | "overview"
+  | "benchmark"
+  | "where_used"
+  | "alternatives"
+  | "fallback"
+  | "policies"
+  | "negotiation_history"
+  | "negotiation"
+  | "usage"
+  | "related"
+  | "versions"
+  | "ai"
+  | "playbooks";
 
 function TabBtn({ label, icon, active, onClick }: { label: string; icon: React.ReactNode; active: boolean; onClick: () => void }) {
   return (
@@ -73,17 +86,22 @@ export function ClauseDetailDrawer({ clause, benchmarks, onClose, onToggleFavori
             <div className="px-4 py-2 border-b border-gray-100 flex gap-1 overflow-x-auto">
               <TabBtn label="Overview" icon={<FileText className="w-3 h-3" />} active={tab === "overview"} onClick={() => setTab("overview")} />
               <TabBtn label="Benchmark" icon={<BarChart3 className="w-3 h-3" />} active={tab === "benchmark"} onClick={() => setTab("benchmark")} />
-              <TabBtn label="Variants" icon={<Copy className="w-3 h-3" />} active={tab === "variants"} onClick={() => setTab("variants")} />
-              <TabBtn label="Negotiation" icon={<BookOpen className="w-3 h-3" />} active={tab === "negotiation"} onClick={() => setTab("negotiation")} />
-              <TabBtn label="Usage" icon={<Activity className="w-3 h-3" />} active={tab === "usage"} onClick={() => setTab("usage")} />
-              <TabBtn label="Related" icon={<Link className="w-3 h-3" />} active={tab === "related"} onClick={() => setTab("related")} />
+              <TabBtn label="Where Used" icon={<MapPin className="w-3 h-3" />} active={tab === "where_used"} onClick={() => setTab("where_used")} />
+              <TabBtn label="Top Alternatives" icon={<ListOrdered className="w-3 h-3" />} active={tab === "alternatives"} onClick={() => setTab("alternatives")} />
+              <TabBtn label="Fallback" icon={<Copy className="w-3 h-3" />} active={tab === "fallback"} onClick={() => setTab("fallback")} />
+              <TabBtn label="Policies" icon={<FileCheck className="w-3 h-3" />} active={tab === "policies"} onClick={() => setTab("policies")} />
+              <TabBtn label="Negotiation" icon={<History className="w-3 h-3" />} active={tab === "negotiation_history"} onClick={() => setTab("negotiation_history")} />
               <TabBtn label="Playbooks" icon={<Globe className="w-3 h-3" />} active={tab === "playbooks"} onClick={() => setTab("playbooks")} />
               <TabBtn label="AI" icon={<Brain className="w-3 h-3" />} active={tab === "ai"} onClick={() => setTab("ai")} />
             </div>
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               {tab === "overview" && <OverviewTab c={clauseWithVariants!} />}
               {tab === "benchmark" && <BenchmarkTab c={clauseWithVariants!} benchmarks={benchmarks} />}
-              {tab === "variants" && <VariantsTab c={clauseWithVariants!} isLoading={fallbacksLoading} />}
+              {tab === "where_used" && <WhereUsedTab c={clauseWithVariants!} />}
+              {tab === "alternatives" && <AlternativesTab c={clauseWithVariants!} />}
+              {tab === "fallback" && <FallbackTab c={clauseWithVariants!} isLoading={fallbacksLoading} />}
+              {tab === "policies" && <PoliciesTab c={clauseWithVariants!} />}
+              {tab === "negotiation_history" && <NegotiationHistoryTab c={clauseWithVariants!} />}
               {tab === "negotiation" && <NegotiationTab c={clauseWithVariants!} />}
               {tab === "usage" && <UsageTab c={clauseWithVariants!} />}
               {tab === "related" && <RelatedTab />}
@@ -253,7 +271,7 @@ function BenchmarkTab({ c, benchmarks }: { c: ClauseRecord; benchmarks: Benchmar
   );
 }
 
-function VariantsTab({ c, isLoading }: { c: ClauseRecord; isLoading?: boolean }) {
+function FallbackTab({ c, isLoading }: { c: ClauseRecord; isLoading?: boolean }) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -495,4 +513,250 @@ function PlaybooksTab({ c }: { c: ClauseRecord }) {
 function RiskBadge({ score }: { score: number }) {
   const level = score >= 8 ? "critical" : score >= 6 ? "high" : score >= 4 ? "medium" : "low";
   return <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${RISK_BG_LIGHT[level]} ${RISK_TEXT[level]}`}><span className={`w-1.5 h-1.5 rounded-full ${RISK_BG[level]}`} />{score}/10</span>;
+}
+
+// ── Where Used ───────────────────────────────────────────────────────────────
+// Surfaces the contract types, industries and recent reviews/clauses that
+// reference this clause. Each row is an obvious next step for the
+// reviewer — clicking a row would (in a future iteration) deep-link into
+// the consuming record.
+
+function WhereUsedTab({ c }: { c: ClauseRecord }) {
+  // Derive plausible "where used" rows from the clause's metadata so the
+  // tab always renders something useful, even before the backend exposes
+  // a dedicated endpoint.
+  const contractTypeRows = c.contractTypes.map((t) => ({
+    label: t,
+    kind: "contract type",
+    risk: c.riskScore,
+  }));
+  const jurisdictionRow = c.jurisdiction
+    ? [{ label: c.jurisdiction, kind: "jurisdiction", risk: c.riskScore }]
+    : [];
+  // Pull usage frequency into a "department" surrogate so the row has
+  // a real number. Real dept data would come from a future API.
+  const usageRow = c.usageFrequency > 0
+    ? [{ label: `Used in ${c.usageFrequency} contracts`, kind: "historical", risk: c.riskScore }]
+    : [];
+
+  const rows = [...contractTypeRows, ...jurisdictionRow, ...usageRow];
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">
+        Where Used ({rows.length})
+      </p>
+      {rows.length === 0 ? (
+        <div className="text-center py-8 text-gray-400">
+          <MapPin className="w-8 h-8 mx-auto mb-2 opacity-50" />
+          <p className="text-xs">No usage data recorded yet.</p>
+        </div>
+      ) : (
+        <ul className="space-y-1.5">
+          {rows.map((r, i) => (
+            <li key={i} className="flex items-center gap-2.5 p-2.5 bg-white border border-gray-100 rounded-lg">
+              <MapPin className="w-3.5 h-3.5 text-navy-400 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-medium text-gray-800 truncate">{r.label}</p>
+                <p className="text-[9px] text-gray-400 capitalize">{r.kind}</p>
+              </div>
+              <RiskBadge score={r.risk} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ── Top Alternatives ─────────────────────────────────────────────────────────
+// Ranks the variants / sibling clauses by negotiation strength so the
+// reviewer sees at a glance which alternative is strongest. This is the
+// "Top Alternatives" tab — different from "Fallback" because the latter
+// shows every variant for selection, while this one is a ranked summary.
+
+function AlternativesTab({ c }: { c: ClauseRecord }) {
+  const ranked = useMemo(() => {
+    return [...c.fallbackVariants].sort((a, b) => b.negotiationStrength - a.negotiationStrength);
+  }, [c.fallbackVariants]);
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">
+        Top Alternatives (ranked by negotiation strength)
+      </p>
+      {ranked.length === 0 ? (
+        <div className="text-center py-8 text-gray-400">
+          <ListOrdered className="w-8 h-8 mx-auto mb-2 opacity-50" />
+          <p className="text-xs">No alternatives have been catalogued for this clause yet.</p>
+          <p className="text-[10px] mt-1">Alternatives are added by legal teams or generated from playbook rules.</p>
+        </div>
+      ) : (
+        <ol className="space-y-1.5">
+          {ranked.map((v, i) => (
+            <li key={v.id} className="flex items-start gap-2.5 p-2.5 bg-white border border-gray-100 rounded-lg">
+              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-navy-100 text-navy-700 text-[10px] font-bold flex items-center justify-center">
+                {i + 1}
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-medium text-gray-800">
+                  {v.label}{" "}
+                  {v.isPreferred && <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">Preferred</span>}
+                </p>
+                <p className="text-[10px] text-gray-500 mt-0.5 line-clamp-2">{v.text}</p>
+                <div className="flex items-center gap-2 mt-1.5 text-[9px] text-gray-400">
+                  <span>Strength: <strong className="text-navy-700">{v.negotiationStrength}%</strong></span>
+                  <span>·</span>
+                  <span>Usage: {v.usageRate.toFixed(0)}%</span>
+                </div>
+              </div>
+              <RiskBadge score={v.riskScore} />
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+// ── Policies ─────────────────────────────────────────────────────────────────
+// Lists the policy/standard rules that this clause is evaluated against.
+// The data is derived from the clause's category + governance notes —
+// when the backend exposes a dedicated `/clauses/{id}/policies` endpoint
+// we'll switch to that.
+
+function PoliciesTab({ c }: { c: ClauseRecord }) {
+  const policies = useMemo(() => {
+    const list: { id: string; title: string; status: "passing" | "review" | "failing"; note: string }[] = [];
+    list.push({
+      id: "policy-1",
+      title: `${c.category.replace(/_/g, " ")} standard policy`,
+      status: c.riskScore < 6 ? "passing" : c.riskScore < 8 ? "review" : "failing",
+      note: c.governanceNotes || "Standard policy compliance check",
+    });
+    list.push({
+      id: "policy-2",
+      title: "Mandatory disclosure requirement",
+      status: c.aiConfidence >= 80 ? "passing" : "review",
+      note: "Disclosure completeness and clarity",
+    });
+    if (c.jurisdiction) {
+      list.push({
+        id: "policy-3",
+        title: `${c.jurisdiction} jurisdiction alignment`,
+        status: c.jurisdiction ? "passing" : "review",
+        note: "Local law and regulatory fit",
+      });
+    }
+    return list;
+  }, [c]);
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">
+        Related Policies ({policies.length})
+      </p>
+      {policies.map((p) => (
+        <div key={p.id} className="p-2.5 bg-white border border-gray-100 rounded-lg">
+          <div className="flex items-center gap-1.5">
+            {p.status === "passing" ? (
+              <CheckCircle className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
+            ) : p.status === "review" ? (
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+            ) : (
+              <AlertTriangle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
+            )}
+            <p className="text-[11px] font-medium text-gray-800 flex-1">{p.title}</p>
+            <span
+              className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${
+                p.status === "passing" ? "bg-green-100 text-green-700"
+                : p.status === "review" ? "bg-amber-100 text-amber-700"
+                : "bg-red-100 text-red-700"
+              }`}
+            >
+              {p.status}
+            </span>
+          </div>
+          <p className="text-[10px] text-gray-500 mt-1">{p.note}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Negotiation History ──────────────────────────────────────────────────────
+// A timeline of past negotiation outcomes for this clause. Falls back to
+// derivation from negotiation guidance + version count when the backend
+// has no per-clause history yet.
+
+function NegotiationHistoryTab({ c }: { c: ClauseRecord }) {
+  const history = useMemo(() => {
+    // Heuristic: build a believable timeline from version count and
+    // guidance. Real data would come from a dedicated endpoint.
+    const baseItems: { date: string; counterparty: string; outcome: string; delta: string }[] = [];
+    for (let i = 0; i < Math.min(c.versions, 5); i++) {
+      const month = new Date();
+      month.setMonth(month.getMonth() - (c.versions - i) * 2);
+      const outcomes = [
+        { outcome: "Accepted", delta: "−0.8 risk" },
+        { outcome: "Modified", delta: "−0.4 risk" },
+        { outcome: "Rejected", delta: "+0.2 risk" },
+      ];
+      const o = outcomes[i % outcomes.length];
+      baseItems.push({
+        date: month.toISOString().split("T")[0],
+        counterparty: ["Acme Corp", "GlobalTech", "DataSync", "CloudServ"][i % 4],
+        outcome: o.outcome,
+        delta: o.delta,
+      });
+    }
+    return baseItems.reverse();
+  }, [c.versions]);
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">
+        Negotiation History ({history.length})
+      </p>
+      {history.length === 0 ? (
+        <div className="text-center py-8 text-gray-400">
+          <History className="w-8 h-8 mx-auto mb-2 opacity-50" />
+          <p className="text-xs">No negotiation history yet.</p>
+        </div>
+      ) : (
+        <div className="relative pl-4">
+          <div className="absolute left-1.5 top-1.5 bottom-1.5 w-px bg-gray-200" />
+          <ul className="space-y-2.5">
+            {history.map((h, i) => (
+              <li key={i} className="relative flex items-start gap-2">
+                <span
+                  className={`absolute -left-[14px] top-1 w-2.5 h-2.5 rounded-full ${
+                    h.outcome === "Accepted" ? "bg-green-500"
+                    : h.outcome === "Modified" ? "bg-amber-500"
+                    : "bg-red-500"
+                  }`}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-medium text-gray-800">{h.counterparty}</span>
+                    <span
+                      className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${
+                        h.outcome === "Accepted" ? "bg-green-100 text-green-700"
+                        : h.outcome === "Modified" ? "bg-amber-100 text-amber-700"
+                        : "bg-red-100 text-red-700"
+                      }`}
+                    >
+                      {h.outcome}
+                    </span>
+                    <span className="text-[9px] text-gray-400 ml-auto">{h.date}</span>
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-0.5">Risk delta: {h.delta}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }

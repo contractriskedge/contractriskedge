@@ -202,13 +202,29 @@ export function useCreateObligation() {
   });
 }
 
-export function useUpdateObligation(id: string) {
+export function useUpdateObligation(id?: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: ObligationUpdateRequest) =>
-      obligationsService.updateObligation(id, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: obligationKeys.detail(id) });
+    mutationFn: (vars: { id?: string; body: ObligationUpdateRequest }) => {
+      // Prefer the id passed at call time (so we can update any obligation
+      // from a list-level favorite toggle), falling back to the id captured
+      // at hook creation time (e.g. the currently-open detail drawer).
+      const targetId = vars.id ?? id;
+      if (!targetId) {
+        // Translate a missing id into a typed error so callers can show a
+        // helpful message instead of letting the request hit a bare
+        // /obligations/ endpoint and get back a 405 from the backend.
+        const err = new Error("Cannot update obligation: missing id");
+        (err as Error & { status_code?: number }).status_code = 400;
+        return Promise.reject(err);
+      }
+      return obligationsService.updateObligation(targetId, vars.body);
+    },
+    onSuccess: (_data, vars) => {
+      const targetId = vars.id ?? id;
+      if (targetId) {
+        qc.invalidateQueries({ queryKey: obligationKeys.detail(targetId) });
+      }
       qc.invalidateQueries({ queryKey: obligationKeys.lists() });
       qc.invalidateQueries({ queryKey: obligationKeys.kpis() });
       qc.invalidateQueries({ queryKey: obligationKeys.overdue() });
@@ -251,7 +267,6 @@ export function useCreateReminder() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: obligationKeys.notificationHistory() });
       qc.invalidateQueries({ queryKey: obligationKeys.lists() });
-      qc.invalidateQueries({ queryKey: obligationKeys.metrics() });
     },
   });
 }

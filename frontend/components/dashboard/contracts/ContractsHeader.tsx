@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Upload, Sparkles, ChevronDown, Clock, Star, X, Filter, Download, Bell } from "lucide-react";
+import { Search, Sparkles, ChevronDown, Clock, Star, X, Filter, Download } from "lucide-react";
 import type { SavedView } from "./types";
 
 const SUGGESTIONS = [
@@ -19,13 +19,11 @@ interface ContractsHeaderProps {
   savedViews: SavedView[];
   activeViewId: string;
   onViewChange: (id: string) => void;
-  onUploadClick: () => void;
-  onBulkUpload: () => void;
   resultCount: number;
 }
 
 export function ContractsHeader({
-  search, onSearchChange, savedViews, activeViewId, onViewChange, onUploadClick, onBulkUpload, resultCount,
+  search, onSearchChange, savedViews, activeViewId, onViewChange, resultCount,
 }: ContractsHeaderProps) {
   const [focused, setFocused] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -46,29 +44,7 @@ export function ContractsHeader({
   const activeView = savedViews.find((v) => v.id === activeViewId);
 
   return (
-    <div className="space-y-2 px-3 pt-3">
-      {/* Top bar */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold text-navy-900 dark:text-white">Contracts Repository</h1>
-          <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">AI-powered contract intelligence workspace</p>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <button className="relative p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-navy-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
-            <Bell className="w-3.5 h-3.5" />
-            <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-red-500 text-white text-[7px] font-bold rounded-full flex items-center justify-center">3</span>
-          </button>
-          <button onClick={onBulkUpload}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium rounded-lg bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors">
-            <Upload className="w-3 h-3" /> Bulk Upload
-          </button>
-          <button onClick={onUploadClick}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm">
-            <Upload className="w-3 h-3" /> Upload Contract
-          </button>
-        </div>
-      </div>
-
+    <div className="space-y-2 px-3">
       {/* Search + Filters row */}
       <div className="flex items-center gap-2">
         {/* Smart search */}

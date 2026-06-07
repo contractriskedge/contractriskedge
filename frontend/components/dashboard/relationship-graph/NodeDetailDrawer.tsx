@@ -74,21 +74,25 @@ function OverviewTab({ node }: { node: GraphNodeData }) {
     <div className="space-y-4">
       <div className="p-3 bg-navy-50 rounded-lg border border-navy-100">
         <div className="flex items-center gap-1.5 mb-1.5"><Share2 className="w-3.5 h-3.5 text-navy-600" /><span className="text-[10px] font-semibold text-navy-700 uppercase tracking-wider">AI Relationship Summary</span></div>
-        <p className="text-[11px] text-gray-700 leading-relaxed">{node.label} ({node.id}) is a {node.type.replace(/_/g, " ")} with risk score {node.riskScore}/10. {node.vendor ? `Vendor: ${node.vendor}.` : ""} {node.businessUnit ? `Business unit: ${node.businessUnit}.` : ""} This node has downstream dependencies that should be monitored for cascading risk.</p>
+        <p className="text-[11px] text-gray-700 leading-relaxed">
+          {node.label} ({node.id}) is a {node.type.replace(/_/g, " ")}
+          {node.metadata?.severity ? ` with severity ${node.metadata.severity}.` : "."}
+          {node.metadata?.counterparty ? ` Counterparty: ${node.metadata.counterparty}.` : ""}
+          {node.metadata?.vendor_name ? ` Vendor: ${node.metadata.vendor_name}.` : ""}
+        </p>
       </div>
       <div className="bg-gray-50 rounded-lg p-3 space-y-0.5 divide-y divide-gray-100">
         <MetaRow label="Node ID" value={node.id} icon={<Share2 className="w-3 h-3" />} />
         <MetaRow label="Type" value={node.type.replace(/_/g, " ")} icon={<FileText className="w-3 h-3" />} />
-        <MetaRow label="Risk Score" value={<RiskBadge score={node.riskScore} />} />
-        <MetaRow label="Risk Level" value={node.riskLevel} icon={<AlertTriangle className="w-3 h-3" />} />
-        <MetaRow label="Status" value={node.status} />
-        {node.vendor && <MetaRow label="Vendor" value={node.vendor} icon={<Building2 className="w-3 h-3" />} />}
-        {node.businessUnit && <MetaRow label="Business Unit" value={node.businessUnit} icon={<Building2 className="w-3 h-3" />} />}
-        {node.geography && <MetaRow label="Geography" value={node.geography} icon={<Globe className="w-3 h-3" />} />}
-        {node.owner && <MetaRow label="Owner" value={node.owner} icon={<User className="w-3 h-3" />} />}
-        {node.financialValue && <MetaRow label="Financial Value" value={`$${node.financialValue}M`} icon={<DollarSign className="w-3 h-3" />} />}
-        {node.expiryDate && <MetaRow label="Expiry Date" value={node.expiryDate} icon={<Calendar className="w-3 h-3" />} />}
-        <MetaRow label="Graph Depth" value={node.depth.toString()} icon={<LayersIcon />} />
+        <MetaRow label="Status" value={(node.metadata?.status as string) || (node.metadata?.resolution as string) || "—"} />
+        {(node.metadata?.severity as string) && <MetaRow label="Severity" value={node.metadata?.severity as string} icon={<AlertTriangle className="w-3 h-3" />} />}
+        {(node.metadata?.risk_level as string) && <MetaRow label="Risk Level" value={node.metadata?.risk_level as string} />}
+        {(node.metadata?.counterparty as string) && <MetaRow label="Counterparty" value={node.metadata?.counterparty as string} icon={<Building2 className="w-3 h-3" />} />}
+        {(node.metadata?.vendor_name as string) && <MetaRow label="Vendor" value={node.metadata?.vendor_name as string} icon={<Building2 className="w-3 h-3" />} />}
+        {(node.metadata?.workflow_stage as string) && <MetaRow label="Stage" value={node.metadata?.workflow_stage as string} />}
+        {(node.metadata?.stage as string) && <MetaRow label="Stage" value={node.metadata?.stage as string} />}
+        {(node.metadata?.clause_type as string) && <MetaRow label="Clause Type" value={node.metadata?.clause_type as string} />}
+        {(node.metadata?.priority as string) && <MetaRow label="Priority" value={node.metadata?.priority as string} />}
       </div>
     </div>
   );
@@ -119,11 +123,14 @@ function ConnectionsTab() {
 }
 
 function RiskTab({ node }: { node: GraphNodeData }) {
+  const severity = (node.metadata?.severity as string) || (node.metadata?.risk_level as string) || "info";
+  const counterparty = (node.metadata?.counterparty as string) || (node.metadata?.vendor_name as string) || "";
+  const nodeType = node.type;
   const risks = [
-    { category: "Inherited Risk", score: Math.min(10, node.riskScore + 1), level: node.riskLevel, detail: "Risk inherited from upstream dependencies" },
-    { category: "Propagated Risk", score: Math.min(10, node.riskScore + 2), level: node.riskScore >= 7 ? "critical" : "high", detail: "Risk propagated to downstream agreements" },
-    { category: "Concentration Risk", score: node.vendor ? 7 : 3, level: node.vendor ? "high" : "low", detail: node.vendor ? `Vendor ${node.vendor} has multiple dependencies` : "No concentration risk" },
-    { category: "Compliance Risk", score: node.type === "dpa" ? 8 : node.geography === "EU" ? 6 : 3, level: node.type === "dpa" ? "high" : "medium", detail: node.type === "dpa" ? "DPA compliance requirements" : "Standard compliance" },
+    { category: "Inherited Risk", score: severity === "critical" ? 9 : severity === "high" ? 7 : severity === "medium" ? 5 : 2, level: severity, detail: "Risk inherited from upstream dependencies" },
+    { category: "Propagated Risk", score: severity === "critical" ? 9 : severity === "high" ? 7 : 4, level: severity === "critical" ? "critical" : "high", detail: "Risk propagated to downstream agreements" },
+    { category: "Concentration Risk", score: counterparty ? 7 : 3, level: counterparty ? "high" : "low", detail: counterparty ? `Counterparty ${counterparty} has multiple dependencies` : "No concentration risk" },
+    { category: "Compliance Risk", score: nodeType === "finding" ? 8 : 3, level: nodeType === "finding" ? "high" : "medium", detail: nodeType === "finding" ? "Finding requires compliance review" : "Standard compliance" },
   ];
   return (
     <div className="space-y-2">
@@ -139,27 +146,17 @@ function RiskTab({ node }: { node: GraphNodeData }) {
 }
 
 function FinancialTab({ node }: { node: GraphNodeData }) {
+  const financialValue = (node.metadata?.financial_impact as number) || (node.metadata?.file_size as number) || 0;
   return (
     <div className="space-y-3">
       <div className="p-4 bg-gray-50 rounded-lg text-center">
-        <p className="text-[10px] text-gray-500 uppercase font-semibold">Financial Value</p>
-        <p className="text-2xl font-bold text-navy-900 mt-1">${node.financialValue || "—"}M</p>
-        <p className="text-[10px] text-gray-400 mt-0.5">Direct contract value</p>
+        <p className="text-[10px] text-gray-500 uppercase font-semibold">Value</p>
+        <p className="text-2xl font-bold text-navy-900 mt-1">{financialValue > 0 ? `$${financialValue}` : "—"}</p>
+        <p className="text-[10px] text-gray-400 mt-0.5">{node.type === "upload" ? "File size (bytes)" : "Financial impact"}</p>
       </div>
       <div className="p-3 bg-orange-50 rounded-lg border border-orange-100">
-        <p className="text-[10px] font-semibold text-orange-700 uppercase mb-1">Downstream Exposure</p>
-        <p className="text-lg font-bold text-orange-600">${((node.financialValue || 0) * 2.5).toFixed(1)}M</p>
-        <p className="text-[10px] text-orange-500">Estimated total exposure including dependencies</p>
-      </div>
-      <div className="space-y-1.5">
-        <p className="text-[10px] font-semibold text-gray-500 uppercase">Value Distribution</p>
-        {[{ label: "Direct Contract", pct: 40 }, { label: "Amendments", pct: 25 }, { label: "SOWs", pct: 20 }, { label: "Obligations", pct: 15 }].map((item) => (
-          <div key={item.label} className="flex items-center gap-2 text-xs">
-            <span className="text-gray-600 w-24">{item.label}</span>
-            <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden"><div className="h-full rounded-full bg-navy-500" style={{ width: `${item.pct}%` }} /></div>
-            <span className="text-gray-500 w-8 text-right">{item.pct}%</span>
-          </div>
-        ))}
+        <p className="text-[10px] font-semibold text-orange-700 uppercase mb-1">Entity Details</p>
+        <p className="text-xs text-orange-600">{node.type === "finding" ? `${(node.metadata?.clause_type as string) || "Unknown"} clause` : `${node.type} entity`}</p>
       </div>
     </div>
   );
@@ -217,14 +214,14 @@ function AiTab({ node }: { node: GraphNodeData }) {
     <div className="space-y-3">
       <div className="p-3 bg-purple-50 rounded-lg border border-purple-100">
         <div className="flex items-center gap-1.5 mb-1.5"><Share2 className="w-3.5 h-3.5 text-purple-600" /><span className="text-[10px] font-semibold text-purple-700 uppercase">AI Relationship Analysis</span></div>
-        <p className="text-[11px] text-gray-700 leading-relaxed">This {node.type.replace(/_/g, " ")} has {node.depth > 0 ? `${node.depth} level(s) of` : "no"} downstream dependencies. {node.riskScore >= 7 ? "HIGH RISK: Immediate review recommended." : "Risk level is within acceptable thresholds."}</p>
+        <p className="text-[11px] text-gray-700 leading-relaxed">This {node.type.replace(/_/g, " ")} has status {String(node.metadata?.status || "unknown")}. {(node.metadata?.severity as string) === "critical" ? "HIGH RISK: Immediate review recommended." : "Risk level is within acceptable thresholds."}</p>
       </div>
       <div className="space-y-2">
         {[
-          { title: "Impact Analysis", desc: `Termination of this node would affect ${node.depth + 2} downstream agreements.` },
-          { title: "Dependency Health", desc: `${node.depth > 0 ? "3 upstream dependencies are healthy." : "No upstream dependencies detected."}` },
-          { title: "Renewal Forecast", desc: `Next renewal event expected within ${node.riskScore * 10 + 30} days.` },
-          { title: "Compliance Status", desc: node.type === "dpa" ? "DPA compliance requires annual review." : "Standard compliance requirements met." },
+          { title: "Impact Analysis", desc: `This ${node.type} entity has findings and redlines.` },
+          { title: "Dependency Health", desc: `${node.metadata?.status || "Unknown"} status.` },
+          { title: "Entity Info", desc: `Type: ${node.type}. ${node.metadata?.clause_type ? "Clause: " + String(node.metadata.clause_type) : ""}` },
+          { title: "Compliance Status", desc: node.type === "finding" ? "Finding requires review." : "Standard compliance." },
         ].map((item) => (
           <div key={item.title} className="p-2.5 bg-white border border-gray-100 rounded-lg">
             <p className="text-[10px] font-semibold text-navy-700 uppercase mb-0.5">{item.title}</p>

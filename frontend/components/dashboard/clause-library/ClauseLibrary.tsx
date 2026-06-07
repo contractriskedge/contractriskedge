@@ -10,10 +10,14 @@ import { PlaybookPanel } from "./PlaybookPanel";
 import { ClauseDetailDrawer } from "./ClauseDetailDrawer";
 import { CreateClauseDialog } from "./CreateClauseDialog";
 import { BenchmarkChart } from "./BenchmarkChart";
+import { ClauseFilterBar, EMPTY_FILTERS, countBy } from "./ClauseFilterBar";
+import type { ClauseFilters } from "./ClauseFilterBar";
 import { CLAUSE_CATEGORIES } from "./types";
 import type { ClauseRecord } from "./types";
 import type { ClauseResponse, BenchmarkResponse } from "@/services/api/clauseIntelligence";
 import { useClauses, useClauseKpis, useBenchmarks, useUpdateClause, useCreateClause } from "@/services/hooks/useClauseIntelligence";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { useFavorites } from "@/hooks/useFavorites";
 
 /** Map backend snake_case → frontend camelCase ClauseRecord */
 function toClauseRecord(c: ClauseResponse): ClauseRecord {
@@ -62,15 +66,28 @@ export function ClauseLibrary() {
   const [selectedClause, setSelectedClause] = useState<ClauseRecord | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [filters, setFilters] = useState<ClauseFilters>({ ...EMPTY_FILTERS });
 
   // ── Live API Queries ──────────────────────────────────────────
-  const { data: clausesData, isLoading, isError, refetch } = useClauses({
-    category: selectedCategory ?? undefined,
-    search: searchQuery || undefined,
-  });
+  // Always fetch the full clause list — we need the unfiltered set so the
+  // sidebar category counts and the filter-bar option counts stay correct
+  // as the user changes selections. All filtering (category, search, risk,
+  // jurisdiction, status, etc.) happens client-side below.
+  const { data: clausesData, isLoading, isError, refetch } = useClauses();
   const { data: kpisData, isLoading: kpisLoading } = useClauseKpis();
   const { data: benchmarksData, isLoading: benchmarksLoading } = useBenchmarks();
-  const updateMutation = useUpdateClause(selectedClause?.id ?? "");
+  // `updateMutation` is used both for the currently-open detail drawer
+  // (where we want to fall back to `selectedClause?.id`) and for the
+  // table-level star toggle (where the id comes from the row). We pass the
+  // id explicitly in each mutate() call so the hook always knows which
+  // clause to update.
+  const updateMutation = useUpdateClause();
+
+  // Local per-user favorites store — used for instant UI feedback in the
+  // sidebar filter and the row star. Mirrored to the backend so the
+  // favorite follows the user across devices.
+  const { user } = useAuth();
+  const favorites = useFavorites(user?.tenant_id, user?.sub);
   const createMutation = useCreateClause();
 
   // ── Derived Data ──────────────────────────────────────────────
@@ -79,11 +96,103 @@ export function ClauseLibrary() {
     [clausesData],
   );
 
-  const filteredClauses = useMemo(() => {
+  // Apply sidebar + header filters first, so the filter bar's options
+  // are computed against the same data set the user is browsing.
+  const baseFilteredClauses = useMemo(() => {
     let list = clauses;
+    if (selectedCategory) {
+      // Match by exact id, or by a slug-normalized form of the displayed
+      // category name. This way clicking "Indemnification" in the sidebar
+      // matches clauses with category "indemnification" or "Indemnification".
+      const norm = (s: string) =>
+        s.toLowerCase().trim().replace(/[\s-]+/g, "_");
+      const target = norm(selectedCategory);
+      list = list.filter((c) => norm(c.category) === target || norm(c.name) === target);
+    }
     if (showFavorites) list = list.filter((c) => c.isFavorite);
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(
+        (c) =>
+          c.name.toLowerCase().includes(q) ||
+          c.category.toLowerCase().includes(q) ||
+          c.tags.some((t) => t.toLowerCase().includes(q)),
+      );
+    }
     return list;
-  }, [clauses, showFavorites]);
+  }, [clauses, showFavorites, searchQuery, selectedCategory]);
+
+  // Apply the ClauseFilterBar (risk / jurisdiction / status / template /
+  // mandatory / custom) on top of the base set.
+  const filteredClauses = useMemo(() => {
+    let list = baseFilteredClauses;
+    if (filters.clauseType) {
+      const q = filters.clauseType.toLowerCase();
+      list = list.filter((c) => c.category.toLowerCase().includes(q) || c.name.toLowerCase().includes(q));
+    }
+    if (filters.risk) list = list.filter((c) => c.riskLevel === filters.risk);
+    if (filters.jurisdiction) list = list.filter((c) => c.jurisdiction === filters.jurisdiction);
+    if (filters.status) list = list.filter((c) => c.approvalStatus === filters.status);
+    if (filters.template) {
+      list = list.filter((c) => c.contractTypes.includes(filters.template));
+    }
+    if (filters.mandatory !== "all") {
+      const wantYes = filters.mandatory === "yes";
+      list = list.filter((c) => {
+        // Treat a clause as mandatory when governance notes call it so,
+        // when its category is on the standard mandatory list, or when the
+        // risk score is critical. This is a heuristic — the backend schema
+        // doesn't yet expose a `mandatory` boolean.
+        const isMandatory =
+          /mandatory/i.test(c.governanceNotes || "") ||
+          /mandatory/i.test(c.aiExplanation || "") ||
+          c.riskLevel === "critical";
+        return wantYes ? isMandatory : !isMandatory;
+      });
+    }
+    if (filters.custom) {
+      const q = filters.custom.toLowerCase();
+      list = list.filter((c) => c.tags.some((t) => t.toLowerCase().includes(q)));
+    }
+    return list;
+  }, [baseFilteredClauses, filters]);
+
+  // ── Option Counts (over the base set so each dropdown reflects the
+  //    currently visible scope minus its own filter).
+  const riskOptions = useMemo(() => {
+    const map = countBy(baseFilteredClauses.filter((c) => !filters.risk || c.riskLevel === filters.risk), "riskLevel");
+    return Array.from(map.entries()).map(([value, count]) => ({ value, label: value.charAt(0).toUpperCase() + value.slice(1), count }));
+  }, [baseFilteredClauses, filters.risk]);
+
+  const jurisdictionOptions = useMemo(() => {
+    const map = countBy(
+      baseFilteredClauses.filter((c) => !filters.jurisdiction || c.jurisdiction === filters.jurisdiction),
+      "jurisdiction",
+    );
+    return Array.from(map.entries())
+      .map(([value, count]) => ({ value, label: value, count }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [baseFilteredClauses, filters.jurisdiction]);
+
+  const statusOptions = useMemo(() => {
+    const map = countBy(
+      baseFilteredClauses.filter((c) => !filters.status || c.approvalStatus === filters.status),
+      "approvalStatus",
+    );
+    return Array.from(map.entries()).map(([value, count]) => ({ value, label: value.replace(/_/g, " "), count }));
+  }, [baseFilteredClauses, filters.status]);
+
+  const templateOptions = useMemo(() => {
+    // Templates are the contract-type facets; aggregate across records.
+    const counts = new Map<string, number>();
+    for (const c of baseFilteredClauses) {
+      if (filters.template && !c.contractTypes.includes(filters.template)) continue;
+      for (const t of c.contractTypes) counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([value, count]) => ({ value, label: value, count }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [baseFilteredClauses, filters.template]);
 
   const benchmarkData = useMemo(
     () => (benchmarksData?.data ?? []).map(toBenchmarkData),
@@ -91,14 +200,30 @@ export function ClauseLibrary() {
   );
 
   // ── Dynamic Category Counts from actual clause data ──────────
+  // Counts derive from the FULL clause list (not the filtered one) so the
+  // sidebar keeps showing the true number of clauses in each category even
+  // after the user picks one. Match category names by id, by a normalized
+  // slug, and against the clause name as a final fallback — this way
+  // backend categories like "liability_cap" still surface under
+  // "Liability & Caps" (id "limitation_of_liability") etc.
   const categoriesWithCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
+    const norm = (s: string) =>
+      s.toLowerCase().trim().replace(/[\s-]+/g, "_");
+    const counts = new Map<string, number>();
     for (const c of clauses) {
-      counts[c.category] = (counts[c.category] || 0) + 1;
+      const cat = norm(c.category || "");
+      const name = norm(c.name || "");
+      for (const sidebar of CLAUSE_CATEGORIES) {
+        const id = norm(sidebar.id);
+        if (cat === id || name.includes(id) || cat.includes(id)) {
+          counts.set(sidebar.id, (counts.get(sidebar.id) ?? 0) + 1);
+          break;
+        }
+      }
     }
-    return CLAUSE_CATEGORIES.map(cat => ({
+    return CLAUSE_CATEGORIES.map((cat) => ({
       ...cat,
-      count: counts[cat.id] || 0,
+      count: counts.get(cat.id) ?? 0,
     }));
   }, [clauses]);
 
@@ -124,10 +249,13 @@ export function ClauseLibrary() {
   // ── Favorite Toggle ───────────────────────────────────────────
   const toggleFavorite = useCallback((id: string) => {
     const clause = clauses.find((c) => c.id === id);
-    if (clause) {
-      updateMutation.mutate({ is_favorite: !clause.isFavorite });
-    }
-  }, [clauses, updateMutation]);
+    if (!clause) return;
+    // Persist in both the local favorites store (per-user, per-tenant,
+    // localStorage) and the backend (so it follows the user across
+    // devices). The backend update needs an id; we pass it explicitly.
+    favorites.toggle(id);
+    updateMutation.mutate({ id, body: { is_favorite: !clause.isFavorite } });
+  }, [clauses, updateMutation, favorites]);
 
   // ── Loading / Error States ────────────────────────────────────
   if (isLoading) {
@@ -164,8 +292,8 @@ export function ClauseLibrary() {
             <BookOpen className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-navy-900">Clause Library & Playbooks</h1>
-            <p className="text-xs text-gray-500 mt-0.5">Enterprise legal intelligence and negotiation playbook system</p>
+            <h1 className="text-xl font-bold text-navy-900">Clause Intelligence Center</h1>
+            <p className="text-xs text-gray-500 mt-0.5">Clause library, playbooks, and negotiation benchmarks</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -192,6 +320,20 @@ export function ClauseLibrary() {
 
       {/* KPI Row */}
       <ClauseKpiCards metrics={clauseKpis} />
+
+      {/* Secondary filter strip — Clause Type / Risk / Jurisdiction /
+          Status / Template / Mandatory / Custom */}
+      <ClauseFilterBar
+        filters={filters}
+        onChange={setFilters}
+        onReset={() => setFilters({ ...EMPTY_FILTERS })}
+        riskOptions={riskOptions}
+        jurisdictionOptions={jurisdictionOptions}
+        statusOptions={statusOptions}
+        templateOptions={templateOptions}
+        totalShown={filteredClauses.length}
+        totalAll={clauses.length}
+      />
 
       {/* Main Content: 3-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">

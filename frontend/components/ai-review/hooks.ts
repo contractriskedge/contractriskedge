@@ -125,6 +125,7 @@ export function mapApiReviewToSummary(raw: ApiRecord): ReviewSummary {
     updated_at: String(raw.updated_at ?? ""),
     completed_at: raw.completed_at ? String(raw.completed_at) : null,
     age_hours: 0,
+    computed_status: raw.computed_status ? String(raw.computed_status) : undefined,
   };
 }
 
@@ -185,7 +186,7 @@ function isNotFoundError(err: unknown): boolean {
 
 /** Backend sub-routes not yet in review/router.py — skip fetch to avoid 404 console noise. */
 export const REVIEW_SUBRESOURCE_API = {
-  policyViolations: false,
+  policyViolations: true,
   missingClauses: false,
   recommendations: true,
   workflow: true,
@@ -405,19 +406,14 @@ function mapApiRecommendation(raw: ApiRecord): Recommendation {
   };
 }
 
-/** Fetch workflow state for a review. */
+/** Fetch workflow state for a review. Uses real API only — no mock fallback. */
 export function useWorkflow(reviewId: string) {
   return useQuery({
     queryKey: platformKeys.workflow(reviewId),
-    queryFn: () =>
-      fetchReviewSubresource(
-        "workflow",
-        () => api.get<WorkflowState>(`/reviews/${reviewId}/workflow`),
-        MOCK_WORKFLOW_STATES[reviewId] || MOCK_WORKFLOW_STATES[Object.keys(MOCK_WORKFLOW_STATES)[0]!]!,
-      ),
+    queryFn: () => api.get<WorkflowState>(`/reviews/${reviewId}/workflow`),
     enabled: !!reviewId,
     staleTime: 15_000,
-    retry: optionalSubresourceRetry,
+    retry: false,
   });
 }
 
@@ -762,6 +758,48 @@ export function useVersions(reviewId: string) {
       } catch (err) {
         if (!USE_MOCK_DATA) throw err;
         return MOCK_VERSIONS;
+      }
+    },
+    enabled: !!reviewId,
+    staleTime: 15_000,
+  });
+}
+
+/** Fetch status transition history for a review. */
+export function useStageHistory(reviewId: string) {
+  return useQuery({
+    queryKey: [...platformKeys.all, "stage-history", reviewId] as const,
+    queryFn: async () => {
+      try {
+        return await api.get<{
+          history: Array<{
+            from_status: string;
+            to_status: string;
+            changed_by: string;
+            reason: string | null;
+            created_at: string;
+          }>;
+        }>(`/reviews/${reviewId}/history`);
+      } catch (err) {
+        if (isNotFoundError(err)) return { history: [] };
+        return { history: [] };
+      }
+    },
+    enabled: !!reviewId,
+    staleTime: 15_000,
+  });
+}
+
+/** Fetch review-level comments (used for activity density). */
+export function useActivityComments(reviewId: string) {
+  return useQuery({
+    queryKey: [...platformKeys.all, "activity-comments", reviewId] as const,
+    queryFn: async () => {
+      try {
+        return await api.get<{ comments: ApiRecord[] }>(`/reviews/${reviewId}/comments`);
+      } catch (err) {
+        if (isNotFoundError(err)) return { comments: [] };
+        return { comments: [] };
       }
     },
     enabled: !!reviewId,

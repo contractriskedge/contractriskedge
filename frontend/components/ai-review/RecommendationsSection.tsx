@@ -19,6 +19,9 @@ import {
 } from "lucide-react";
 import { useReviewContext } from "./ReviewContext";
 import { useApplyRecommendation, useDismissRecommendation } from "./hooks";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/services/api/client";
+import type { Recommendation } from "./types";
 
 const TYPE_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; label: string }> = {
   remediation: { icon: Lightbulb, color: "text-amber-600", bg: "bg-amber-100 dark:bg-amber-900/20", label: "Remediation" },
@@ -29,7 +32,37 @@ const TYPE_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: 
 
 export function RecommendationsSection() {
   const ctx = useReviewContext();
-  const { recommendations, selectedReviewId } = ctx;
+  const { recommendations, findings, selectedReviewId } = ctx;
+  const queryClient = useQueryClient();
+
+  const generateRedlineMutation = useMutation({
+    mutationFn: (rec: Recommendation) => {
+      const finding = findings?.find(f => f.finding_id === rec.finding_id);
+      const categoryMap: Record<string, string> = {
+        liability: "liability_indemnity", indemnification: "liability_indemnity",
+        data_protection: "data_protection", confidentiality: "confidentiality",
+        ip: "intellectual_property", intellectual_property: "intellectual_property",
+        term: "term_termination", sla: "sla_support",
+        assignment: "assignment_change_control",
+      };
+      const mitMap: Record<string, string> = {
+        liability: "adding_liability_cap", indemnification: "narrowing_indemnity_scope",
+        data_protection: "adding_dpa", confidentiality: "broadening_confidentiality",
+        ip: "restricting_derivative_works", intellectual_property: "restricting_derivative_works",
+        term: "extending_notice_period", sla: "adding_sla_guarantees",
+        assignment: "adding_change_of_control",
+      };
+      const ct = (finding?.clause_type || "").toLowerCase();
+      return api.post(`/reviews/${selectedReviewId}/generate-mitigation-redline`, {
+        mitigation_type: mitMap[ct] || "adding_liability_cap",
+        clause_category: categoryMap[ct] || "liability_indemnity",
+        finding_ids: rec.finding_id ? [rec.finding_id] : [],
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["review-redlines", selectedReviewId] });
+    },
+  });
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState("");
@@ -272,8 +305,35 @@ export function RecommendationsSection() {
                         className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200 transition-colors">
                         <XCircle className="w-2.5 h-2.5" /> Dismiss
                       </button>
-                      <button className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 transition-colors">
-                        <FileText className="w-2.5 h-2.5" /> Generate Redline
+                      {/* Linked Finding */}
+                      {rec.finding_id && (() => {
+                        const linkedFinding = findings?.find(f => f.finding_id === rec.finding_id);
+                        return (
+                          <div className="flex items-center gap-1.5 p-1.5 rounded bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-200 dark:border-indigo-800">
+                            <ExternalLink className="w-2.5 h-2.5 text-indigo-500 flex-shrink-0" />
+                            <span className="text-[8px] text-indigo-700 dark:text-indigo-300">
+                              Finding: <strong>{linkedFinding?.title || rec.finding_id.slice(0, 8)}</strong>
+                            </span>
+                            {linkedFinding && (
+                              <span className={`ml-auto text-[7px] font-medium px-1.5 py-0.5 rounded-full ${
+                                linkedFinding.severity === 'critical' ? 'bg-red-100 text-red-700' :
+                                linkedFinding.severity === 'high' ? 'bg-orange-100 text-orange-700' :
+                                'bg-amber-100 text-amber-700'
+                              }`}>{linkedFinding.severity}</span>
+                            )}
+                            <button onClick={() => ctx.setActiveSection('findings')}
+                              className="ml-1 px-1.5 py-0.5 text-[7px] font-medium rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200">
+                              View
+                            </button>
+                          </div>
+                        );
+                      })()}
+                      {/* Generate Redline */}
+                      <button onClick={() => generateRedlineMutation.mutate(rec)}
+                        disabled={generateRedlineMutation.isPending}
+                        className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 transition-colors disabled:opacity-50">
+                        {generateRedlineMutation.isPending ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <FileText className="w-2.5 h-2.5" />}
+                        {generateRedlineMutation.isPending ? "Generating..." : "Generate Redline"}
                       </button>
                     </div>
                   )}

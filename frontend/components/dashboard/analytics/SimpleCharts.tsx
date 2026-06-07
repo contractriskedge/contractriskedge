@@ -93,7 +93,7 @@ export function SimpleLineChart({
   }, [xKey]);
 
   return (
-    <ResponsiveContainer width="100%" height="100%">
+    <ResponsiveContainer width="100%" height={190}>
       <LineChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
         <XAxis dataKey={xKey} tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
@@ -138,7 +138,7 @@ export function SimplePieChart({
 
   return (
     <div className="flex items-center h-full gap-2">
-      <ResponsiveContainer width="60%" height="100%">
+      <ResponsiveContainer width="60%" height={190}>
         <PieChart>
           <Pie
             data={data}
@@ -202,7 +202,7 @@ export function SimpleBarChart({
   if (horizontal) {
     const sorted = [...data].sort((a, b) => (Number(b[barKey]) || 0) - (Number(a[barKey]) || 0));
     return (
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height={190}>
         <BarChart data={sorted} layout="vertical" margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" horizontal={false} />
           <XAxis type="number" tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
@@ -223,7 +223,7 @@ export function SimpleBarChart({
   }
 
   return (
-    <ResponsiveContainer width="100%" height="100%">
+    <ResponsiveContainer width="100%" height={190}>
       <BarChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
         <XAxis dataKey={xKey} tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />

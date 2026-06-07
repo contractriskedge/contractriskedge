@@ -71,7 +71,7 @@ const navGroups: NavGroup[] = [
     items: [
       { id: "ingestion", label: "Ingestion", icon: Upload, permission: "contracts:write" },
       { id: "contracts", label: "Contracts", icon: FileText, permission: "contracts:read" },
-      { id: "clause-library", label: "Clause Library", icon: Library, permission: "contracts:read" },
+      { id: "clause-library", label: "Clause Intelligence Center", icon: Library, permission: "contracts:read" },
       { id: "obligations", label: "Obligations", icon: ClipboardCheck, permission: "contracts:read" },
     ],
   },

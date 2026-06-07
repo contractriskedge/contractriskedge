@@ -51,7 +51,7 @@ export function ObligationAiInsights({ insights }: { insights: ObligationInsight
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2"><Brain className="w-4.5 h-4.5 text-navy-700" /><h2 className="text-sm font-semibold text-navy-900">AI Operational Intelligence</h2></div>
+        <div className="flex items-center gap-2"><Brain className="w-4.5 h-4.5 text-navy-700" /><h2 className="text-sm font-semibold text-navy-900">Compliance Alerts</h2></div>
         <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{insights.length} insights</span>
       </div>
       <div className="flex items-center gap-3 px-3 py-2 bg-gradient-to-r from-navy-50 to-indigo-50 rounded-lg border border-navy-100">

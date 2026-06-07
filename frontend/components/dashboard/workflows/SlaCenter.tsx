@@ -41,7 +41,7 @@ export function SlaBreachChart({ data }: { data: SlaMetric[] }) {
   return (
     <SectionCard title="SLA Performance by Stage" subtitle="Target vs actual hours with breach rate">
       <div className="h-56">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <BarChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
             <XAxis dataKey="name" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} angle={-20} textAnchor="end" height={40} />
@@ -67,7 +67,7 @@ export function SlaBreachRateChart({ data }: { data: SlaMetric[] }) {
   return (
     <SectionCard title="SLA Breach Rate by Stage (%)" subtitle="Percentage of workflows breaching SLA">
       <div className="h-56">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <BarChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
             <XAxis dataKey="name" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} angle={-20} textAnchor="end" height={40} />

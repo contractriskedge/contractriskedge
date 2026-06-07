@@ -25,7 +25,7 @@ import { BenchmarkPage } from "./BenchmarkPage";
 import { SettingsPage } from "./SettingsPage";
 import { RelationshipGraph } from "./RelationshipGraph";
 import { PlaceholderView } from "./shared/PlaceholderView";
-import { PolicyCenter } from "@/components/policy/PolicyCenter";
+import { PolicyEngine } from "@/components/policy/PolicyEngine";
 import { ExplainabilityPanel } from "@/components/explainability/ExplainabilityPanel";
 import { ClauseIntelligenceView } from "@/components/clause-intelligence/ClauseIntelligenceView";
 import { ExecutiveDashboardView } from "@/components/executive/ExecutiveDashboard";
@@ -48,6 +48,9 @@ const AiOperationsDashboard = lazy(() =>
 );
 const WorkflowIntelligenceDashboard = lazy(() =>
   import("./workflow-intelligence/WorkflowIntelligenceDashboard").then((m) => ({ default: m.WorkflowIntelligenceDashboard }))
+);
+const ObligationCenter = lazy(() =>
+  import("./obligations/ObligationCenter").then((m) => ({ default: m.ObligationCenter }))
 );
 
 function DashboardSkeleton() {
@@ -132,10 +135,6 @@ export function DashboardLayout() {
         ) : (
           <ProtectedRoute permission="contracts:read">
             <div className="max-w-5xl mx-auto">
-              <div className="mb-4">
-                <h2 className="text-lg font-bold text-navy-900">Review Queue</h2>
-                <p className="text-sm text-gray-500 mt-1">Manage and process contract reviews</p>
-              </div>
               <ReviewQueue
                 onReviewSelect={(reviewId) => setSelectedReviewId(reviewId)}
               />
@@ -216,12 +215,13 @@ export function DashboardLayout() {
           status="Coming Soon"
         />;
       case "obligations":
-        return <PlaceholderView
-          title="Obligations Management"
-          description="Track and manage contractual obligations across all active contracts."
-          icon="check"
-          status="Coming Soon"
-        />;
+        return (
+          <ProtectedRoute permission="contracts:read">
+            <Suspense fallback={<DashboardSkeleton />}>
+              <ObligationCenter />
+            </Suspense>
+          </ProtectedRoute>
+        );
       case "negotiation":
         return <PlaceholderView
           title="Negotiation Workspace"
@@ -245,7 +245,7 @@ export function DashboardLayout() {
       case "policy":
         return (
           <ProtectedRoute permission={["contracts:read", "ai:view"]} requireAll={false}>
-            <PolicyCenter />
+            <PolicyEngine />
           </ProtectedRoute>
         );
       case "clause-intelligence":

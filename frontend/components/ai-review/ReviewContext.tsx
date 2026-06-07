@@ -99,6 +99,8 @@ interface ReviewContextProviderProps {
   children: React.ReactNode;
   preselectedReviewId?: string;
   preselectedContractId?: string;
+  /** Optional initial section to land on (e.g. "redline" from a deep link). */
+  initialSection?: ReviewSection;
 }
 
 /** If the URL has a typo'd UUID, pick the sole list entry with the same prefix. */
@@ -109,13 +111,15 @@ function resolveReviewIdFromList(requestedId: string, reviews: ReviewSummary[]):
   return matches.length === 1 ? matches[0].review_id : null;
 }
 
-export function ReviewContextProvider({ children, preselectedReviewId, preselectedContractId }: ReviewContextProviderProps) {
+export function ReviewContextProvider({ children, preselectedReviewId, preselectedContractId, initialSection }: ReviewContextProviderProps) {
   const router = useRouter();
   const [selectedReviewId, setSelectedReviewId] = useState<string | null>(
     preselectedReviewId || preselectedContractId || null,
   );
   const [reviewError, setReviewError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<ReviewSection>("summary");
+  // Land on the requested section (e.g. "redline") if provided, otherwise
+  // default to the summary view.
+  const [activeSection, setActiveSection] = useState<ReviewSection>(initialSection ?? "summary");
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
   const [expandedFindingId, setExpandedFindingId] = useState<string | null>(null);
   const [showLeftPanel, setShowLeftPanel] = useState(true);

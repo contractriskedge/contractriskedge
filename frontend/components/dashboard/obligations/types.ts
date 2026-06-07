@@ -1,9 +1,27 @@
 // ── Enterprise Obligation Management Types ──────────────────────────────────
 
 export type ObligationType = "payment" | "deliverable" | "milestone" | "sla" | "renewal" | "compliance" | "reporting" | "insurance";
-export type ObligationStatus = "pending" | "in_progress" | "completed" | "overdue" | "waived" | "escalated";
+export type ObligationStatus = "draft" | "pending" | "in_progress" | "active" | "completed" | "overdue" | "cancelled" | "archived" | "waived" | "escalated";
 export type RiskLevel = "critical" | "high" | "medium" | "low" | "info";
 export type SlaStatus = "on_track" | "at_risk" | "breached" | "not_applicable";
+
+export interface AuditLogEntry {
+  id: string;
+  obligation_id: string;
+  action: string;
+  actor: string | null;
+  changes: Record<string, unknown> | null;
+  comment: string | null;
+  created_at: string;
+}
+
+export interface ComplianceAction {
+  status: string;
+  dueDate: string;
+  owner: string;
+  daysRemaining: number;
+  actionRequired: string;
+}
 
 export interface ObligationKpi {
   id: string; label: string; value: string; trend: number;
@@ -29,6 +47,12 @@ export interface ObligationRecord {
   slaStatus: SlaStatus;
   slaRemaining: number;
   financialImpact: number;
+  sourceContract?: string;
+  sourceClause?: string;
+  extractedByAi?: boolean;
+  contractOwner?: string;
+  daysRemaining?: number;
+  actionRequired?: string;
   currency: string;
   escalationLevel: number;
   aiRiskPrediction: number;
@@ -43,6 +67,7 @@ export interface ObligationRecord {
   geography: string;
   createdAt: string;
   lastModified: string;
+  isFavorite?: boolean;
 }
 
 export interface ObligationInsight {
@@ -184,11 +209,17 @@ export const OBLIGATION_TYPES: { id: ObligationType; label: string; icon: string
 export const RISK_BG = { critical: "bg-red-500", high: "bg-orange-500", medium: "bg-yellow-500", low: "bg-green-500", info: "bg-blue-500" };
 export const RISK_TEXT = { critical: "text-red-700", high: "text-orange-700", medium: "text-yellow-700", low: "text-green-700", info: "text-blue-700" };
 export const RISK_BG_LIGHT = { critical: "bg-red-50", high: "bg-orange-50", medium: "bg-yellow-50", low: "bg-green-50", info: "bg-blue-50" };
-export const STATUS_CONFIG: Record<ObligationStatus, { color: string; bg: string; label: string }> = {
+export const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string }> = {
+  draft: { color: "text-gray-500", bg: "bg-gray-50", label: "Draft" },
   pending: { color: "text-yellow-700", bg: "bg-yellow-50", label: "Pending" },
   in_progress: { color: "text-blue-700", bg: "bg-blue-50", label: "In Progress" },
+  active: { color: "text-blue-700", bg: "bg-blue-50", label: "Active" },
   completed: { color: "text-green-700", bg: "bg-green-50", label: "Completed" },
   overdue: { color: "text-red-700", bg: "bg-red-50", label: "Overdue" },
+  cancelled: { color: "text-gray-600", bg: "bg-gray-100", label: "Cancelled" },
+  archived: { color: "text-gray-500", bg: "bg-gray-50", label: "Archived" },
   waived: { color: "text-gray-600", bg: "bg-gray-100", label: "Waived" },
   escalated: { color: "text-purple-700", bg: "bg-purple-50", label: "Escalated" },
+  open: { color: "text-blue-700", bg: "bg-blue-50", label: "Open" },
+  closed: { color: "text-gray-600", bg: "bg-gray-100", label: "Closed" },
 };

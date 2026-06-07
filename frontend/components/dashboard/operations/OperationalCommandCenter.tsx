@@ -28,8 +28,12 @@ import {
   Ban,
   Activity,
   Eye,
+  BarChart3,
+  Gauge,
+  Shield,
 } from "lucide-react";
 import { useReviewDashboard } from "@/services/hooks";
+import { useReviewerWorkload, useSystemHealth, useReviewAging } from "@/services/hooks/useAnalytics";
 
 // ── KPI Card ──
 
@@ -158,6 +162,11 @@ function ActivityItem({ action, detail, time, type }: ActivityItemProps) {
 export function OperationalCommandCenter() {
   const { data: dashboard, isLoading, error, refetch } = useReviewDashboard();
 
+  // ── Additional analytics hooks (MUST be before early returns) ──
+  const { data: reviewerWorkload } = useReviewerWorkload();
+  const { data: systemHealth } = useSystemHealth();
+  const { data: reviewAging } = useReviewAging();
+
   // ── Loading State ──
   if (isLoading && !dashboard) {
     return (
@@ -214,9 +223,21 @@ export function OperationalCommandCenter() {
   const overdueCount = dashboard?.stats?.overdue_count ?? 0;
   const completed7d = dashboard?.stats?.completed_7d ?? 0;
   const avgReviewAgeHours = dashboard?.stats?.avg_review_age_hours ?? 0;
+  const slaBreaches = dashboard?.stats?.sla_breach_count ?? 0;
   const reviewsByStatus = dashboard?.reviews_by_status ?? ({} as Record<string, number>);
   const recentActivity = dashboard?.recent_activity ?? [];
   const inReviewCount = reviewsByStatus["in_review"] ?? 0;
+
+  // ── Reviewer workload data ──
+  const reviewers = reviewerWorkload?.reviewers ?? [];
+  const totalActiveReviews = reviewers.reduce((sum, r) => sum + r.active_count, 0);
+  const overloadedReviewers = reviewers.filter((r) => r.overload_probability > 0.7).length;
+  const totalBacklogHours = reviewers.reduce((sum, r) => sum + r.predicted_backlog_hours, 0);
+
+  // ── System health data ──
+  const aiSuccessRate = systemHealth?.ai_success_rate ?? 0;
+  const uploadSuccessRate = systemHealth?.upload_success_rate ?? 0;
+  const activeAiRuns = systemHealth?.active_ai_runs ?? 0;
 
   return (
     <div className="p-6 space-y-6">
@@ -382,6 +403,110 @@ export function OperationalCommandCenter() {
                 </p>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Reviewer Capacity Panel ── */}
+      {reviewers.length > 0 && (
+        <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+          <SectionHeader title="Reviewer Capacity" icon={<Users className="w-4 h-4 text-navy-500" />} />
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            <div className="text-center p-3 rounded-lg bg-gray-50 dark:bg-navy-700">
+              <p className="text-lg font-bold text-navy-900 dark:text-white">{reviewers.length}</p>
+              <p className="text-[10px] text-gray-500">Total Reviewers</p>
+            </div>
+            <div className="text-center p-3 rounded-lg bg-gray-50 dark:bg-navy-700">
+              <p className="text-lg font-bold text-navy-900 dark:text-white">{totalActiveReviews}</p>
+              <p className="text-[10px] text-gray-500">Active Reviews</p>
+            </div>
+            <div className="text-center p-3 rounded-lg bg-red-50 dark:bg-red-900/10">
+              <p className="text-lg font-bold text-red-600">{overloadedReviewers}</p>
+              <p className="text-[10px] text-red-500">Overloaded</p>
+            </div>
+            <div className="text-center p-3 rounded-lg bg-amber-50 dark:bg-amber-900/10">
+              <p className="text-lg font-bold text-amber-600">{totalBacklogHours.toFixed(0)}h</p>
+              <p className="text-[10px] text-amber-500">Backlog Hours</p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-navy-700">
+                  <th className="pb-2 font-medium">Reviewer</th>
+                  <th className="pb-2 font-medium">Active</th>
+                  <th className="pb-2 font-medium">Completed</th>
+                  <th className="pb-2 font-medium">Overload</th>
+                  <th className="pb-2 font-medium">Avg Time</th>
+                  <th className="pb-2 font-medium">Backlog</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reviewers.slice(0, 8).map((r) => (
+                  <tr key={r.reviewer} className="border-b border-gray-50 dark:border-navy-700">
+                    <td className="py-2 font-medium text-navy-900 dark:text-white">{r.reviewer}</td>
+                    <td className="py-2 text-gray-600">{r.active_count}</td>
+                    <td className="py-2 text-gray-600">{r.completed_count}</td>
+                    <td className="py-2">
+                      <span className={`font-medium ${
+                        r.overload_probability > 0.7 ? "text-red-600" : r.overload_probability > 0.4 ? "text-amber-600" : "text-green-600"
+                      }`}>
+                        {Math.round(r.overload_probability * 100)}%
+                      </span>
+                    </td>
+                    <td className="py-2 text-gray-600">{r.avg_completion_hours?.toFixed(1) ?? "—"}h</td>
+                    <td className="py-2 text-gray-600">{r.predicted_backlog_hours?.toFixed(1) ?? "—"}h</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── System Health & SLA Monitoring Panel ── */}
+      {systemHealth && (
+        <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+          <SectionHeader title="System Health & SLA Monitoring" icon={<Gauge className="w-4 h-4 text-navy-500" />} />
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+            <div className="text-center p-3 rounded-lg bg-gray-50 dark:bg-navy-700">
+              <p className={`text-lg font-bold ${
+                systemHealth.status === "healthy" ? "text-green-600" : systemHealth.status === "degraded" ? "text-amber-600" : "text-red-600"
+              }`}>
+                {systemHealth.status}
+              </p>
+              <p className="text-[10px] text-gray-500">System Status</p>
+            </div>
+            <div className="text-center p-3 rounded-lg bg-gray-50 dark:bg-navy-700">
+              <p className="text-lg font-bold text-navy-900 dark:text-white">{Math.round(uploadSuccessRate)}%</p>
+              <p className="text-[10px] text-gray-500">Upload Success</p>
+            </div>
+            <div className="text-center p-3 rounded-lg bg-gray-50 dark:bg-navy-700">
+              <p className="text-lg font-bold text-navy-900 dark:text-white">{Math.round(aiSuccessRate)}%</p>
+              <p className="text-[10px] text-gray-500">AI Success Rate</p>
+            </div>
+            <div className="text-center p-3 rounded-lg bg-gray-50 dark:bg-navy-700">
+              <p className="text-lg font-bold text-amber-600">{activeAiRuns}</p>
+              <p className="text-[10px] text-gray-500">Active AI Runs</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3 text-xs text-gray-600 dark:text-gray-400">
+            <div className="flex items-center justify-between p-2 rounded bg-gray-50 dark:bg-navy-700">
+              <span>SLA Breaches</span>
+              <span className="font-semibold text-red-600">{slaBreaches}</span>
+            </div>
+            <div className="flex items-center justify-between p-2 rounded bg-gray-50 dark:bg-navy-700">
+              <span>Recent Errors (24h)</span>
+              <span className="font-semibold text-navy-900 dark:text-white">{systemHealth.recent_errors_24h}</span>
+            </div>
+            <div className="flex items-center justify-between p-2 rounded bg-gray-50 dark:bg-navy-700">
+              <span>Active Uploads</span>
+              <span className="font-semibold text-navy-900 dark:text-white">{systemHealth.active_uploads}</span>
+            </div>
+            <div className="flex items-center justify-between p-2 rounded bg-gray-50 dark:bg-navy-700">
+              <span>Pending Reviews</span>
+              <span className="font-semibold text-navy-900 dark:text-white">{systemHealth.pending_reviews}</span>
+            </div>
           </div>
         </div>
       )}

@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { BarChart3, Download, RefreshCw, Search, Database, Loader2, AlertCircle } from "lucide-react";
+import { BarChart3, Download, RefreshCw, Search, Database, Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Target, Award, AlertTriangle, Lightbulb } from "lucide-react";
 import { BenchmarkKpiCards } from "./BenchmarkKpiCards";
 import { ClauseBenchmarkChart, DeviationHeatmap, IndustryComparisonChart, VendorAggressivenessChart, ComplianceBenchmarkChart, ClauseFrequencyChart } from "./BenchmarkCharts";
 import { BenchmarkAiInsights } from "./AiInsights";
@@ -91,6 +91,156 @@ export function BenchmarkPage() {
 
       {/* KPI Row */}
       <BenchmarkKpiCards metrics={benchmarkKpis} />
+
+      {/* Market Position Summary — from real benchmark data */}
+      {clauseBenchmarks.length > 0 && (() => {
+        const avgPercentile = clauseBenchmarks.reduce((s, cb) => s + cb.percentile, 0) / clauseBenchmarks.length;
+        const avgDeviation = clauseBenchmarks.reduce((s, cb) => s + cb.deviationPercent, 0) / clauseBenchmarks.length;
+        const aboveMarket = clauseBenchmarks.filter(cb => cb.direction === "far_above" || cb.direction === "above_market").length;
+        const belowMarket = clauseBenchmarks.filter(cb => cb.direction === "far_below" || cb.direction === "below_market").length;
+        const atMarket = clauseBenchmarks.length - aboveMarket - belowMarket;
+        const topClause = clauseBenchmarks.reduce((max, cb) => Math.abs(cb.deviationPercent) > Math.abs(max.deviationPercent) ? cb : max, clauseBenchmarks[0]);
+        const totalSamples = clauseBenchmarks.reduce((s, cb) => s + cb.sampleSize, 0);
+
+        return (
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            {/* Market Position */}
+            <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Target className="w-4 h-4 text-emerald-500" />
+                <span className="text-[10px] font-semibold text-gray-500 uppercase">Market Position</span>
+              </div>
+              <p className="text-2xl font-bold text-navy-900 dark:text-white">{avgPercentile.toFixed(0)}<span className="text-sm font-medium text-gray-400">th</span></p>
+              <p className="text-xs text-gray-500 mt-0.5">Average percentile across {clauseBenchmarks.length} clause categories</p>
+              <div className="mt-2 flex items-center gap-2 text-xs">
+                <span className="text-emerald-600 font-medium">{aboveMarket} above</span>
+                <span className="text-gray-300">·</span>
+                <span className="text-gray-500">{atMarket} at market</span>
+                <span className="text-gray-300">·</span>
+                <span className="text-blue-600 font-medium">{belowMarket} below</span>
+              </div>
+            </div>
+
+            {/* Overall Deviation */}
+            <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Award className="w-4 h-4 text-amber-500" />
+                <span className="text-[10px] font-semibold text-gray-500 uppercase">Overall Deviation</span>
+              </div>
+              <p className={`text-2xl font-bold ${avgDeviation > 0 ? "text-red-500" : "text-green-500"}`}>
+                {avgDeviation > 0 ? "+" : ""}{avgDeviation.toFixed(1)}%
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {avgDeviation > 5 ? "Your contracts are more aggressive than market" :
+                 avgDeviation < -5 ? "Your contracts are more favorable than market" :
+                 "Your contracts are near market average"}
+              </p>
+            </div>
+
+            {/* Top Outlier */}
+            <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle className="w-4 h-4 text-purple-500" />
+                <span className="text-[10px] font-semibold text-gray-500 uppercase">Top Outlier</span>
+              </div>
+              <p className="text-lg font-bold text-navy-900 dark:text-white truncate">{topClause.clauseType}</p>
+              <p className={`text-sm font-semibold ${topClause.deviationPercent > 0 ? "text-red-500" : "text-green-500"}`}>
+                {topClause.deviationPercent > 0 ? "+" : ""}{topClause.deviationPercent.toFixed(0)}% vs market
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">{topClause.percentile}th percentile</p>
+            </div>
+
+            {/* Sample Size */}
+            <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Database className="w-4 h-4 text-blue-500" />
+                <span className="text-[10px] font-semibold text-gray-500 uppercase">Benchmark Coverage</span>
+              </div>
+              <p className="text-2xl font-bold text-navy-900 dark:text-white">{totalSamples.toLocaleString()}</p>
+              <p className="text-xs text-gray-500 mt-0.5">Contract samples across {clauseBenchmarks.length} clause types</p>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Clause Outlier Analysis — top deviations */}
+      {clauseBenchmarks.length > 0 && (() => {
+        const sortedByDeviation = [...clauseBenchmarks].sort((a, b) => Math.abs(b.deviationPercent) - Math.abs(a.deviationPercent));
+        const topDeviations = sortedByDeviation.slice(0, 5);
+
+        return (
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <TrendingUp className="w-4 h-4 text-orange-500" />
+              <span className="text-xs font-semibold text-gray-500 uppercase">Clause Outlier Analysis</span>
+            </div>
+            <div className="space-y-2">
+              {topDeviations.map((cb) => {
+                const isAggressive = cb.deviationPercent > 0;
+                return (
+                  <div key={cb.clauseType} className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 dark:bg-navy-700">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-navy-900 dark:text-white">{cb.clauseType}</p>
+                      <p className="text-[10px] text-gray-500">
+                        Your score: {cb.yourScore}/10 · Market: {cb.marketMedian}/10 · {cb.percentile}th percentile
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 ml-3">
+                      <div className="w-20 h-2 bg-gray-200 dark:bg-navy-600 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${isAggressive ? "bg-red-500" : "bg-green-500"}`}
+                          style={{ width: `${Math.min(Math.abs(cb.deviationPercent), 100)}%` }}
+                        />
+                      </div>
+                      <span className={`text-xs font-semibold ${isAggressive ? "text-red-600" : "text-green-600"} w-16 text-right`}>
+                        {isAggressive ? "+" : ""}{cb.deviationPercent.toFixed(0)}%
+                      </span>
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+                        isAggressive ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"
+                      }`}>
+                        {isAggressive ? "Aggressive" : "Favorable"}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Benchmark Recommendations */}
+      {clauseBenchmarks.length > 0 && (() => {
+        const highDeviations = clauseBenchmarks.filter(cb => Math.abs(cb.deviationPercent) > 15).slice(0, 3);
+        if (highDeviations.length === 0) return null;
+
+        return (
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Lightbulb className="w-4 h-4 text-amber-500" />
+              <span className="text-xs font-semibold text-gray-500 uppercase">Benchmark Recommendations</span>
+            </div>
+            <div className="space-y-2">
+              {highDeviations.map((cb) => {
+                const isAggressive = cb.deviationPercent > 0;
+                return (
+                  <div key={cb.clauseType} className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/20">
+                    <Lightbulb className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs font-medium text-navy-900 dark:text-white">{cb.clauseType}</p>
+                      <p className="text-[10px] text-gray-600 dark:text-gray-400 mt-0.5">
+                        {isAggressive
+                          ? `${cb.clauseType} exceeds market by ${cb.deviationPercent.toFixed(0)}%. Consider reviewing ${cb.clauseType.toLowerCase()} terms to align with market standards.`
+                          : `${cb.clauseType} is ${Math.abs(cb.deviationPercent).toFixed(0)}% below market. Your current terms are favorable but may be leaving leverage on the table.`}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Loading / Error / Seed states */}
       {isLoading && (

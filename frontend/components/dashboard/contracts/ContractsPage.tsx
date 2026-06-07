@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Loader2, AlertCircle, RefreshCw } from "lucide-react";
+import { Loader2, AlertCircle, RefreshCw, Upload, Download, ExternalLink } from "lucide-react";
 import { ContractKpiCards } from "./ContractKpiCards";
 import { ContractsHeader } from "./ContractsHeader";
 import { FilterBar } from "./FilterBar";
@@ -11,6 +11,8 @@ import { PreviewDrawer } from "./PreviewDrawer";
 import { UploadFlow } from "./UploadFlow";
 import { useContracts, useContractKpis, useSavedViews } from "@/services/hooks/useContracts";
 import type { ContractRecord, ContractFilterState } from "./types";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { useRouter } from "next/navigation";
 
 const defaultFilters: ContractFilterState = {
   search: "", vendor: "", geography: "", contractType: "", businessUnit: "",
@@ -21,16 +23,14 @@ const defaultFilters: ContractFilterState = {
 function mapKpis(data: { total_contracts: number; active_reviews: number; pending_reviews: number; high_risk_count: number; expiring_soon: number; avg_risk_score: number; total_value_at_risk: number } | undefined) {
   if (!data) return [];
   return [
-    { id: "needs-review", label: "Needs Review", value: data.pending_reviews.toString(), subtitle: `${data.active_reviews} active`, trend: 0, trendDirection: "neutral" as const, icon: "Search", severity: "warning" as const, tooltip: "Contracts requiring legal review" },
     { id: "renewals-due", label: "Renewals Due", value: data.expiring_soon.toString(), trend: 0, trendDirection: "neutral" as const, icon: "Clock", severity: "warning" as const, tooltip: "Contracts expiring within 90 days" },
-    { id: "high-risk", label: "High Risk", value: data.high_risk_count.toString(), trend: 0, trendDirection: "neutral" as const, icon: "AlertTriangle", severity: "critical" as const, tooltip: "Contracts with critical or high risk scores" },
-    { id: "unresolved-findings", label: "Unresolved Findings", value: "0", trend: 0, trendDirection: "neutral" as const, icon: "Brain", severity: "info" as const, tooltip: "Unresolved AI findings across contracts" },
     { id: "total-contracts", label: "Total Contracts", value: data.total_contracts.toLocaleString(), trend: 0, trendDirection: "neutral" as const, icon: "FileText", severity: "info" as const, tooltip: "Total contracts in repository" },
     { id: "value-at-risk", label: "Value at Risk", value: `$${(data.total_value_at_risk / 1_000_000).toFixed(1)}M`, trend: 0, trendDirection: "neutral" as const, icon: "DollarSign", severity: "critical" as const, tooltip: "Total financial value of high-risk contracts" },
   ];
 }
 
 export function ContractsPage() {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<ContractFilterState>({ ...defaultFilters });
   const [activeViewId, setActiveViewId] = useState("view-1");
@@ -119,6 +119,32 @@ export function ContractsPage() {
 
   return (
     <div className="space-y-3 pb-24 bg-gray-50 dark:bg-navy-900 min-h-screen">
+      {/* Page Header */}
+      <div className="px-3 pt-3 pb-1">
+        <PageHeader
+          title="Contract Repository"
+          description="System of record for contract metadata, lifecycle status, and search."
+          actions={
+            <>
+              <button
+                onClick={() => setUploadOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gold-500 text-white hover:bg-gold-600 transition-colors"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                Upload Contract
+              </button>
+              <button
+                onClick={() => {}}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Export
+              </button>
+            </>
+          }
+        />
+      </div>
+
       {/* Header + Search */}
       <ContractsHeader
         search={search}
@@ -126,8 +152,6 @@ export function ContractsPage() {
         savedViews={savedViews}
         activeViewId={activeViewId}
         onViewChange={handleViewChange}
-        onUploadClick={() => setUploadOpen(true)}
-        onBulkUpload={() => setUploadOpen(true)}
         resultCount={filteredContracts.length}
       />
 
@@ -149,7 +173,52 @@ export function ContractsPage() {
       <div className="px-3"><FilterBar filters={filters} onChange={handleFilterChange} onReset={resetFilters} /></div>
 
       {/* Contracts Table */}
-      <div className="px-3"><ContractsTable contracts={filteredContracts} onSelectContract={setSelectedContract} /></div>
+      <div className="px-3">
+        <ContractsTable
+          contracts={filteredContracts}
+          onSelectContract={setSelectedContract}
+          onAction={(contractId, action) => {
+            switch (action) {
+              case "view-details":
+                router.push(`/contracts/${contractId}`);
+                break;
+              case "analyze-risks":
+                router.push(`/reviews/ai-workspace?contractId=${contractId}`);
+                break;
+              case "generate-redlines":
+                router.push(`/reviews/${contractId}/redlines`);
+                break;
+              case "assign-reviewer":
+                // Open a simple prompt — in production this would open an assignee picker
+                const name = prompt("Enter reviewer name:");
+                if (name) {
+                  fetch(`/api/v1/reviews/${contractId}/assign`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ assigned_to: name }),
+                  }).catch(() => {});
+                }
+                break;
+              case "add-tags":
+                router.push(`/contracts/${contractId}`);
+                break;
+              case "request-approval":
+                router.push(`/reviews/ai-workspace?contractId=${contractId}`);
+                break;
+              case "export-pdf":
+                window.open(`/api/v1/export/reviews/${contractId}/pdf`, "_blank");
+                break;
+              case "archive":
+                if (confirm("Archive this contract?")) {
+                  fetch(`/api/v1/reviews/${contractId}`, {
+                    method: "DELETE",
+                  }).catch(() => {});
+                }
+                break;
+            }
+          }}
+        />
+      </div>
 
       {/* Preview Drawer */}
       <PreviewDrawer contract={selectedContract} onClose={() => setSelectedContract(null)} />

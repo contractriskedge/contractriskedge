@@ -101,7 +101,11 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     async def _get_client(self):
         if self._client is None:
             from openai import AsyncOpenAI
-            self._client = AsyncOpenAI(api_key=self._api_key)
+            from httpx import AsyncClient, Timeout
+            self._client = AsyncOpenAI(
+                api_key=self._api_key,
+                http_client=AsyncClient(timeout=Timeout(self.TIMEOUT_SECONDS, connect=10.0)),
+            )
         return self._client
 
     @retry(

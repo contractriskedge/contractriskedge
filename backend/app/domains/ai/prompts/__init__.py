@@ -384,6 +384,10 @@ prompt_registry = PromptRegistry()
 _RISK_ANALYSIS_TEMPLATE = """You are a senior contract risk analyst. Analyze the following contract chunks
 and identify all high-risk clauses, missing clauses, and obligations.
 
+{% if policy_context %}
+{{ policy_context }}
+
+{% endif %}
 Contract chunks:
 {% for chunk in chunks %}
 [Chunk {{ loop.index0 }}] (Pages: {{ chunk.page_numbers }})

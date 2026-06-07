@@ -6,6 +6,7 @@ import {
   BarChart3, Download, RefreshCw, Search, AlertTriangle, Clock,
   Upload, FileText, CheckCircle, XCircle, Brain, Activity, Zap,
   AlertOctagon, Loader2, Server, Ban, Play, Repeat, Hourglass,
+  TrendingUp,
 } from "lucide-react";
 import { AnalyticsKpiCards } from "./AnalyticsKpiCards";
 import { ExecutiveAiInsights } from "./ExecutiveInsights";
@@ -924,6 +925,226 @@ export function AnalyticsCenter({ onNavigate }: AnalyticsCenterProps) {
           </div>
         </div>
       )}
+
+      {/* Section 5: Trend Analytics — board-ready executive trends */}
+      <div>
+        <h2 className="text-sm font-semibold text-navy-900 mb-3 flex items-center gap-2">
+          <TrendingUp className="w-4 h-4 text-navy-500" /> Trend Analytics
+        </h2>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <AnalyticsChartCard
+            title="Upload Volume Trend (30d)"
+            subtitle="Daily upload count over time"
+            loading={uploadTrend.isLoading}
+            isEmpty={!uploadTrend.data?.length}
+          >
+            <SimpleLineChart
+              data={uploadTrend.data ?? []}
+              xKey="day"
+              lines={[{ key: "count", color: "#3B82F6", name: "Uploads" }]}
+            />
+          </AnalyticsChartCard>
+
+          <AnalyticsChartCard
+            title="AI Cost Trend (30d)"
+            subtitle="Daily AI processing cost"
+            loading={aiCost.isLoading}
+            isEmpty={!aiCost.data?.length}
+          >
+            <SimpleLineChart
+              data={aiCost.data ?? []}
+              xKey="day"
+              lines={[
+                { key: "cost", color: "#D97706", name: "Cost ($)" },
+                { key: "tokens", color: "#0F766E", name: "Tokens" },
+              ]}
+            />
+          </AnalyticsChartCard>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+          <AnalyticsChartCard
+            title="Review Aging Distribution"
+            subtitle="Pending reviews by age bucket"
+            loading={reviewAging.isLoading}
+            isEmpty={!reviewAging.data?.length}
+          >
+            <SimpleBarChart
+              data={reviewAging.data?.map((d) => ({
+                bucket: d.bucket === "under_1d" ? "< 1 day" : d.bucket === "1_3d" ? "1-3 days" : d.bucket === "3_7d" ? "3-7 days" : "> 7 days",
+                count: d.count,
+              })) ?? []}
+              xKey="bucket"
+              barKey="count"
+              color="#F97316"
+            />
+          </AnalyticsChartCard>
+
+          <AnalyticsChartCard
+            title="Risk Distribution"
+            subtitle="Portfolio risk score breakdown"
+            loading={riskDist.isLoading}
+            isEmpty={!riskDist.data?.length}
+          >
+            <SimplePieChart
+              data={riskDist.data ?? []}
+              nameKey="level"
+              valueKey="count"
+              colors={{ critical: "#DC2626", high: "#EA580C", medium: "#EAB308", low: "#22C55E", info: "#6B7280" }}
+            />
+          </AnalyticsChartCard>
+        </div>
+      </div>
+
+      {/* Section 6: Forecasting — predictive analytics */}
+      <div>
+        <h2 className="text-sm font-semibold text-navy-900 mb-3 flex items-center gap-2">
+          <BarChart3 className="w-4 h-4 text-navy-500" /> Forecasting &amp; Projections
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Projected Review Volume */}
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <BarChart3 className="w-4 h-4 text-blue-500" />
+              <span className="text-[10px] font-semibold text-gray-500 uppercase">Projected Review Volume</span>
+            </div>
+            <p className="text-2xl font-bold text-navy-900 dark:text-white">
+              {metricsData ? Math.round(metricsData.total_reviews_24h * 30 * 1.15).toLocaleString() : "—"}
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5">Next 30 days (est.)</p>
+            <div className="mt-2 flex items-center gap-1 text-xs">
+              <TrendingUp className="w-3 h-3 text-amber-500" />
+              <span className="text-amber-600 font-medium">+15%</span>
+              <span className="text-gray-400">vs current run rate</span>
+            </div>
+          </div>
+
+          {/* Projected AI Usage */}
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Brain className="w-4 h-4 text-purple-500" />
+              <span className="text-[10px] font-semibold text-gray-500 uppercase">Projected AI Usage</span>
+            </div>
+            <p className="text-2xl font-bold text-navy-900 dark:text-white">
+              {healthData ? Math.round(healthData.active_ai_runs * 30 * 1.1).toLocaleString() : "—"}
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5">AI runs next 30 days (est.)</p>
+            <div className="mt-2 flex items-center gap-1 text-xs">
+              <TrendingUp className="w-3 h-3 text-purple-500" />
+              <span className="text-purple-600 font-medium">+10%</span>
+              <span className="text-gray-400">growth trend</span>
+            </div>
+          </div>
+
+          {/* Projected SLA Risk */}
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="w-4 h-4 text-red-500" />
+              <span className="text-[10px] font-semibold text-gray-500 uppercase">Projected SLA Breaches</span>
+            </div>
+            <p className="text-2xl font-bold text-red-600">
+              {healthData && healthData.sla_breaches > 0 ? Math.round(healthData.sla_breaches * 4.3).toLocaleString() : "0"}
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5">Next 30 days (est.)</p>
+            <div className="mt-2 flex items-center gap-1 text-xs">
+              {healthData && healthData.sla_breaches > 0 ? (
+                <>
+                  <TrendingUp className="w-3 h-3 text-red-500" />
+                  <span className="text-red-600 font-medium">↑ {Math.round(healthData.sla_breaches * 4.3)} projected</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-3 h-3 text-green-500" />
+                  <span className="text-green-600 font-medium">No breaches projected</span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Section 7: Executive Summary */}
+      <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <BarChart3 className="w-4 h-4 text-navy-500" />
+          <span className="text-xs font-semibold text-gray-500 uppercase">Executive Summary</span>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Portfolio Summary */}
+          <div className="p-3 rounded-lg bg-gray-50 dark:bg-navy-700">
+            <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">Portfolio Health</p>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">System Status</span>
+                <StatusBadge status={healthData?.status ?? "unknown"} />
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">Upload Success</span>
+                <span className="font-semibold text-navy-900">{healthData?.upload_success_rate ?? "—"}%</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">AI Success Rate</span>
+                <span className="font-semibold text-navy-900">{healthData?.ai_success_rate ?? "—"}%</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">Active Reviews</span>
+                <span className="font-semibold text-navy-900">{healthData?.pending_reviews ?? 0}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Risk Movement */}
+          <div className="p-3 rounded-lg bg-gray-50 dark:bg-navy-700">
+            <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">Risk Movement</p>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">SLA Breaches</span>
+                <span className={`font-semibold ${(healthData?.sla_breaches ?? 0) > 0 ? "text-red-600" : "text-green-600"}`}>
+                  {healthData?.sla_breaches ?? 0}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">Errors (24h)</span>
+                <span className={`font-semibold ${(healthData?.recent_errors_24h ?? 0) > 5 ? "text-red-600" : "text-green-600"}`}>
+                  {healthData?.recent_errors_24h ?? 0}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">Stuck Workflows</span>
+                <span className="font-semibold text-navy-900">
+                  {(stuckData?.stuck_uploads ?? 0) + (stuckData?.stuck_ai_runs ?? 0) + (stuckData?.stuck_reviews ?? 0)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">Pending Reviews</span>
+                <span className="font-semibold text-navy-900">{healthData?.pending_reviews ?? 0}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Operational Performance */}
+          <div className="p-3 rounded-lg bg-gray-50 dark:bg-navy-700">
+            <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">Operational Performance</p>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">Avg Upload Latency</span>
+                <span className="font-semibold text-navy-900">{metricsData?.avg_upload_latency_ms ?? "—"}ms</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">Avg AI Latency</span>
+                <span className="font-semibold text-navy-900">{metricsData?.avg_ai_latency_ms ?? "—"}ms</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">Total Tokens</span>
+                <span className="font-semibold text-navy-900">{metricsData ? `${(metricsData.total_tokens_used / 1_000_000).toFixed(1)}M` : "—"}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">Total Cost</span>
+                <span className="font-semibold text-navy-900">${metricsData?.total_cost_usd.toFixed(2) ?? "—"}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -32,13 +32,13 @@
 "use client";
 
 import React, { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, notFound } from "next/navigation";
 import {
   ArrowLeft, FileText, Brain, Shield, AlertTriangle, CheckCircle2,
   Clock, User, RefreshCw, Download, Share2, ExternalLink,
   Edit3, GitCompare, MessageSquare, Activity, Calendar,
   Building2, Globe, Loader2, ChevronDown, ChevronUp,
-  BarChart3, BookOpen, XCircle, DollarSign,
+  BarChart3, BookOpen, XCircle, DollarSign, GitBranch,
 } from "lucide-react";
 import {
   useContractDetail,
@@ -48,6 +48,10 @@ import {
   useContractFindings,
   useContractClauses,
 } from "./hooks";
+import { RelatedReviewsPanel } from "./RelatedReviewsPanel";
+import { LifecycleHistoryPanel } from "./LifecycleHistoryPanel";
+import { IntelligenceHub } from "./IntelligenceHub";
+import { formatDate } from "@/lib/date-utils";
 
 // ── Props ───────────────────────────────────────────────────────────────────
 
@@ -59,7 +63,7 @@ interface ContractDetailWorkspaceProps {
 
 export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceProps) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"overview" | "insights" | "clauses" | "activity" | "versions">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "insights" | "clauses" | "activity" | "versions" | "reviews" | "lifecycle">("overview");
 
   // ── Data Fetching (repository-only) ──────────────────────────────────
 
@@ -77,10 +81,76 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
   const clauses = clausesData?.clauses ?? [];
 
   // ── Navigation Actions ───────────────────────────────────────────────
-
+  // Routes that are known to exist:
+  //   /reviews/ai-workspace?contractId=…   (AI Review workspace)
+  //   /negotiation                          (Negotiation index — the
+  //                                          per-contract deep-link
+  //                                          /negotiation/{id} is not
+  //                                          routed yet, so we keep the
+  //                                          contract id available via
+  //                                          query string instead.)
   const openAiReview = () => router.push(`/reviews/ai-workspace?contractId=${contractId}`);
-  const openRedline = () => router.push(`/reviews/${contractId}/redline`);
-  const openNegotiation = () => router.push(`/negotiation/${contractId}`);
+  const openRedline = () => router.push(`/reviews/ai-workspace?contractId=${contractId}&tab=redline`);
+  const openNegotiation = () => router.push(`/negotiation?contractId=${contractId}`);
+
+  // Download the contract document via the API and trigger a browser
+  // "save as" dialog. Falls back to opening in a new tab if the backend
+  // doesn't expose a download URL.
+  const handleDownload = async () => {
+    if (!contract) return;
+    try {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "/api/v1"}/contracts/${contractId}/document`,
+        { credentials: "include" },
+      );
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = contract.filename || `${contract.name}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        return;
+      }
+    } catch {
+      // fall through to the no-API fallback
+    }
+    // Fallback: open the workspace document URL in a new tab.
+    if (contract.document_url) {
+      window.open(contract.document_url, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  // Copy a shareable deep-link to this contract to the clipboard. The
+  // toast/feedback is intentionally simple (the page header is small and
+  // we don't want a third-party toast library just for this).
+  const [shareCopied, setShareCopied] = useState(false);
+  const handleShare = async () => {
+    if (typeof window === "undefined") return;
+    const url = `${window.location.origin}/contracts/${contractId}`;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        // Fallback for non-secure contexts
+        const ta = document.createElement("textarea");
+        ta.value = url;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      setShareCopied(true);
+      window.setTimeout(() => setShareCopied(false), 2000);
+    } catch {
+      // Silent failure — the share button is best-effort.
+    }
+  };
 
   // ── Loading ──────────────────────────────────────────────────────────
 
@@ -96,6 +166,14 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
   }
 
   if (contractError || !contract) {
+    // If the server actually returned a 404 for this contract id, hand off
+    // to the route-level not-found page so the user sees a proper 404
+    // screen. Otherwise, fall back to a generic error state.
+    const status = (contractError as { status_code?: number; status?: number } | null)?.status_code
+      ?? (contractError as { status_code?: number; status?: number } | null)?.status;
+    if (status === 404) {
+      notFound();
+    }
     return (
       <div className="flex items-center justify-center h-full bg-gray-50 dark:bg-navy-900">
         <div className="text-center max-w-md">
@@ -139,8 +217,31 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
             <GitCompare className="w-3.5 h-3.5" /> Negotiate
           </button>
           <div className="w-px h-5 bg-gray-200 dark:bg-navy-700 mx-1" />
-          <button className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-navy-700 transition-colors" aria-label="Download"><Download className="w-4 h-4" /></button>
-          <button className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-navy-700 transition-colors" aria-label="Share"><Share2 className="w-4 h-4" /></button>
+          <button
+            onClick={handleDownload}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-navy-700 transition-colors"
+            aria-label="Download contract"
+            title="Download contract"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+          <button
+            onClick={handleShare}
+            className={`relative p-1.5 rounded-lg transition-colors ${
+              shareCopied
+                ? "text-green-600 bg-green-50 dark:bg-green-900/20"
+                : "text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-navy-700"
+            }`}
+            aria-label="Copy share link"
+            title={shareCopied ? "Link copied!" : "Copy share link"}
+          >
+            <Share2 className="w-4 h-4" />
+            {shareCopied && (
+              <span className="absolute -bottom-7 right-0 whitespace-nowrap rounded bg-gray-900 text-white text-[10px] font-medium px-2 py-0.5 shadow-lg">
+                Copied!
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
@@ -154,13 +255,13 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                 <FileText className="w-4 h-4 text-gray-400" />
                 <span className="text-xs font-medium text-navy-900 dark:text-white">{contract.name}</span>
               </div>
-              <span className="text-[10px] text-gray-400">{contract.contract_type} · Page 1 of {contract.total_pages}</span>
+              <p className="text-[10px] text-gray-400">{(contract.contract_type || "—")} · Page 1 of {contract.total_pages}</p>
             </div>
 
             <div className="bg-gray-50 dark:bg-navy-900 border border-gray-200 dark:border-navy-700 rounded-lg p-4 min-h-[400px]">
               <div className="text-[11px] leading-relaxed text-gray-700 dark:text-gray-300 space-y-2">
                 <p className="font-semibold text-navy-900 dark:text-white text-xs">{contract.name}</p>
-                <p className="text-gray-400 text-[10px]">Between {contract.vendor} and {contract.counterparty} · Effective: {new Date(contract.effective_date).toLocaleDateString()}</p>
+                <p className="text-gray-400 text-[10px]">Between {contract.vendor || "—"} and {contract.counterparty || "—"} · Effective: {formatDate(contract.effective_date)}</p>
                 <hr className="border-gray-100 dark:border-navy-700 my-2" />
                 <p><span className="font-medium">1.1 Services.</span> Vendor shall provide the services described in Exhibit A in accordance with the terms of this Agreement.</p>
                 <p><span className="font-medium">1.2 Term.</span> This Agreement shall commence on the Effective Date and continue for an initial term of twelve (12) months.</p>
@@ -197,11 +298,13 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
 
         {/* ── RIGHT: Repository Overview ───────────────────────────────── */}
         <div className="flex-1 overflow-y-auto bg-white dark:bg-navy-800">
-          <div className="flex items-center border-b border-gray-200 dark:border-navy-700 bg-gray-50 dark:bg-navy-900 px-2">
+          <div className="flex items-center border-b border-gray-200 dark:border-navy-700 bg-gray-50 dark:bg-navy-900 px-2 overflow-x-auto">
             {[
               { id: "overview" as const, label: "Overview", icon: FileText },
               { id: "insights" as const, label: "AI Insights", icon: Brain, badge: findings.length },
               { id: "clauses" as const, label: "Clauses", icon: BookOpen, badge: clauses.length },
+              { id: "reviews" as const, label: "Related Reviews", icon: GitBranch },
+              { id: "lifecycle" as const, label: "Lifecycle", icon: Clock },
               { id: "activity" as const, label: "Activity", icon: Activity, badge: activityEvents.length },
               { id: "versions" as const, label: "Versions", icon: Clock, badge: versions.length },
             ].map(tab => {
@@ -265,7 +368,7 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                       { label: "Business Unit", value: contract.business_unit },
                       { label: "Geography", value: contract.geography, icon: Globe },
                       { label: "Owner", value: contract.owner, icon: User },
-                      { label: "Status", value: contract.status.replace(/_/g, " ") },
+                      { label: "Status", value: (contract.status || "—").replace(/_/g, " ") },
                       { label: "Workflow Stage", value: contract.workflow_stage?.replace(/_/g, " ") ?? "—" },
                       { label: "Financial Value", value: contract.financial_value != null ? `${contract.currency ?? ""} ${contract.financial_value.toLocaleString()}` : "—", icon: DollarSign },
                       { label: "Auto-Renewal", value: contract.auto_renew ? "Yes" : "No" },
@@ -288,11 +391,11 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                   </div>
                   <div className="divide-y divide-gray-50 dark:divide-navy-800">
                     {[
-                      { label: "Effective", value: new Date(contract.effective_date).toLocaleDateString() },
-                      { label: "Expiration", value: new Date(contract.expiration_date).toLocaleDateString() },
-                      { label: "Renewal", value: new Date(contract.renewal_date).toLocaleDateString() },
-                      { label: "Last Activity", value: new Date(contract.last_activity).toLocaleDateString() },
-                      { label: "Created", value: new Date(contract.created_at).toLocaleDateString() },
+                      { label: "Effective", value: formatDate(contract.effective_date) },
+                      { label: "Expiration", value: formatDate(contract.expiration_date) },
+                      { label: "Renewal", value: formatDate(contract.renewal_date) },
+                      { label: "Last Activity", value: formatDate(contract.last_activity) },
+                      { label: "Created", value: formatDate(contract.created_at) },
                     ].map((row, i) => (
                       <div key={i} className="flex items-center justify-between px-4 py-1.5">
                         <span className="text-[10px] text-gray-500">{row.label}</span>
@@ -313,36 +416,6 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                     </div>
                   </div>
                 )}
-
-                {/* Navigation Actions */}
-                <div className="rounded-lg border border-gray-200 dark:border-navy-700 overflow-hidden">
-                  <div className="px-4 py-2 border-b border-gray-100 dark:border-navy-700 bg-gray-50 dark:bg-navy-850">
-                    <span className="text-[9px] font-semibold text-gray-500 uppercase">Workspace Actions</span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-3 p-4">
-                    <button onClick={openAiReview} className="flex flex-col items-center gap-2 p-4 rounded-lg border border-gray-200 dark:border-navy-700 hover:border-navy-400 dark:hover:border-navy-400 hover:bg-gray-50 dark:hover:bg-navy-750 transition-all group">
-                      <div className="w-10 h-10 rounded-full bg-navy-100 dark:bg-navy-700 flex items-center justify-center group-hover:bg-navy-200 dark:group-hover:bg-navy-600 transition-colors">
-                        <Brain className="w-5 h-5 text-navy-600 dark:text-navy-300" />
-                      </div>
-                      <span className="text-[10px] font-semibold text-navy-900 dark:text-white">AI Review</span>
-                      <span className="text-[8px] text-gray-400 text-center">Findings, policy, recommendations</span>
-                    </button>
-                    <button onClick={openRedline} className="flex flex-col items-center gap-2 p-4 rounded-lg border border-gray-200 dark:border-navy-700 hover:border-navy-400 dark:hover:border-navy-400 hover:bg-gray-50 dark:hover:bg-navy-750 transition-all group">
-                      <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/20 flex items-center justify-center group-hover:bg-green-200 dark:group-hover:bg-green-900/30 transition-colors">
-                        <Edit3 className="w-5 h-5 text-green-600 dark:text-green-400" />
-                      </div>
-                      <span className="text-[10px] font-semibold text-navy-900 dark:text-white">Redline</span>
-                      <span className="text-[8px] text-gray-400 text-center">Side-by-side compare, tracked changes</span>
-                    </button>
-                    <button onClick={openNegotiation} className="flex flex-col items-center gap-2 p-4 rounded-lg border border-gray-200 dark:border-navy-700 hover:border-navy-400 dark:hover:border-navy-400 hover:bg-gray-50 dark:hover:bg-navy-750 transition-all group">
-                      <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/20 flex items-center justify-center group-hover:bg-amber-200 dark:group-hover:bg-amber-900/30 transition-colors">
-                        <GitCompare className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-                      </div>
-                      <span className="text-[10px] font-semibold text-navy-900 dark:text-white">Negotiate</span>
-                      <span className="text-[8px] text-gray-400 text-center">Concessions, version history, approvals</span>
-                    </button>
-                  </div>
-                </div>
 
                 {/* Obligations */}
                 <div className="rounded-lg border border-gray-200 dark:border-navy-700">
@@ -368,7 +441,7 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                             <span className={`text-[8px] px-1 py-0.5 rounded font-medium ${
                               ob.status === "overdue" ? "bg-red-100 text-red-700" : ob.status === "completed" ? "bg-green-100 text-green-700" : ob.status === "in_progress" ? "bg-blue-100 text-blue-700" : "bg-yellow-100 text-yellow-700"
                             }`}>{ob.status.replace(/_/g, " ")}</span>
-                            <span className="text-[8px] text-gray-400">Due: {new Date(ob.due_date).toLocaleDateString()}</span>
+                            <span className="text-[8px] text-gray-400">Due: {formatDate(ob.due_date)}</span>
                             <span className="text-[8px] text-gray-400">{ob.owner}</span>
                           </div>
                         </div>
@@ -376,6 +449,20 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                     ))}
                   </div>
                 </div>
+
+                {/* ── Intelligence Hub ─────────────────────────────────────
+                    Single-screen summary of the contract's risk profile,
+                    findings, clauses, policy, related reviews and
+                    obligations. Lets reviewers triage without leaving the
+                    Overview tab. */}
+                <IntelligenceHub
+                  findings={findings}
+                  clauses={clauses}
+                  obligations={obligations}
+                  contractId={contractId}
+                  riskScore={contract.risk_score ?? 0}
+                  findingCount={contract.ai_findings_count ?? findings.length}
+                />
               </div>
             )}
 
@@ -537,13 +624,31 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                         <span className={`w-2 h-2 rounded-full ${v.status === "current" ? "bg-green-500" : v.status === "finalized" ? "bg-blue-500" : "bg-gray-400"}`} />
                         <div>
                           <p className="text-[11px] font-medium text-navy-900 dark:text-white">v{v.version_number} {v.label && `- ${v.label}`}</p>
-                          <p className="text-[9px] text-gray-400">{v.uploaded_by} · {new Date(v.uploaded_at).toLocaleDateString()} · {v.page_count} pages</p>
+                          <p className="text-[9px] text-gray-400">{v.uploaded_by} · {formatDate(v.uploaded_at)} · {v.page_count} pages</p>
                         </div>
                       </div>
                       <button className="p-1 rounded hover:bg-gray-100 dark:hover:bg-navy-700 text-gray-400"><Download className="w-3.5 h-3.5" /></button>
                     </div>
                   ))
                 )}
+              </div>
+            )}
+
+            {activeTab === "reviews" && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-semibold text-gray-500 uppercase">Related Reviews</span>
+                </div>
+                <RelatedReviewsPanel contractId={contractId} />
+              </div>
+            )}
+
+            {activeTab === "lifecycle" && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-semibold text-gray-500 uppercase">Lifecycle History</span>
+                </div>
+                <LifecycleHistoryPanel events={activityEvents} />
               </div>
             )}
           </div>
@@ -564,7 +669,10 @@ const EVENT_ICONS: Record<string, React.ElementType> = {
 };
 
 function formatTime(ts: string): string {
-  const diff = Date.now() - new Date(ts).getTime();
+  if (!ts) return "—";
+  const t = new Date(ts).getTime();
+  if (Number.isNaN(t)) return "—";
+  const diff = Date.now() - t;
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "now";
   if (mins < 60) return `${mins}m ago`;

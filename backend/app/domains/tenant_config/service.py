@@ -269,43 +269,38 @@ class FeatureFlagService:
     async def set_override(self, override: FeatureOverrideCreate, actor: str) -> FeatureFlagOverride:
         """Create or update a feature flag override."""
         now = datetime.now(timezone.utc)
-        override_id = uuid.uuid4().hex[:12]
 
-        # Upsert logic
+        # Upsert logic — table has auto-increment `id`, not `override_id`
         sql = sa_text("""
-            INSERT INTO feature_flag_overrides (override_id, flag_key, target_type, target_id,
-                enabled, reason, expires_at, created_by, created_at)
-            VALUES (:oid, :flag_key, :target_type, :target_id,
-                :enabled, :reason, :expires_at, :created_by, :created_at)
+            INSERT INTO feature_flag_overrides (flag_key, target_type, target_id,
+                enabled, expires_at, created_at, updated_at)
+            VALUES (:flag_key, :target_type, :target_id,
+                :enabled, :expires_at, :created_at, :created_at)
             ON CONFLICT (flag_key, target_type, target_id)
-            DO UPDATE SET enabled = :enabled, reason = :reason,
-                expires_at = :expires_at, updated_at = :updated_at
-            RETURNING override_id, flag_key, target_type, target_id, enabled, reason,
-                expires_at, created_by, created_at
+            DO UPDATE SET enabled = :enabled, expires_at = :expires_at, updated_at = :now
+            RETURNING id, flag_key, target_type, target_id, enabled,
+                expires_at, created_at, updated_at
         """)
         result = await self.session.execute(sql, {
-            "oid": override_id,
             "flag_key": override.flag_key,
             "target_type": override.target_type,
             "target_id": override.target_id,
             "enabled": override.enabled,
-            "reason": override.reason,
             "expires_at": override.expires_at,
-            "created_by": actor,
             "created_at": now,
-            "updated_at": now,
+            "now": now,
         })
         await self.session.commit()
         row = result.fetchone()
         return FeatureFlagOverride(
-            override_id=str(row.override_id),
+            override_id=str(row.id),
             flag_key=row.flag_key,
             target_type=row.target_type,
             target_id=row.target_id,
             enabled=row.enabled,
-            reason=row.reason or "",
+            reason="",
             expires_at=row.expires_at,
-            created_by=row.created_by,
+            created_by=actor,
             created_at=row.created_at,
         )
 
@@ -379,7 +374,7 @@ class PolicyPackService:
                 is_active, version, created_by, created_at, updated_at)
             VALUES (:pid, :tid, :name, :desc, :scope,
                 :region, :industry, :jurisdiction, :playbook_id,
-                :rule_overrides::jsonb, :threshold_overrides::jsonb, :clause_overrides::jsonb,
+                CAST(:rule_overrides AS jsonb), CAST(:threshold_overrides AS jsonb), CAST(:clause_overrides AS jsonb),
                 :is_active, 1, :actor, :now, :now)
             RETURNING pack_id, name, description, scope, region, industry, jurisdiction,
                 playbook_id, rule_overrides, threshold_overrides, clause_overrides,
@@ -473,7 +468,7 @@ class ScoringOverrideService:
                 is_active, reason, applies_to_business_units, created_by, created_at, updated_at)
             VALUES (:oid, :tid, :clause_type,
                 :severity, :weight, :score,
-                :is_active, :reason, :bus::jsonb, :actor, :now, :now)
+                :is_active, :reason, CAST(:bus AS jsonb), :actor, :now, :now)
             RETURNING override_id, tenant_id, clause_type, override_severity,
                 override_risk_weight, override_risk_score, is_active, reason,
                 applies_to_business_units, created_by, created_at, updated_at
@@ -548,8 +543,8 @@ class CompliancePackService:
                 regulations, required_clause_categories, forbidden_clause_categories,
                 jurisdiction_rules, is_active, version, created_by, created_at, updated_at)
             VALUES (:pid, :tid, :region, :name, :desc,
-                :regulations::jsonb, :required::jsonb, :forbidden::jsonb,
-                :rules::jsonb, :is_active, 1, :actor, :now, :now)
+                CAST(:regulations AS jsonb), CAST(:required AS jsonb), CAST(:forbidden AS jsonb),
+                CAST(:rules AS jsonb), :is_active, 1, :actor, :now, :now)
             RETURNING pack_id, region, name, description, regulations,
                 required_clause_categories, forbidden_clause_categories,
                 jurisdiction_rules, is_active, version, created_by, created_at, updated_at

@@ -38,7 +38,7 @@ export function SlaPerformanceChart({ data, predictions }: { data: SlaMetric[]; 
   return (
     <SectionCard title="SLA Performance by Vendor" subtitle="Actual vs target performance %">
       <div className="h-56">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <BarChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
             <XAxis dataKey="name" tick={{ fontSize: 8, fill: "#6B7280" }} axisLine={false} tickLine={false} angle={-20} textAnchor="end" height={40} />
@@ -125,24 +125,33 @@ export function FinancialExposurePanel({ data, valueAtRisk }: { data: FinancialE
 
 export function ObligationTimeline({ events }: { events: import("./types").TimelineEvent[] }) {
   return (
-    <SectionCard title="Obligation Timeline" subtitle="Upcoming and overdue obligations">
-      <div className="space-y-1.5 max-h-[300px] overflow-y-auto">
-        {events.map((e, i) => (
-          <div key={e.id} className="flex items-start gap-2.5">
-            <div className="flex flex-col items-center">
-              <div className={`w-2.5 h-2.5 rounded-full ${e.status === "overdue" ? "bg-red-500" : e.status === "in_progress" ? "bg-blue-500" : "bg-gray-300"}`} />
-              {i < events.length - 1 && <div className="w-px h-5 bg-gray-100" />}
-            </div>
-            <div className="flex-1 min-w-0 pb-1">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] font-semibold text-navy-900">{e.title}</span>
-                <span className={`text-[8px] font-medium px-1 py-0.5 rounded-full ${e.status === "overdue" ? "bg-red-50 text-red-700" : e.status === "in_progress" ? "bg-blue-50 text-blue-700" : "bg-gray-50 text-gray-500"}`}>{e.status.replace(/_/g, " ")}</span>
+    <SectionCard title="Obligation Timeline" subtitle="Upcoming, overdue, escalations, and reminders">
+      <div className="space-y-1.5 max-h-[400px] overflow-y-auto">
+        {events.length === 0 ? (
+          <div className="text-center py-6 text-gray-400 text-[10px]">No timeline events yet.</div>
+        ) : events.map((e, i) => {
+          const isOverdue = e.status === "overdue";
+          const isEscalated = e.status === "escalated";
+          const isUpcoming = e.status === "pending" || e.status === "in_progress";
+          const dotColor = isOverdue ? "bg-red-500" : isEscalated ? "bg-purple-500" : isUpcoming ? "bg-blue-500" : "bg-gray-300";
+          const badgeColor = isOverdue ? "bg-red-50 text-red-700" : isEscalated ? "bg-purple-50 text-purple-700" : isUpcoming ? "bg-blue-50 text-blue-700" : "bg-gray-50 text-gray-500";
+          return (
+            <div key={e.id} className="flex items-start gap-2.5">
+              <div className="flex flex-col items-center">
+                <div className={`w-2.5 h-2.5 rounded-full ${dotColor}`} />
+                {i < events.length - 1 && <div className="w-px h-5 bg-gray-100" />}
               </div>
-              <p className="text-[9px] text-gray-500">{e.description}</p>
-              <p className="text-[8px] text-gray-400">{e.date} • {e.vendor}</p>
+              <div className="flex-1 min-w-0 pb-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-semibold text-navy-900 truncate">{e.title}</span>
+                  <span className={`text-[8px] font-medium px-1 py-0.5 rounded-full ${badgeColor}`}>{e.status.replace(/_/g, " ")}</span>
+                </div>
+                <p className="text-[9px] text-gray-500">{e.description}</p>
+                <p className="text-[8px] text-gray-400">{e.date} {e.vendor ? `• ${e.vendor}` : ""}</p>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </SectionCard>
   );

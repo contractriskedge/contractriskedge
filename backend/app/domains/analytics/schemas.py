@@ -98,3 +98,10 @@ class QueryPerformanceResponse(BaseModel):
     pool_checked_in: int = 0
     pool_checked_out: int = 0
     pool_overflow: int = 0
+
+
+class SlaBreachTrendPoint(BaseModel):
+    """A single data point in the SLA breach trend."""
+    date: str
+    count: int
+    critical: int

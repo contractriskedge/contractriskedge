@@ -71,64 +71,108 @@ class AIExecutionOrchestrator:
             )
             raise AIPolicyViolation("; ".join(policy_decision.violations))
 
-        provider = llm_registry.select_provider(preferred=envelope.execution_plan.fallback_chain.providers)
-        if provider.provider_name != envelope.execution_plan.provider_name:
-            logger.info(
-                "Provider selected by plan/fallback chain: requested=%s selected=%s",
-                envelope.execution_plan.provider_name,
-                provider.provider_name,
-            )
+        # Build the provider selection chain: primary + fallbacks
+        provider_chain = [envelope.execution_plan.provider_name]
+        if envelope.execution_plan.fallback_chain.providers:
+            for p in envelope.execution_plan.fallback_chain.providers:
+                if p not in provider_chain:
+                    provider_chain.append(p)
 
-        max_tokens = min(
-            envelope.execution_plan.token_budget,
-            envelope.execution_plan.provider_capabilities.max_response_tokens,
-        )
-        llm_request = LLMRequest(
-            prompt=envelope.audit_context.get("prompt_text", ""),
-            system_prompt=envelope.audit_context.get("system_prompt"),
-            model=envelope.execution_plan.model,
-            temperature=envelope.execution_plan.temperature,
-            max_tokens=max_tokens,
-            response_format=envelope.execution_plan.metadata.get("response_format"),
-        )
+        last_exception = None
+        selected_provider = None
 
-        pre_violations = self.guardrail_engine.evaluate_prompt(llm_request.prompt)
-        if self.guardrail_engine.has_critical_violation(pre_violations):
-            raise AIPolicyViolation("Critical guardrail violation prevented execution")
+        for provider_name in provider_chain:
+            try:
+                selected_provider = llm_registry.select_provider(preferred=[provider_name])
+                if not selected_provider:
+                    logger.warning(
+                        "Provider %s not available in registry, trying next",
+                        provider_name,
+                    )
+                    continue
 
-        cost_estimator = AICostEstimator()
-        start = time.monotonic()
-        try:
-            result = await provider.complete(llm_request)
-            latency_ms = int((time.monotonic() - start) * 1000)
-            result.cost_usd = cost_estimator.estimate(
-                result.model,
-                result.prompt_tokens,
-                result.completion_tokens,
-            )
-            llm_registry.report_outcome(
-                provider.provider_name,
-                success=True,
-                latency_ms=latency_ms,
-                cost_usd=result.cost_usd,
-                timeout=False,
-            )
-        except Exception as exc:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            llm_registry.report_outcome(
-                provider.provider_name,
-                success=False,
-                latency_ms=latency_ms,
-                cost_usd=0.0,
-                timeout=isinstance(exc, TimeoutError),
-            )
+                logger.info(
+                    "Attempting provider: %s (chain: %s, trace_id=%s)",
+                    selected_provider.provider_name,
+                    provider_chain,
+                    trace_id,
+                )
+
+                max_tokens = min(
+                    envelope.execution_plan.token_budget,
+                    envelope.execution_plan.provider_capabilities.max_response_tokens,
+                )
+                llm_request = LLMRequest(
+                    prompt=envelope.audit_context.get("prompt_text", ""),
+                    system_prompt=envelope.audit_context.get("system_prompt"),
+                    model=envelope.execution_plan.model,
+                    temperature=envelope.execution_plan.temperature,
+                    max_tokens=max_tokens,
+                    response_format=envelope.execution_plan.metadata.get("response_format"),
+                )
+
+                pre_violations = self.guardrail_engine.evaluate_prompt(llm_request.prompt)
+                if self.guardrail_engine.has_critical_violation(pre_violations):
+                    raise AIPolicyViolation("Critical guardrail violation prevented execution")
+
+                cost_estimator = AICostEstimator()
+                start = time.monotonic()
+                try:
+                    result = await selected_provider.complete(llm_request)
+                    latency_ms = int((time.monotonic() - start) * 1000)
+                    result.cost_usd = cost_estimator.estimate(
+                        result.model,
+                        result.prompt_tokens,
+                        result.completion_tokens,
+                    )
+                    llm_registry.report_outcome(
+                        selected_provider.provider_name,
+                        success=True,
+                        latency_ms=latency_ms,
+                        cost_usd=result.cost_usd,
+                        timeout=False,
+                    )
+                except Exception as exc:
+                    latency_ms = int((time.monotonic() - start) * 1000)
+                    llm_registry.report_outcome(
+                        selected_provider.provider_name,
+                        success=False,
+                        latency_ms=latency_ms,
+                        cost_usd=0.0,
+                        timeout=isinstance(exc, TimeoutError),
+                    )
+                    logger.warning(
+                        "Provider %s failed: %s — %d fallback(s) remaining in chain",
+                        selected_provider.provider_name,
+                        exc,
+                        len(provider_chain) - provider_chain.index(provider_name) - 1,
+                    )
+                    last_exception = exc
+                    continue  # Try next provider in chain
+
+                # Success — break out of provider chain
+                break
+
+            except Exception as exc:
+                logger.warning(
+                    "Provider selection/execution error for %s: %s",
+                    provider_name,
+                    exc,
+                )
+                last_exception = exc
+                continue
+
+        if selected_provider is None or last_exception is not None and 'result' not in dir():
+            # All providers in chain failed
             logger.error(
-                "Provider execution failed: provider=%s trace_id=%s error=%s",
-                provider.provider_name,
+                "All providers failed for trace_id=%s chain=%s last_error=%s",
                 trace_id,
-                exc,
+                provider_chain,
+                last_exception,
             )
-            raise
+            if last_exception:
+                raise last_exception
+            raise RuntimeError(f"All providers failed: {provider_chain}")
 
         post_violations = self.guardrail_engine.evaluate_response(llm_request.prompt, result.content)
         if self.guardrail_engine.has_critical_violation(post_violations):

@@ -90,6 +90,10 @@ celery_app.conf.update(
             "options": {"queue": "default"},
         },
         # Idempotency record cleanup — every hour
+        # Note: _cleanup_idempotency_records() is also called inside
+        # recover_stuck_workflows (every 5 min), so this hourly entry
+        # is redundant but kept for explicit visibility. It runs the
+        # same recovery task which includes cleanup as a sub-step.
         "cleanup-idempotency-records": {
             "task": "recover_stuck_workflows",
             "schedule": crontab(minute="0"),

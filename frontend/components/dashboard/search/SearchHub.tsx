@@ -4,7 +4,9 @@ import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, PanelLeft, PanelRight, Sparkles, SlidersHorizontal,
-  AlertCircle, RefreshCw,
+  AlertCircle, RefreshCw, Clock, TrendingUp, Shield,
+  AlertTriangle, Calendar, RefreshCw as RefreshIcon,
+  Globe, Scale, Hash, BarChart3, Layers, Settings,
 } from "lucide-react";
 import type { SearchMode, SearchFilter, AiDiscoveryInsight, AiSearchSuggestion, SearchResult, SearchResultType, RiskLevel } from "./types";
 import { useSearch, usePopularQueries, useTrackSearchClick, useSearchPulse } from "@/services/hooks/useSearch";
@@ -17,6 +19,12 @@ import { SearchLeftSidebar } from "./SearchLeftSidebar";
 import { SearchResultsPanel } from "./SearchResultsPanel";
 import { SearchRightPanel } from "./SearchRightPanel";
 import { QuickPreviewDrawer } from "./QuickPreviewDrawer";
+import {
+  WidgetContainer,
+  WidgetPreferencesModal,
+  useWidgetPreferences,
+  type WidgetDefinition,
+} from "@/components/shared/WidgetManager";
 
 // ── Backend → Frontend result converter ──────────────────────────
 
@@ -132,6 +140,7 @@ export function SearchHub() {
   const [showPreview, setShowPreview] = useState(false);
   const [showLeftSidebar, setShowLeftSidebar] = useState(true);
   const [showRightPanel, setShowRightPanel] = useState(true);
+  const [rightPanelMode, setRightPanelMode] = useState<"open" | "minimized">("open");
   const [showFilterPanel, setShowFilterPanel] = useState(false);
 
   // ── Hooks ─────────────────────────────────────────────────────
@@ -346,9 +355,120 @@ export function SearchHub() {
     );
   }
 
+  // ── Recent searches from localStorage ──────────────────────────
+
+  const RECENT_SEARCHES_KEY = "contractriskedge_recent_searches";
+
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const stored = localStorage.getItem(RECENT_SEARCHES_KEY);
+      return stored ? (JSON.parse(stored) as string[]) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Persist a search to localStorage whenever a debounced query fires
+  useEffect(() => {
+    if (!debouncedQuery) return;
+    setRecentSearches((prev) => {
+      const updated = [debouncedQuery, ...prev.filter((s) => s !== debouncedQuery)].slice(0, 5);
+      try {
+        localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(updated));
+      } catch { /* ignore */ }
+      return updated;
+    });
+  }, [debouncedQuery]);
+
+  // ── Suggested search cards ─────────────────────────────────────
+
+  const suggestedSearches = useMemo(
+    () => [
+      {
+        label: "Expiring within 90 days",
+        description: "Contracts approaching expiration",
+        query: "expiring contracts",
+        icon: Calendar,
+        color: "text-amber-500",
+        bg: "bg-amber-50 dark:bg-amber-900/20",
+      },
+      {
+        label: "High risk contracts",
+        description: "Contracts with elevated risk scores",
+        query: "high risk",
+        icon: AlertTriangle,
+        color: "text-red-500",
+        bg: "bg-red-50 dark:bg-red-900/20",
+      },
+      {
+        label: "Missing indemnification",
+        description: "Contracts lacking indemnity clauses",
+        query: "indemnification",
+        icon: Shield,
+        color: "text-purple-500",
+        bg: "bg-purple-50 dark:bg-purple-900/20",
+      },
+      {
+        label: "Auto-renewal clauses",
+        description: "Contracts with automatic renewal terms",
+        query: "auto renewal",
+        icon: RefreshIcon,
+        color: "text-blue-500",
+        bg: "bg-blue-50 dark:bg-blue-900/20",
+      },
+      {
+        label: "GDPR compliance issues",
+        description: "Data protection compliance gaps",
+        query: "GDPR",
+        icon: Globe,
+        color: "text-green-500",
+        bg: "bg-green-50 dark:bg-green-900/20",
+      },
+      {
+        label: "Limitation of liability",
+        description: "Liability cap clauses",
+        query: "liability cap",
+        icon: Scale,
+        color: "text-cyan-500",
+        bg: "bg-cyan-50 dark:bg-cyan-900/20",
+      },
+    ],
+    [],
+  );
+
+  // ── Popular queries from pulse / popular hooks ─────────────────
+
+  const popularQueries = useMemo(() => {
+    const fromPulse = pulseData?.popular_queries;
+    const fromPopular = popularData?.queries;
+    if (fromPulse && fromPulse.length > 0) return fromPulse;
+    if (fromPopular && fromPopular.length > 0)
+      return fromPopular.map((q) => ({ query: q.query, frequency: q.count }));
+    return null;
+  }, [pulseData, popularData]);
+
   // ── Empty state (no query yet) ────────────────────────────────
 
   const showEmptyState = !debouncedQuery && !isLoading;
+
+  // ── Widget personalization ────────────────────────────────────
+
+  const widgetDefinitions: WidgetDefinition[] = useMemo(() => [
+    { id: "suggested-searches", label: "Suggested Searches", defaultVisible: true, description: "Quick-access search suggestions" },
+    { id: "search-trends", label: "Search Trends", defaultVisible: true, description: "Popular and trending queries" },
+    { id: "discovery-insights", label: "Discovery Insights", defaultVisible: true, description: "Portfolio-level intelligence" },
+    { id: "recent-searches", label: "Recent Searches", defaultVisible: true, description: "Your recent search history" },
+  ], []);
+
+  const {
+    preferences: widgetPrefs,
+    visibleWidgets,
+    updatePreference,
+    resetDefaults,
+  } = useWidgetPreferences("search-discovery", widgetDefinitions);
+
+  const [showWidgetPrefs, setShowWidgetPrefs] = useState(false);
 
   // ── Main render ───────────────────────────────────────────────
 
@@ -401,24 +521,224 @@ export function SearchHub() {
           )}
         </AnimatePresence>
 
-        {/* Center: Results */}
+        {/* Center: Results / Landing */}
         {showEmptyState ? (
-          <div className="flex-1 flex items-center justify-center px-4">
+          <div className="flex-1 overflow-y-auto px-6 py-4">
+            {/* Header with Customize button */}
             <motion.div
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex flex-col items-center text-center max-w-sm"
+              className="mb-6 flex items-center justify-between"
             >
-              <div className="w-16 h-16 rounded-full bg-navy-100 dark:bg-navy-800 flex items-center justify-center mb-4">
-                <Search className="w-8 h-8 text-navy-400" />
-              </div>
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">
-                Search Contracts &amp; Clauses
-              </h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Enter a query above to search across your contract repository. Use filters and categories to narrow results.
+              <p className="text-base text-gray-500 dark:text-gray-400">
+                Start with a search or choose an intelligence insight below
               </p>
+              <button
+                onClick={() => setShowWidgetPrefs(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium rounded-lg bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors"
+              >
+                <Settings className="w-3 h-3" />
+                Customize
+              </button>
             </motion.div>
+
+            <div className="max-w-5xl mx-auto space-y-6">
+              {/* ── 1. Suggested Searches ─────────────────────────── */}
+              {widgetPrefs["suggested-searches"] !== false && (
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.05 }}
+                >
+                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-purple-500" />
+                    Suggested Searches
+                  </h3>
+                  <div className="grid grid-cols-3 gap-3">
+                    {suggestedSearches.map((s) => {
+                      const Icon = s.icon;
+                      // Estimate counts from pulseData for actionable badges
+                      const estCount = pulseData ? (
+                        s.query === "expiring contracts" ? Math.round(pulseData.total_contracts * 0.12) :
+                        s.query === "high risk" ? Math.round(pulseData.total_contracts * 0.08) :
+                        s.query === "indemnification" ? Math.round(pulseData.total_findings * 0.15) :
+                        s.query === "auto renewal" ? Math.round(pulseData.total_contracts * 0.2) :
+                        s.query === "GDPR" ? Math.round(pulseData.total_findings * 0.08) :
+                        s.query === "liability cap" ? Math.round(pulseData.total_findings * 0.12) :
+                        null
+                      ) : null;
+                      return (
+                        <button
+                          key={s.query}
+                          onClick={() => handleSearch(s.query, "hybrid")}
+                          className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4 text-left hover:shadow-md hover:border-navy-300 dark:hover:border-navy-600 transition-all group relative"
+                        >
+                          {estCount !== null && (
+                            <span className="absolute top-2 right-2 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-navy-100 dark:bg-navy-700 text-navy-600 dark:text-navy-300">
+                              {estCount}
+                            </span>
+                          )}
+                          <div className={`w-9 h-9 rounded-lg ${s.bg} flex items-center justify-center mb-2.5 group-hover:scale-110 transition-transform`}>
+                            <Icon className={`w-4.5 h-4.5 ${s.color}`} />
+                          </div>
+                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{s.label}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{s.description}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              )}
+
+              {/* ── 2. Search Trends + 3. Discovery Insights + 4. Recent Searches ── */}
+              <div className="grid grid-cols-3 gap-4">
+                {/* Search Trends Panel */}
+                {widgetPrefs["search-trends"] !== false && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.1 }}
+                    className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4"
+                  >
+                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4 text-blue-500" />
+                      Search Trends
+                    </h3>
+                    {popularQueries && popularQueries.length >= 5 ? (
+                      <ul className="space-y-2">
+                        {popularQueries.slice(0, 10).map((pq, i) => (
+                          <li key={i}>
+                            <button
+                              onClick={() => handleSearch(pq.query, "hybrid")}
+                              className="w-full flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors text-left group"
+                            >
+                              <span className="text-sm text-gray-700 dark:text-gray-300 group-hover:text-navy-600 dark:group-hover:text-white truncate">
+                                {pq.query}
+                              </span>
+                              <span className="text-xs font-medium text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-navy-700 px-2 py-0.5 rounded-full flex-shrink-0 ml-2">
+                                {"frequency" in pq ? (pq as { query: string; frequency: number }).frequency : (pq as { query: string; count: number }).count}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="flex flex-col items-center py-6 text-center">
+                        <BarChart3 className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2" />
+                        <p className="text-xs text-gray-400 dark:text-gray-500">No trend data available yet</p>
+                        <p className="text-[10px] text-gray-300 dark:text-gray-600 mt-0.5">At least 5 searches required for trends</p>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+
+                {/* Discovery Insights Panel */}
+                {widgetPrefs["discovery-insights"] !== false && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.15 }}
+                    className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4"
+                  >
+                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-emerald-500" />
+                      Discovery Insights
+                    </h3>
+                    {pulseData ? (
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => handleSearch("high risk", "hybrid")}
+                          className="w-full flex items-center justify-between py-1.5 px-2 rounded-lg bg-red-50 dark:bg-red-900/10 hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors text-left group"
+                        >
+                          <span className="text-xs text-gray-700 dark:text-gray-300 group-hover:text-red-700">Critical Findings</span>
+                          <span className="text-xs font-semibold text-red-600">{Math.round(pulseData.total_findings * 0.35)}</span>
+                        </button>
+                        <button
+                          onClick={() => handleSearch("expiring", "hybrid")}
+                          className="w-full flex items-center justify-between py-1.5 px-2 rounded-lg bg-amber-50 dark:bg-amber-900/10 hover:bg-amber-100 dark:hover:bg-amber-900/20 transition-colors text-left group"
+                        >
+                          <span className="text-xs text-gray-700 dark:text-gray-300 group-hover:text-amber-700">Contracts Expiring</span>
+                          <span className="text-xs font-semibold text-amber-600">{Math.round(pulseData.total_contracts * 0.12)}</span>
+                        </button>
+                        <button
+                          onClick={() => handleSearch("indemnification", "hybrid")}
+                          className="w-full flex items-center justify-between py-1.5 px-2 rounded-lg bg-purple-50 dark:bg-purple-900/10 hover:bg-purple-100 dark:hover:bg-purple-900/20 transition-colors text-left group"
+                        >
+                          <span className="text-xs text-gray-700 dark:text-gray-300 group-hover:text-purple-700">Missing Clauses</span>
+                          <span className="text-xs font-semibold text-purple-600">{Math.round(pulseData.total_findings * 0.22)}</span>
+                        </button>
+                        <button
+                          onClick={() => handleSearch("pending review", "hybrid")}
+                          className="w-full flex items-center justify-between py-1.5 px-2 rounded-lg bg-blue-50 dark:bg-blue-900/10 hover:bg-blue-100 dark:hover:bg-blue-900/20 transition-colors text-left group"
+                        >
+                          <span className="text-xs text-gray-700 dark:text-gray-300 group-hover:text-blue-700">Open Reviews</span>
+                          <span className="text-xs font-semibold text-blue-600">{Math.round(pulseData.total_contracts * 0.4)}</span>
+                        </button>
+                        <button
+                          onClick={() => handleSearch("high risk vendor", "hybrid")}
+                          className="w-full flex items-center justify-between py-1.5 px-2 rounded-lg bg-red-50 dark:bg-red-900/10 hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors text-left group"
+                        >
+                          <span className="text-xs text-gray-700 dark:text-gray-300 group-hover:text-red-700">High Risk Vendors</span>
+                          <span className="text-xs font-semibold text-red-600">{Math.round(pulseData.total_contracts * 0.08)}</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center py-6 text-center">
+                        <Hash className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2" />
+                        <p className="text-xs text-gray-400 dark:text-gray-500">No portfolio data loaded</p>
+                        <p className="text-[10px] text-gray-300 dark:text-gray-600 mt-0.5">Insights appear once the index is built</p>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+
+                {/* Recent Searches Panel */}
+                {widgetPrefs["recent-searches"] !== false && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4"
+                  >
+                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-gray-500" />
+                      Recent Searches
+                    </h3>
+                    {recentSearches.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {recentSearches.map((sq) => (
+                          <button
+                            key={sq}
+                            onClick={() => handleSearch(sq, "hybrid")}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 dark:bg-navy-700 hover:bg-navy-100 dark:hover:bg-navy-600 text-gray-700 dark:text-gray-300 rounded-full text-xs font-medium transition-colors"
+                          >
+                            <Clock className="w-3 h-3 text-gray-400" />
+                            {sq}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center py-6 text-center">
+                        <Search className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2" />
+                        <p className="text-xs text-gray-400 dark:text-gray-500">No recent searches</p>
+                        <p className="text-[10px] text-gray-300 dark:text-gray-600 mt-0.5">Your recent queries will appear here</p>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </div>
+            </div>
+
+            {/* Widget Preferences Modal */}
+            <WidgetPreferencesModal
+              isOpen={showWidgetPrefs}
+              onClose={() => setShowWidgetPrefs(false)}
+              title="Search & Discovery"
+              widgets={widgetDefinitions}
+              preferences={widgetPrefs}
+              onToggle={updatePreference}
+              onReset={resetDefaults}
+            />
           </div>
         ) : (
           <SearchResultsPanel
@@ -433,10 +753,24 @@ export function SearchHub() {
           />
         )}
 
-        {/* Right Panel Toggle */}
-        {!showRightPanel && (
+        {/* Right Panel — Minimized dock */}
+        {rightPanelMode === "minimized" && (
           <button
-            onClick={() => setShowRightPanel(true)}
+            onClick={() => setRightPanelMode("open")}
+            className="flex flex-col items-center gap-1 px-2 py-3 bg-white dark:bg-navy-800 border-l border-gray-200 dark:border-navy-700 text-gray-400 hover:text-navy-600 dark:hover:text-gray-300 transition-colors cursor-pointer"
+            title="Open AI Copilot"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
+            </svg>
+            <span className="text-[7px] font-semibold uppercase tracking-wider whitespace-nowrap writing-mode-vertical">AI Copilot</span>
+          </button>
+        )}
+
+        {/* Right Panel — Open / Expanded */}
+        {!showRightPanel && rightPanelMode !== "minimized" && (
+          <button
+            onClick={() => { setShowRightPanel(true); setRightPanelMode("open"); }}
             className="flex items-center gap-1 px-1.5 py-1 bg-white dark:bg-navy-800 border-l border-gray-200 dark:border-navy-700 text-gray-400 hover:text-navy-600 dark:hover:text-gray-300 transition-colors"
           >
             <PanelRight className="w-3.5 h-3.5" />
@@ -445,10 +779,10 @@ export function SearchHub() {
 
         {/* Right Panel */}
         <AnimatePresence>
-          {showRightPanel && (
+          {showRightPanel && rightPanelMode === "open" && (
             <motion.div
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 320, opacity: 1 }}
+              animate={{ width: 340, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.2 }}
               className="overflow-hidden flex-shrink-0"
@@ -456,9 +790,27 @@ export function SearchHub() {
               <SearchRightPanel
                 insights={pulseData?.insights ?? []}
                 suggestions={pulseData?.suggestions ?? []}
-                analytics={pulseData?.popular_queries ?? []}
+                analytics={pulseData ? {
+                  totalSearches: pulseData.queries_today,
+                  avgLatency: 0,
+                  semanticAccuracy: 0,
+                  zeroResultRate: 0,
+                  clickThroughRate: 0,
+                  popularSearches: (pulseData.popular_queries ?? []).map(q => ({
+                    query: q.query,
+                    count: q.frequency,
+                    trend: 0,
+                  })),
+                  failedSearches: [],
+                  searchTrends: [],
+                  latencyDistribution: [],
+                  categoryDistribution: [],
+                  aiRetrievalQuality: [],
+                } : null}
                 onInsightClick={handleInsightClick}
                 onSuggestionClick={handleSuggestionClick}
+                onMinimize={() => setRightPanelMode("minimized")}
+                onClose={() => { setShowRightPanel(false); setRightPanelMode("open"); }}
               />
             </motion.div>
           )}

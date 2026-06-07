@@ -20,16 +20,31 @@ import React, { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { EnterpriseReviewPlatform } from "@/components/ai-review/EnterpriseReviewPlatform";
+import type { ReviewSection } from "@/components/ai-review/types";
 
 function AiReviewWorkspaceContent() {
   const searchParams = useSearchParams();
   const reviewId = searchParams.get("reviewId");
   const contractId = searchParams.get("contractId");
+  const tab = searchParams.get("tab");
+  // The `tab` query param is a hint for which section to land on. We
+  // accept any of the well-known ReviewSection ids and fall back to
+  // undefined (which the platform treats as "summary") for unknown
+  // values so a typo doesn't break the page.
+  const VALID_SECTIONS = new Set<ReviewSection>([
+    "summary", "overview", "findings", "redline", "versions", "policy",
+    "recommendations", "risk_reduction", "workflow", "explainability",
+    "audit", "governance", "history",
+  ]);
+  const initialSection = (tab && VALID_SECTIONS.has(tab as ReviewSection))
+    ? (tab as ReviewSection)
+    : undefined;
 
   return (
     <EnterpriseReviewPlatform
       preselectedReviewId={reviewId || undefined}
       preselectedContractId={contractId || undefined}
+      initialSection={initialSection}
     />
   );
 }

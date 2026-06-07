@@ -78,6 +78,35 @@ class Settings(BaseSettings):
     # ── Redis ──────────────────────────────────────────────────────
     redis_url: str = "redis://localhost:6379/0"
 
+    # ── AI Rate Limiting ───────────────────────────────────────────
+    ai_rate_limit_analyze_per_user: int = 5
+    """Max analyze requests per user per window."""
+    ai_rate_limit_analyze_per_tenant: int = 100
+    """Max analyze requests per tenant per tenant window."""
+    ai_rate_limit_analyze_window_seconds: int = 60
+    """Per-user sliding window for analyze requests."""
+    ai_rate_limit_tenant_window_seconds: int = 3600
+    """Per-tenant sliding window (1 hour)."""
+    ai_rate_limit_copilot_per_user: int = 20
+    """Max copilot suggest requests per user per window."""
+    ai_rate_limit_copilot_per_tenant: int = 200
+    """Max copilot suggest requests per tenant per hour."""
+    ai_max_concurrent_analyses: int = 5
+    """Max simultaneous AI analyses per tenant across all workers.
+    Development default: 5. Production override: 3 (set via env var)."""
+    ai_concurrency_retry_seconds: int = 30
+    """Max retry delay (seconds) when concurrent analysis limit reached.
+    Actual delay uses exponential backoff: 5s, 10s, 20s, capped at this value."""
+
+    @property
+    def effective_max_concurrent(self) -> int:
+        """Return environment-appropriate concurrency limit.
+        Production is more conservative than development.
+        """
+        if self.environment == "production":
+            return min(self.ai_max_concurrent_analyses, 3)
+        return self.ai_max_concurrent_analyses
+
     # ── Auth0 ──────────────────────────────────────────────────────
     auth0_domain: str = ""
     auth0_audience: str = "https://api.contractriskedge.com"
@@ -207,7 +236,7 @@ class Settings(BaseSettings):
     s3_access_key: str = "minioadmin"
     s3_secret_key: str = "minioadmin"
     s3_region: str = "us-east-1"
-    s3_bucket: str = "contractedge-documents"
+    s3_bucket: str = "contractrisk-documents"
     """Default S3/MinIO bucket for document storage."""
     s3_connect_timeout_seconds: int = 5
     s3_read_timeout_seconds: int = 120

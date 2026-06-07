@@ -38,7 +38,7 @@ export function RiskTrendChart({ data }: { data: RiskTrend[] }) {
   return (
     <SectionCard title="Enterprise Risk Trend" subtitle="Risk distribution and exposure over time">
       <div className="h-64">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <AreaChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
             <defs>{["critical", "high", "medium", "low"].map((k) => (
               <linearGradient key={k} id={`ar-${k}`} x1="0" y1="0" x2="0" y2="1">
@@ -69,7 +69,7 @@ export function DepartmentChart({ data }: { data: DepartmentAnalytics[] }) {
   return (
     <SectionCard title="Department Risk Comparison" subtitle="Average risk score by department">
       <div className="h-64">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <BarChart data={sorted} layout="vertical" margin={{ top: 5, right: 30, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" horizontal={false} />
             <XAxis type="number" domain={[0, 10]} tick={{ fontSize: 11, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
@@ -92,7 +92,7 @@ export function VendorRankingChart({ data }: { data: VendorAnalytics[] }) {
   return (
     <SectionCard title="Vendor Spend & Risk Ranking" subtitle="Total spend vs risk score by vendor">
       <div className="h-64">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <BarChart data={sorted} layout="vertical" margin={{ top: 5, right: 30, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" horizontal={false} />
             <XAxis type="number" tick={{ fontSize: 11, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
@@ -112,7 +112,7 @@ export function ComplianceChart({ data }: { data: ComplianceAnalytics[] }) {
   return (
     <SectionCard title="Compliance Benchmark" subtitle="Your score vs market average">
       <div className="h-56">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <BarChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
             <XAxis dataKey="standard" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />
@@ -136,7 +136,7 @@ export function ForecastChart({ data }: { data: ForecastPoint[] }) {
   return (
     <SectionCard title="Risk Exposure Forecast" subtitle="Actual vs predicted exposure with confidence bands">
       <div className="h-64">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <AreaChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
             <XAxis dataKey="period" tick={{ fontSize: 11, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
@@ -184,7 +184,7 @@ export function DepartmentExposureChart({ data }: { data: DepartmentAnalytics[] 
   return (
     <SectionCard title="Financial Exposure by Department" subtitle="Total at-risk contract value ($M)">
       <div className="h-56">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <BarChart data={[...data].sort((a, b) => b.exposure - a.exposure)} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
             <XAxis dataKey="department" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />

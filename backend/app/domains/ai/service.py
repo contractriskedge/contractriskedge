@@ -50,6 +50,8 @@ from app.domains.ingestion.repository import IngestionRepository
 from app.domains.review.models import (
     ContractReview, ReviewFinding, ReviewRedline, ReviewStatus,
 )
+from app.domains.tenant_config.context_provider import TenantConfigContextProvider
+from app.domains.tenant_config.service import ScoringOverrideService
 from app.kernel.events.bus import EventBus
 from app.kernel.security.auth import UserContext
 
@@ -350,11 +352,31 @@ class AIService:
             post_violations = guardrail_engine.evaluate_response(prompt_text, risk_result.content)
             guardrail_violations = pre_violations + post_violations
 
+            # Load tenant scoring overrides for this analysis
+            scoring_overrides: dict[str, dict] = {}
+            try:
+                scoring_service = ScoringOverrideService(
+                    self.ai_repo.session, self.tenant_id,
+                )
+                overrides_list = await scoring_service.list_overrides()
+                for o in overrides_list:
+                    scoring_overrides[o.clause_type] = {
+                        "severity": o.override_severity,
+                        "weight": o.override_risk_weight,
+                        "score": o.override_risk_score,
+                    }
+            except Exception as exc:
+                logger.warning(
+                    "Failed to load scoring overrides: %s — using default scoring",
+                    exc,
+                )
+
             analysis_result = self._build_analysis_result(
                 validated.model_dump() if validated else parsed,
                 risk_result.model,
                 guardrail_violations=guardrail_violations,
                 execution_context=execution_context,
+                scoring_overrides=scoring_overrides,
             )
 
             # 5. Store findings
@@ -698,15 +720,72 @@ class AIService:
         chunks: list,
         provider: OpenAIProvider,
     ) -> tuple[str, LLMRequest, int]:
-        """Render the risk analysis prompt and request for execution."""
+        """Render the risk analysis prompt and request for execution.
+
+        Injects tenant-specific policy context (Playbook + Policy Pack overrides)
+        into the LLM prompt so the AI evaluates clauses against company standards.
+        """
         chunk_data = [
             {"text": c.text[:2000], "page_numbers": c.page_numbers or [1]}
             for c in chunks[:50]
         ]
 
+        # ── Tenant Configuration Injection ────────────────────────────
+        policy_context_str = ""
+        try:
+            config_provider = TenantConfigContextProvider(
+                self.ai_repo.session, self.tenant_id,
+            )
+            merged = await config_provider.get_merged_context()
+
+            if merged.clauses or merged.rules:
+                parts = ["TENANT POLICY CONTEXT:"]
+                parts.append("")
+
+                # Policy rules
+                mandatory = [r for r in merged.rules if r.is_mandatory and r.is_active]
+                if mandatory:
+                    parts.append(f"MANDATORY RULES ({len(mandatory)}):")
+                    for r in mandatory[:10]:
+                        parts.append(f"  - [{r.rule_type}] {r.name}: effect={r.effect}")
+                    parts.append("")
+
+                # Clause standards with overrides applied
+                approved = [c for c in merged.clauses if c.clause_type in ("approved", "preferred") and c.is_active]
+                if approved:
+                    parts.append(f"APPROVED CLAUSE STANDARDS ({len(approved)}):")
+                    for c in approved[:10]:
+                        tag = " [TENANT OVERRIDE]" if c.overridden else ""
+                        parts.append(f"  - {c.category}/{c.title}{tag}: {c.body[:300]}")
+                    parts.append("")
+
+                forbidden = [c for c in merged.clauses if c.clause_type == "forbidden" and c.is_active]
+                if forbidden:
+                    parts.append(f"FORBIDDEN CLAUSES ({len(forbidden)}):")
+                    for c in forbidden[:5]:
+                        parts.append(f"  - {c.category}/{c.title}")
+                    parts.append("")
+
+                if merged.total_overrides_applied > 0:
+                    parts.append(
+                        f"Note: {merged.total_overrides_applied} tenant-specific "
+                        f"override(s) are active for this analysis."
+                    )
+                    parts.append("")
+
+                parts.append("Evaluate each clause against these standards. Flag any deviations.")
+                policy_context_str = "\n".join(parts)
+
+        except Exception as exc:
+            logger.warning(
+                "Failed to load tenant policy context: %s — continuing without policy injection",
+                exc,
+            )
+
         prompt = prompt_registry.render(
             "risk_analysis", version="1.0.0",
             chunks=chunk_data,
+            policy_context=policy_context_str,
         )
 
         template = prompt_registry.get("risk_analysis")
@@ -773,6 +852,22 @@ class AIService:
         from app.domains.playbook.context_provider import PlaybookContextProvider
         playbook_provider = PlaybookContextProvider(self.ai_repo.session, self.tenant_id)
 
+        # Load tenant config context for clause override injection
+        tenant_clause_overrides: dict[str, str] = {}
+        try:
+            config_provider = TenantConfigContextProvider(
+                self.ai_repo.session, self.tenant_id,
+            )
+            merged = await config_provider.get_merged_context()
+            for c in merged.clauses:
+                if c.overridden and c.body:
+                    tenant_clause_overrides[c.category] = c.body
+        except Exception as exc:
+            logger.warning(
+                "Failed to load tenant clause overrides: %s — continuing without overrides",
+                exc,
+            )
+
         for finding in eligible:
             relevant_text = _chunk_text_for_indices(chunks, finding.chunk_indices)
             if not relevant_text.strip():
@@ -797,6 +892,20 @@ class AIService:
                     "Playbook context fetch failed for %s: %s — continuing without playbook guidance",
                     finding.clause_type, pb_exc,
                 )
+
+            # Inject tenant-specific clause override if available
+            override_body = tenant_clause_overrides.get(finding.clause_type or "")
+            if override_body:
+                if playbook_context:
+                    playbook_context += (
+                        f"\n\nTENANT-SPECIFIC CLAUSE OVERRIDE:\n{override_body}\n\n"
+                        "This tenant-specific override takes precedence over the playbook standards above."
+                    )
+                else:
+                    playbook_context = (
+                        f"TENANT-SPECIFIC CLAUSE LANGUAGE:\n{override_body}\n\n"
+                        "Use this language as the primary basis for your proposed_text."
+                    )
 
             # Use v4 prompt — playbook-aware, forbids section numbering, returns risk traceability
             prompt = prompt_registry.render(
@@ -920,8 +1029,22 @@ class AIService:
         model: str,
         guardrail_violations: list[AIGuardrailViolation] | None = None,
         execution_context: Optional[dict[str, Any]] = None,
+        scoring_overrides: Optional[dict[str, dict]] = None,
     ) -> AnalysisResult:
-        """Build structured AnalysisResult from parsed LLM output."""
+        """Build structured AnalysisResult from parsed LLM output.
+
+        Applies tenant-specific Scoring Overrides (when available) to override
+        severity, risk weight, and risk score per clause type.
+
+        Args:
+            parsed: Parsed LLM output
+            model: Model name used
+            guardrail_violations: Any guardrail violations
+            execution_context: Execution metadata
+            scoring_overrides: Optional dict of clause_type → {severity, weight, score}
+        """
+        scoring_overrides = scoring_overrides or {}
+        default_conf_map = {"critical": 0.95, "high": 0.85, "medium": 0.65, "low": 0.40}
         if not parsed:
             return AnalysisResult(
                 model_used=model,
@@ -940,13 +1063,15 @@ class AIService:
 
         findings = []
         for f in parsed.get("findings", []):
+            clause_type = f.get("clause_type", "other")
+            tenant_override = scoring_overrides.get(clause_type)
+
             # Coerce confidence to float — the AI sometimes returns strings
             raw_conf = f.get("confidence", 0.5)
             if isinstance(raw_conf, str):
-                conf_map = {"critical": 0.95, "high": 0.85, "medium": 0.65, "low": 0.40}
                 normalized = raw_conf.strip().lower()
-                if normalized in conf_map:
-                    confidence = conf_map[normalized]
+                if normalized in default_conf_map:
+                    confidence = default_conf_map[normalized]
                 else:
                     try:
                         confidence = float(normalized)
@@ -958,19 +1083,82 @@ class AIService:
                 confidence = 0.5
             confidence = max(0.0, min(1.0, confidence))
 
+            # Apply tenant scoring override for severity
+            severity = f.get("severity", "info")
+            if tenant_override and tenant_override.get("severity"):
+                severity = tenant_override["severity"]
+
+            # Apply tenant scoring override for risk_score
+            risk_score = f.get("risk_score")
+            if tenant_override and tenant_override.get("score") is not None:
+                risk_score = tenant_override["score"]
+
             findings.append(RiskFinding(
-                clause_type=f.get("clause_type", "other"),
-                severity=f.get("severity", "info"),
+                clause_type=clause_type,
+                severity=severity,
                 title=f.get("title", ""),
                 description=f.get("description", ""),
                 recommendation=f.get("recommendation"),
                 confidence=confidence,
-                risk_score=f.get("risk_score"),
+                risk_score=risk_score,
                 chunk_indices=f.get("chunk_indices", []),
             ))
 
+        # Calculate overall risk score using tenant weights if available
+        overall_risk = parsed.get("risk_score", 0.0)
+        if findings and scoring_overrides:
+            weighted_scores = []
+            total_weight = 0.0
+            for finding in findings:
+                override = scoring_overrides.get(finding.clause_type)
+                weight = 1.0
+                if override and override.get("weight") is not None:
+                    weight = override["weight"]
+                score = finding.risk_score if finding.risk_score is not None else 0.5
+                weighted_scores.append(score * weight)
+                total_weight += weight
+            if total_weight > 0:
+                overall_risk = sum(weighted_scores) / total_weight
+
+        # ── Safeguard: never store the LLM's literal "risk_score" as the
+        # overall risk if it is suspiciously equal to the finding count
+        # (the LLM sometimes writes the count instead of an aggregate
+        # score). When that pattern is detected we fall back to a
+        # severity-weighted aggregate computed from the findings.
+        llm_literal = parsed.get("risk_score", 0.0)
+        finding_count = len(findings)
+        looks_like_count = (
+            finding_count > 0
+            and isinstance(llm_literal, (int, float))
+            and 0 < llm_literal < 100
+            and (
+                abs(llm_literal - finding_count) < 0.01
+                or (0 < llm_literal < 1.0 and abs(llm_literal * 10 - finding_count) < 0.1)
+            )
+        )
+        if looks_like_count and findings:
+            # Severity-weighted average as a sanity-check fallback.
+            SEVERITY_WEIGHTS = {
+                "critical": 1.0, "high": 0.7, "medium": 0.4, "low": 0.15, "info": 0.0,
+            }
+            total = 0.0
+            for f in findings:
+                total += SEVERITY_WEIGHTS.get(f.severity, 0.4)
+            # Scale by severity saturation — more findings of the same
+            # severity compound the score, but with diminishing returns.
+            aggregate = min(1.0, total / max(3.0, len(findings)))
+            logger.warning(
+                "LLM risk_score %.4f looks like finding count %d; "
+                "using severity-weighted aggregate %.4f instead",
+                llm_literal, finding_count, aggregate,
+            )
+            overall_risk = aggregate
+        else:
+            # Use the LLM's value, but only if it passed the suspicion check.
+            overall_risk = llm_literal
+
         return AnalysisResult(
-            risk_score=parsed.get("risk_score", 0.0),
+            risk_score=overall_risk,
             summary=parsed.get("summary", ""),
             findings=findings,
             model_used=model,

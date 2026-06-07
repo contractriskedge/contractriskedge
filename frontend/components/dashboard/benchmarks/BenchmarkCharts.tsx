@@ -39,7 +39,7 @@ export function ClauseBenchmarkChart({ data }: { data: ClauseBenchmark[] }) {
   return (
     <SectionCard title="Clause Benchmark Distribution" subtitle="Your scores vs market median (P25–P75 range)">
       <div className="h-72">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <BarChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
             <XAxis dataKey="name" tick={{ fontSize: 8, fill: "#6B7280" }} axisLine={false} tickLine={false} angle={-35} textAnchor="end" height={60} interval={0} />
@@ -68,7 +68,7 @@ export function DeviationHeatmap({ data }: { data: ClauseBenchmark[] }) {
   return (
     <SectionCard title="Deviation from Market (%)" subtitle="Positive = above market (worse for client)">
       <div className="h-72">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 30, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" horizontal={false} />
             <XAxis type="number" tick={{ fontSize: 11, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
@@ -94,7 +94,7 @@ export function IndustryComparisonChart({ data }: { data: IndustryComparison[] }
   return (
     <SectionCard title="Industry Comparison" subtitle="Your risk profile vs industry averages">
       <div className="h-72">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <BarChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
             <XAxis dataKey="name" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} angle={-20} textAnchor="end" height={40} />
@@ -116,7 +116,7 @@ export function VendorAggressivenessChart({ data }: { data: { vendor: string; sc
   return (
     <SectionCard title="Vendor Aggressiveness Index" subtitle="Higher = more vendor-favorable terms">
       <div className="h-64">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <BarChart data={[...data].sort((a, b) => b.score - a.score)} layout="vertical" margin={{ top: 5, right: 30, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" horizontal={false} />
             <XAxis type="number" domain={[0, 10]} tick={{ fontSize: 11, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
@@ -139,7 +139,7 @@ export function ComplianceBenchmarkChart({ data }: { data: { regulation: string;
   return (
     <SectionCard title="Compliance Benchmark Coverage" subtitle="Your coverage vs market standards (%)">
       <div className="h-56">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <BarChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
             <XAxis dataKey="regulation" tick={{ fontSize: 10, fill: "#6B7280" }} axisLine={false} tickLine={false} />
@@ -161,7 +161,7 @@ export function ClauseFrequencyChart({ data }: { data: { clauseType: string; fre
   return (
     <SectionCard title="Clause Library: Frequency vs Risk" subtitle="Bubble size = frequency in corpus">
       <div className="h-64">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <ScatterChart margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
             <XAxis dataKey="frequency" name="Frequency %" domain={[0, 100]} tick={{ fontSize: 11, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />

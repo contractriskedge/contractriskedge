@@ -208,16 +208,72 @@ export function useContractCompliance(contractId: string) {
 }
 
 /** Fetch activity timeline.
- *  Backend: activity is embedded in GET /reviews/{review_id}/workspace.
- *  No standalone activity endpoint exists, so we use the workspace hydrate.
+ *  Backend: activity is embedded in GET /reviews/{review_id}/workspace as
+ *  `recent_activity` (array of status-history rows). We also synthesize a
+ *  few extra entries from `versions` so the timeline never feels empty
+ *  even for contracts that haven't had a status transition yet.
  */
 export function useContractActivity(contractId: string) {
   return useQuery({
     queryKey: contractDetailKeys.activity(contractId),
     queryFn: async () => {
       try {
-        const res = await api.get<{ events?: ActivityEvent[]; activity?: ActivityEvent[] }>(`/reviews/${contractId}/workspace`);
-        return { events: res.events ?? res.activity ?? [] };
+        const res = await api.get<{
+          recent_activity?: Array<Record<string, unknown>>;
+          events?: ActivityEvent[];
+          activity?: ActivityEvent[];
+          versions?: Array<Record<string, unknown>>;
+          review?: Record<string, unknown>;
+        }>(`/reviews/${contractId}/workspace`);
+
+        // Fast path: backend already returns the friendly shape
+        if (res.events?.length) {
+          return { events: res.events };
+        }
+        if (res.activity?.length) {
+          return { events: res.activity };
+        }
+
+        // Normalize the actual `recent_activity` payload from
+        // GET /reviews/{id}/workspace. The backend returns rows with
+        // {activity_id, from_status, to_status, changed_by, reason, created_at}
+        // which we map to the ActivityEvent shape used by the UI.
+        const statusEvents: ActivityEvent[] = (res.recent_activity ?? []).map(
+          (row) => normalizeStatusHistoryRow(row),
+        );
+
+        // Synthesize events from the document version list — every new
+        // version is a real "version_created" activity that the UI can
+        // show. This is what was missing before: a brand-new contract
+        // has no status transitions but does have a current version.
+        const versionEvents: ActivityEvent[] = (res.versions ?? [])
+          .slice(0, 10)
+          .map((v) => normalizeVersionRow(v));
+
+        // Fall back to the contract creation if we still have nothing
+        // to show (e.g. very old contracts with no version rows).
+        const fallback: ActivityEvent[] = [];
+        if (statusEvents.length === 0 && versionEvents.length === 0) {
+          const createdAt = String(
+            res.review?.created_at ?? res.review?.createdAt ?? new Date().toISOString(),
+          );
+          const createdBy = String(
+            res.review?.created_by ?? res.review?.createdBy ?? "system",
+          );
+          fallback.push({
+            id: `fallback-${contractId}-created`,
+            type: "contract_created",
+            actor: createdBy,
+            action: "Contract created",
+            timestamp: createdAt,
+          });
+        }
+
+        return {
+          events: [...statusEvents, ...versionEvents, ...fallback].sort(
+            (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+          ),
+        };
       } catch {
         return { events: [] };
       }
@@ -225,6 +281,79 @@ export function useContractActivity(contractId: string) {
     enabled: !!contractId,
     staleTime: 30_000,
   });
+}
+
+/** Map a backend `review_status_history` row to the frontend ActivityEvent shape. */
+function normalizeStatusHistoryRow(row: Record<string, unknown>): ActivityEvent {
+  const from = row.from_status ? String(row.from_status) : null;
+  const to = row.to_status ? String(row.to_status) : null;
+  const reason = row.reason ? String(row.reason) : "";
+  const actor = row.changed_by ? String(row.changed_by) : "system";
+  const timestamp = row.created_at
+    ? String(row.created_at)
+    : new Date().toISOString();
+  const id = row.activity_id
+    ? String(row.activity_id)
+    : `status-${timestamp}-${actor}`;
+
+  // Derive a friendly `type` and `action` from the transition. We
+  // recognise the common ReviewStatus values the backend produces.
+  const action = describeTransition(from, to, reason);
+  const type = transitionType(from, to);
+
+  return {
+    id,
+    type,
+    actor,
+    action,
+    timestamp,
+    details: reason || undefined,
+  };
+}
+
+function describeTransition(
+  from: string | null,
+  to: string | null,
+  reason: string,
+): string {
+  const cleanTo = (to ?? "").replace(/_/g, " ");
+  if (from && to) {
+    return `Status changed: ${from.replace(/_/g, " ")} → ${cleanTo}${reason ? ` (${reason})` : ""}`;
+  }
+  if (to) {
+    return `Status set to ${cleanTo}${reason ? ` (${reason})` : ""}`;
+  }
+  return reason || "Status updated";
+}
+
+function transitionType(
+  from: string | null,
+  to: string | null,
+): ActivityEvent["type"] {
+  if (to === "approved") return "review_approved";
+  if (to === "rejected") return "review_rejected";
+  if (to === "ai_analyzed" || to === "ai_reviewed") return "ai_analysis_completed";
+  if (to === "in_review") return "status_changed";
+  if (to === "escalated") return "status_changed";
+  if (from && to && from !== to) return "status_changed";
+  return "status_changed";
+}
+
+/** Map a backend `contract_document_versions` row to an ActivityEvent. */
+function normalizeVersionRow(v: Record<string, unknown>): ActivityEvent {
+  const versionNumber = v.version_number ?? v.versionNumber ?? 1;
+  const createdAt = String(v.created_at ?? v.createdAt ?? new Date().toISOString());
+  const createdBy = String(v.created_by ?? v.createdBy ?? "system");
+  const changeSummary = v.change_summary ?? v.changeSummary;
+  const id = String(v.version_id ?? v.versionId ?? `version-${versionNumber}-${createdAt}`);
+
+  return {
+    id,
+    type: "version_created",
+    actor: createdBy,
+    action: `Version v${versionNumber} created${changeSummary ? ` — ${String(changeSummary)}` : ""}`,
+    timestamp: createdAt,
+  };
 }
 
 /** Fetch comments. */

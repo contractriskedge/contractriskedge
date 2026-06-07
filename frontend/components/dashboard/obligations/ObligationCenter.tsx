@@ -1,15 +1,17 @@
 "use client";
 
 import React, { useState, useMemo, useCallback } from "react";
+import { useQueryClient, useMutation, useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ClipboardCheck, Download, RefreshCw, Search, Filter, Bell, AlertTriangle, Loader2, AlertCircle, Eye, Save } from "lucide-react";
+import { ClipboardCheck, Download, RefreshCw, Search, Filter, Bell, AlertTriangle, Loader2, AlertCircle, Eye, Save, Plus, History, X } from "lucide-react";
 import { ObligationKpiCards } from "./ObligationKpiCards";
 import { ObligationTable } from "./ObligationTable";
 import { ObligationAiInsights } from "./AiInsights";
 import { SlaPerformanceChart, SlaVendorTable, FinancialExposurePanel, ObligationTimeline } from "./SlaCenter";
 import { ObligationDetailDrawer } from "./ObligationDetailDrawer";
+import { CreateObligationModal } from "./CreateObligationModal";
 import { ObligationFilterBar } from "./ObligationFilterBar";
-import type { ObligationRecord, ObligationKpi, ObligationInsight, SlaMetric, FinancialExposure, TimelineEvent } from "./types";
+import type { ObligationRecord, ObligationKpi, ObligationInsight, SlaMetric, FinancialExposure, TimelineEvent, AuditLogEntry } from "./types";
 import type { ObligationResponse, SlaMetricResponse, FinancialExposureResponse } from "@/services/api/obligations";
 import {
   useObligations, useObligationKpis, useSlaPerformance, useSlaBreaches,
@@ -17,6 +19,10 @@ import {
   useFinancialExposure, useValueAtRisk, useAnomalies, useEscalations,
   useUpdateObligation,
 } from "@/services/hooks/useObligations";
+import { obligationsService, obligationKeys } from "@/services/api/obligations";
+import { useRouter } from "next/navigation";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { useCreateObligation } from "@/services/hooks/useObligations";
 
 // ── Mappers ──────────────────────────────────────────────────────
 
@@ -44,6 +50,7 @@ function toObligationRecord(o: ObligationResponse): ObligationRecord {
     aiConfidence: o.ai_confidence ?? 0,
     description: o.description ?? "",
     clauseReference: o.clause_reference ?? "",
+    sourceClause: o.clause_reference ?? undefined,
     attachments: o.attachments_count ?? 0,
     reminders: o.reminders_count ?? 0,
     notes: o.notes ?? "",
@@ -52,6 +59,7 @@ function toObligationRecord(o: ObligationResponse): ObligationRecord {
     geography: o.geography ?? "",
     createdAt: o.created_at ?? "",
     lastModified: o.updated_at ?? o.created_at ?? "",
+    isFavorite: o.is_favorite ?? false,
   };
 }
 
@@ -114,11 +122,52 @@ interface ObligationFilters {
 const defaultFilters: ObligationFilters = { type: "", status: "", vendor: "", slaStatus: "", riskLevel: "", department: "" };
 
 export function ObligationCenter() {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const createObligation = useCreateObligation();
   const [filters, setFilters] = useState<ObligationFilters>({ ...defaultFilters });
   const [selectedObligation, setSelectedObligation] = useState<ObligationRecord | null>(null);
   const [activeView, setActiveView] = useState("all");
   const [showSavedViews, setShowSavedViews] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [auditObligationId, setAuditObligationId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  // ── Action Mutations ──────────────────────────────────────────
+  const completeMutation = useMutation({
+    mutationFn: (id: string) => obligationsService.completeObligation(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["obligations"] }); showFeedback("success", "Obligation completed"); },
+    onError: (err: Error) => showFeedback("error", err.message),
+  });
+  const cancelMutation = useMutation({
+    mutationFn: (id: string) => obligationsService.cancelObligation(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["obligations"] }); showFeedback("success", "Obligation cancelled"); },
+    onError: (err: Error) => showFeedback("error", err.message),
+  });
+  const archiveMutation = useMutation({
+    mutationFn: (id: string) => obligationsService.archiveObligation(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["obligations"] }); showFeedback("success", "Obligation archived"); },
+    onError: (err: Error) => showFeedback("error", err.message),
+  });
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => obligationsService.deleteObligation(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["obligations"] }); showFeedback("success", "Obligation permanently deleted"); },
+    onError: (err: Error) => showFeedback("error", err.message),
+  });
+
+  // ── Audit History Query ───────────────────────────────────────
+  const { data: auditData, isLoading: auditLoading } = useQuery({
+    queryKey: [...obligationKeys.all, "audit", auditObligationId],
+    queryFn: () => (auditObligationId ? obligationsService.getAuditHistory(auditObligationId) : Promise.resolve([])),
+    enabled: !!auditObligationId,
+    staleTime: 10_000,
+  });
+
+  const showFeedback = (type: "success" | "error", message: string) => {
+    setFeedback({ type, message });
+    setTimeout(() => setFeedback(null), 3000);
+  };
 
   // ── Live API Queries ──────────────────────────────────────────
   const { data: obligationsData, isLoading, isError, refetch } = useObligations({
@@ -166,15 +215,24 @@ export function ObligationCenter() {
 
   const timelineEvents: TimelineEvent[] = useMemo(() => {
     const overdue = (overdueData?.data ?? []).map((o: ObligationResponse) => ({
-      id: o.id, title: `Overdue: ${o.name}`, description: `Overdue obligation with ${o.vendor}`,
-      event_date: o.due_date ?? "", status: "overdue", vendor: o.vendor ?? "", obligation_id: o.id,
+      id: `overdue-${o.id}`, title: `Overdue: ${o.name}`, description: `Overdue obligation with ${o.vendor}`,
+      event_date: o.due_date ?? "", status: "overdue" as const, vendor: o.vendor ?? "", obligation_id: o.id,
     }));
     const upcoming = (upcomingData?.data ?? []).map((o: ObligationResponse) => ({
-      id: o.id, title: `Due: ${o.name}`, description: `Due ${o.due_date}`,
-      event_date: o.due_date ?? "", status: "pending", vendor: o.vendor ?? "", obligation_id: o.id,
+      id: `upcoming-${o.id}`, title: `Due: ${o.name}`, description: `Due ${o.due_date}`,
+      event_date: o.due_date ?? "", status: "pending" as const, vendor: o.vendor ?? "", obligation_id: o.id,
     }));
-    return [...overdue, ...upcoming].slice(0, 20).map(toTimelineEvent);
-  }, [overdueData, upcomingData]);
+    const escalations = (escalationData?.data ?? []).map((e: any) => ({
+      id: `esc-${e.id}`, title: `Escalated: ${e.obligation_id?.slice(0, 8) ?? "Unknown"}`,
+      description: `Level ${e.escalation_level} escalation to ${e.escalated_to}`,
+      event_date: e.created_at ?? "", status: "escalated" as const, vendor: "", obligation_id: e.obligation_id ?? "",
+    }));
+    // Combine, sort by date descending, limit to 20
+    const combined = [...overdue, ...upcoming, ...escalations].sort(
+      (a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime(),
+    );
+    return combined.slice(0, 20).map(toTimelineEvent);
+  }, [overdueData, upcomingData, escalationData]);
 
   // ── KPI Cards ─────────────────────────────────────────────────
   const clauseKpis: ObligationKpi[] = useMemo(() => {
@@ -253,10 +311,18 @@ export function ObligationCenter() {
 
   const toggleFavorite = useCallback((id: string) => {
     const obligation = obligations.find((o) => o.id === id);
-    if (obligation) {
-      updateMutation.mutate({ isFavorite: true });
-    }
+    if (!obligation) return;
+    // Compute the next value (!current) and pass id explicitly so the hook
+    // can update any row from a list-level favorite toggle, regardless of
+    // which obligation is currently open in the detail drawer.
+    const nextIsFavorite = !obligation.isFavorite;
+    updateMutation.mutate({ id, body: { isFavorite: nextIsFavorite } });
   }, [obligations, updateMutation]);
+
+  // ── Refresh handler: invalidates ALL obligation queries ───────
+  const handleRefresh = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["obligations"] });
+  }, [queryClient]);
 
   // ── Loading / Error ───────────────────────────────────────────
   if (isLoading) {
@@ -276,7 +342,7 @@ export function ObligationCenter() {
         <div className="flex flex-col items-center gap-3 text-center">
           <AlertCircle className="w-10 h-10 text-red-400" />
           <p className="text-sm font-medium text-gray-700">Failed to load obligation data</p>
-          <button onClick={() => refetch()} className="px-4 py-2 text-xs font-medium text-white bg-navy-700 rounded-lg hover:bg-navy-800 transition-colors">
+          <button onClick={handleRefresh} className="px-4 py-2 text-xs font-medium text-white bg-navy-700 rounded-lg hover:bg-navy-800 transition-colors">
             Retry
           </button>
         </div>
@@ -286,43 +352,44 @@ export function ObligationCenter() {
 
   return (
     <div className="space-y-4 pb-24">
-      {/* Header */}
-      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500 to-cyan-700 flex items-center justify-center shadow-sm">
-            <ClipboardCheck className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-navy-900">Obligation Management Center</h1>
-            <p className="text-xs text-gray-500 mt-0.5">Enterprise post-signature operational intelligence and SLA governance</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {/* Saved Views */}
-          <div className="relative">
-            <button onClick={() => setShowSavedViews(!showSavedViews)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
-              <Eye className="w-3.5 h-3.5" /> {DEFAULT_VIEWS.find((v) => v.id === activeView)?.name || "Views"}
-            </button>
-            {showSavedViews && (
-              <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="absolute right-0 mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1">
-                {DEFAULT_VIEWS.map((v) => (
-                  <button key={v.id} onClick={() => { applyView(v); setShowSavedViews(false); }}
-                    className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-gray-50 ${activeView === v.id ? "text-navy-900 font-semibold bg-navy-50" : "text-gray-600"}`}>{v.name}</button>
-                ))}
-                <div className="border-t border-gray-100 mt-1 pt-1">
-                  <button className="w-full text-left px-3 py-1.5 text-[11px] text-gray-500 hover:bg-gray-50 flex items-center gap-1.5"><Save className="w-3 h-3" /> Save Current View</button>
-                </div>
-              </motion.div>
-            )}
-          </div>
-          <button onClick={() => refetch()} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
-            <RefreshCw className="w-3.5 h-3.5" /> Refresh
-          </button>
-          <button className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-navy-700 text-white hover:bg-navy-800 transition-colors shadow-sm">
-            <Download className="w-3.5 h-3.5" /> Export Report
-          </button>
-        </div>
-      </motion.div>
+      {/* Page Header */}
+      <div className="px-1 pt-1">
+        <PageHeader
+          title="Obligation Management Center"
+          description="Track post-signature obligations, deadlines, compliance, and SLA performance."
+          actions={
+            <>
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gold-500 text-white hover:bg-gold-600 transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Create Obligation
+              </button>
+              <button
+                onClick={() => {
+                  const url = `/api/v1/obligations/export?format=pdf`;
+                  window.open(url, "_blank");
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-navy-700 text-white hover:bg-navy-800 transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Export Report
+              </button>
+              <button
+                onClick={handleRefresh}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Refresh
+              </button>
+            </>
+          }
+        />
+      </div>
+
+      {/* KPI Row */}
+      <div><ObligationKpiCards metrics={clauseKpis} /></div>
 
       {/* Urgency Alert Bar */}
       {(kpisData && (kpisData.overdue_count > 0 || kpisData.breached_count > 0)) && (
@@ -340,9 +407,6 @@ export function ObligationCenter() {
         </motion.div>
       )}
 
-      {/* KPI Row */}
-      <ObligationKpiCards metrics={clauseKpis} />
-
       {/* Filter Bar */}
       <ObligationFilterBar filters={filters} onChange={handleFilterChange} onReset={resetFilters} />
 
@@ -357,7 +421,17 @@ export function ObligationCenter() {
       </div>
 
       {/* Section 2: Obligation Table */}
-      <ObligationTable obligations={filteredObligations} onSelect={setSelectedObligation} onToggleFavorite={toggleFavorite} />
+      <ObligationTable
+        obligations={filteredObligations}
+        onSelect={setSelectedObligation}
+        onToggleFavorite={toggleFavorite}
+        onComplete={(id) => completeMutation.mutate(id)}
+        onCancel={(id) => cancelMutation.mutate(id)}
+        onArchive={(id) => archiveMutation.mutate(id)}
+        onDelete={(id) => { if (confirm("Permanently delete this obligation? This cannot be undone.")) deleteMutation.mutate(id); }}
+        onViewAudit={(id) => setAuditObligationId(id)}
+        isAdmin={false}
+      />
 
       {/* Section 3: SLA + Financial */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -366,8 +440,81 @@ export function ObligationCenter() {
       </div>
       <SlaVendorTable data={slaMetrics} breaches={breachData?.data ?? []} />
 
+      {/* Audit History Modal */}
+      {auditObligationId && (
+        <AuditHistoryModal
+          obligationId={auditObligationId}
+          entries={auditData ?? []}
+          loading={auditLoading}
+          onClose={() => setAuditObligationId(null)}
+        />
+      )}
+
       {/* Detail Drawer */}
       <ObligationDetailDrawer obligation={selectedObligation} onClose={() => setSelectedObligation(null)} onToggleFavorite={toggleFavorite} />
+      <CreateObligationModal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} onCreated={handleRefresh} />
+
+      {/* Feedback toast */}
+      {feedback && (
+        <div className={`fixed bottom-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-medium shadow-lg border ${
+          feedback.type === "success" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-red-50 text-red-700 border-red-200"
+        }`}>
+          {feedback.message}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Format ISO timestamp to user-friendly date. */
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  } catch {
+    return "—";
+  }
+}
+
+/** Audit History Modal */
+function AuditHistoryModal({ obligationId, entries, loading, onClose }: {
+  obligationId: string; entries: AuditLogEntry[]; loading: boolean; onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full mx-4 max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
+          <div className="flex items-center gap-2">
+            <History className="w-4 h-4 text-navy-500" />
+            <h3 className="text-sm font-bold text-navy-900">Audit History</h3>
+          </div>
+          <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 text-gray-400"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          {loading ? (
+            <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
+          ) : entries.length === 0 ? (
+            <p className="text-xs text-gray-400 text-center py-8">No audit events recorded yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {entries.map((e) => (
+                <div key={e.id} className="flex items-start gap-2 p-2 rounded-lg border border-gray-100">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-medium text-navy-900 capitalize">{e.action.replace(/_/g, " ")}</span>
+                      {e.actor && <span className="text-[8px] text-gray-400">by {e.actor}</span>}
+                    </div>
+                    {e.comment && <p className="text-[9px] text-gray-500 mt-0.5">{e.comment}</p>}
+                    <p className="text-[8px] text-gray-400 mt-0.5">{fmtDate(e.created_at)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -34,7 +34,7 @@ _NON_TERMINAL_STATES = (
     "ocr_complete",
     "chunking_pending",
     "embedding_pending",
-    "analysis_pending",
+    "analysis_pending",  # Re-dispatched, not marked as failed
 )
 
 # How long an upload can stay in a non-terminal state before we consider it stuck
@@ -50,11 +50,10 @@ async def recover_stuck_uploads_on_startup(
     that have been in a non-terminal state for longer than the grace period
     and marks them as ``failed`` with an appropriate error message.
 
-    Args:
-        db_factory: The shared tenant-aware session factory.
-
-    Returns:
-        A list of dicts describing each recovery action taken.
+    Uploads stuck in ``analysis_pending`` are handled differently — the AI
+    analysis task is re-dispatched to Celery instead of marking as failed,
+    since this state means the task was queued but not yet processed by a
+    worker (e.g., during a deployment restart).
     """
     session = await db_factory.create_session(
         tenant_id="system",
@@ -100,6 +99,34 @@ async def recover_stuck_uploads_on_startup(
             tenant_id = row.tenant_id
             state = row.ingestion_state
             age_minutes = round((datetime.now(timezone.utc) - row.updated_at).total_seconds() / 60, 1)
+
+            # ── Special handling for analysis_pending ──────────────
+            # Don't mark as failed — re-dispatch the AI analysis task.
+            # The task may have been queued but not yet processed by a worker.
+            if state == "analysis_pending":
+                try:
+                    from workers.ai_worker import analyze_contract_task
+                    analyze_contract_task.delay(upload_id, tenant_id, "system", "full")
+                    logger.info(
+                        "[StartupRecovery] Re-dispatched AI analysis for upload %s "
+                        "(stuck in analysis_pending for %dmin)",
+                        upload_id[:8], int(age_minutes),
+                    )
+                    action = {
+                        "upload_id": upload_id,
+                        "tenant_id": tenant_id[:8],
+                        "filename": row.filename,
+                        "previous_state": state,
+                        "age_minutes": age_minutes,
+                        "action": "redispatched_ai_analysis",
+                    }
+                    recovered.append(action)
+                except Exception as exc:
+                    logger.error(
+                        "[StartupRecovery] Failed to re-dispatch AI analysis for %s: %s",
+                        upload_id[:8], exc,
+                    )
+                continue
 
             recovery_sql = sa_text("""
                 UPDATE upload_sessions

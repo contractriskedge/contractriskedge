@@ -981,37 +981,73 @@ export function RedlineWorkspace() {
                         </div>
                       </div>
 
-                      {/* ── Recommendation Traceability Chain ────────── */}
-                      {(rl.finding_id || rl.recommendation_id) && (
-                        <div className="flex items-center gap-1 text-[7px] text-gray-400 px-1 flex-wrap">
-                          {rl.finding_id && (
-                            <>
-                              <span className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-blue-50 text-blue-600">
-                                Finding
-                              </span>
-                              <ChevronDown className="w-2 h-2 -rotate-90" />
-                            </>
-                          )}
-                          {rl.recommendation_id && (
-                            <>
-                              <span className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-cyan-50 text-cyan-600">
-                                Rec-{rl.recommendation_id.slice(0, 8)}
-                              </span>
-                              <ChevronDown className="w-2 h-2 -rotate-90" />
-                            </>
-                          )}
-                          <span className={`flex items-center gap-0.5 px-1 py-0.5 rounded ${
-                            rl.status === "accepted" ? "bg-green-50 text-green-600" :
-                            rl.status === "rejected" ? "bg-gray-100 text-gray-400" : "bg-purple-50 text-purple-600"
-                          }`}>
-                            Redline
-                          </span>
-                          <ChevronDown className="w-2 h-2 -rotate-90" />
-                          <span className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-gray-100 text-gray-400">
-                            v{rl.version}
-                          </span>
+                      {/* ── Clause Metadata Panel ── */}
+                      <div className="grid grid-cols-3 gap-1.5 px-1">
+                        <div className="p-1.5 rounded bg-gray-50 dark:bg-navy-700">
+                          <span className="text-[6px] font-semibold text-gray-500 uppercase">Finding ID</span>
+                          <p className="text-[8px] font-mono text-navy-900 dark:text-white truncate">{rl.finding_id ? rl.finding_id.slice(0, 12) : "—"}</p>
                         </div>
-                      )}
+                        <div className="p-1.5 rounded bg-gray-50 dark:bg-navy-700">
+                          <span className="text-[6px] font-semibold text-gray-500 uppercase">Risk Category</span>
+                          <p className="text-[8px] font-medium text-navy-900 dark:text-white capitalize">{rl.clause_type.replace(/_/g, " ")}</p>
+                        </div>
+                        <div className="p-1.5 rounded bg-gray-50 dark:bg-navy-700">
+                          <span className="text-[6px] font-semibold text-gray-500 uppercase">Severity</span>
+                          <p className={`text-[8px] font-semibold ${
+                            rl.severity === "critical" ? "text-red-600" : rl.severity === "high" ? "text-orange-600" : "text-amber-600"
+                          }`}>{rl.severity || "medium"}</p>
+                        </div>
+                        <div className="p-1.5 rounded bg-gray-50 dark:bg-navy-700">
+                          <span className="text-[6px] font-semibold text-gray-500 uppercase">Confidence</span>
+                          <p className="text-[8px] font-medium text-navy-900 dark:text-white">{rl.confidence ? `${Math.round(rl.confidence * 100)}%` : "—"}</p>
+                        </div>
+                        <div className="p-1.5 rounded bg-gray-50 dark:bg-navy-700">
+                          <span className="text-[6px] font-semibold text-gray-500 uppercase">Version</span>
+                          <p className="text-[8px] font-medium text-navy-900 dark:text-white">v{rl.version}</p>
+                        </div>
+                        <div className="p-1.5 rounded bg-gray-50 dark:bg-navy-700">
+                          <span className="text-[6px] font-semibold text-gray-500 uppercase">Status</span>
+                          <p className={`text-[8px] font-semibold ${sc.color}`}>{sc.label}</p>
+                        </div>
+                      </div>
+
+                      {/* ── Traceability Chain ── */}
+                      <div className="flex items-center gap-1 text-[7px] text-gray-400 px-1 flex-wrap">
+                        <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium">
+                          Original Clause
+                        </span>
+                        <ChevronDown className="w-2 h-2 -rotate-90" />
+                        {rl.finding_id && (
+                          <>
+                            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 font-medium">
+                              AI Finding
+                            </span>
+                            <ChevronDown className="w-2 h-2 -rotate-90" />
+                          </>
+                        )}
+                        {rl.recommendation_id && (
+                          <>
+                            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-cyan-50 dark:bg-cyan-900/20 text-cyan-600 dark:text-cyan-400 font-medium">
+                              Recommendation
+                            </span>
+                            <ChevronDown className="w-2 h-2 -rotate-90" />
+                          </>
+                        )}
+                        <span className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded font-medium ${
+                          rl.status === "accepted" ? "bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400" :
+                          rl.status === "rejected" ? "bg-gray-100 dark:bg-gray-800 text-gray-400" : "bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400"
+                        }`}>
+                          Generated Redline
+                        </span>
+                        <ChevronDown className="w-2 h-2 -rotate-90" />
+                        <span className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded font-medium ${
+                          rl.status === "accepted" ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300" :
+                          rl.modified_text ? "bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300" :
+                          "bg-gray-100 dark:bg-gray-800 text-gray-400"
+                        }`}>
+                          {rl.modified_text ? "Reviewer Modified" : rl.status === "accepted" ? "Final Accepted" : "Pending"}
+                        </span>
+                      </div>
 
                       {/* ── Locate source in document (always available) ─ */}
                       <div className="flex items-center justify-between gap-2 p-1.5 rounded bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800">

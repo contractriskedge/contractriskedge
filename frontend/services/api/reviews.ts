@@ -324,6 +324,18 @@ export const reviewService = {
       `/reviews/${reviewId}/history`,
     ),
 
+  /** Waive a policy violation. */
+  waivePolicyViolation: (reviewId: string, body: {
+    rule_id: string;
+    justification: string;
+    risk_assessment?: string;
+    proposed_alternative?: string;
+  }) =>
+    api.post<{ override_id: string; status: string; requested_at: string }>(
+      `/reviews/${reviewId}/policy-violations/waive`,
+      body,
+    ),
+
   // ── Dashboard ──
 
   /** Get review dashboard aggregation */

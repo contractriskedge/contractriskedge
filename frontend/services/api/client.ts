@@ -140,12 +140,24 @@ export interface ReviewDetail {
 export interface WorkloadMetrics {
   total: number;
   unassigned: number;
+  ai_analyzed: number;
+  ready_for_review: number;
+  assigned: number;
   in_review: number;
   overdue: number;
   escalated: number;
   critical: number;
+  closed: number;
   sla_at_risk: number;
   completed_today: number;
+  critical_risk: number;
+  high_risk: number;
+  medium_risk: number;
+  low_risk: number;
+  age_0_2_days: number;
+  age_3_5_days: number;
+  age_6_10_days: number;
+  age_10_plus_days: number;
 }
 
 export interface BulkActionResponse {

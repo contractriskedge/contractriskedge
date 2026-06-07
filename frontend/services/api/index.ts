@@ -54,11 +54,18 @@ export type {
 
 export { tenantService, tenantKeys } from "./tenant";
 export type {
+  TenantSettingsResponse,
+  TenantSettingsUpdate,
   TenantConfiguration,
   TenantBranding,
   WorkflowDefinition,
-  FeatureFlag,
-  CompliancePack,
+  FeatureFlagDefinition,
+  FeatureFlagEvaluation,
+  FeatureFlagOverride,
+  PolicyPackResponse,
+  ScoringOverrideResponse,
+  CompliancePackResponse,
+  TenantSummary,
 } from "./tenant";
 export type {
   ApiError,

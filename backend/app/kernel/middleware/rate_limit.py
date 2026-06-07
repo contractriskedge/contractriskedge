@@ -18,6 +18,7 @@ from starlette.responses import JSONResponse, Response
 
 from app.config import settings
 from app.kernel.middleware.excluded_paths import is_path_excluded
+from app.kernel.middleware.ai_rate_limits import match_ai_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         """Determine the rate limit for this request based on user role and endpoint."""
         path = request.url.path
 
-        # Check endpoint-specific overrides
+        # Check regex-based AI endpoint patterns first (handles UUID segments)
+        ai_match = match_ai_endpoint(path)
+        if ai_match is not None:
+            pattern, user_limit, tenant_limit = ai_match
+            # Store tenant limit on request state for dispatch() to check
+            request.state._ai_tenant_limit = tenant_limit
+            request.state._ai_operation = pattern.pattern
+            return user_limit
+
+        # Check prefix-based endpoint overrides
         for endpoint_path, limit in ENDPOINT_OVERIDES.items():
             if path.startswith(endpoint_path):
                 return limit
@@ -141,6 +151,45 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                         "X-RateLimit-Remaining": "0",
                     },
                 )
+
+            # Tenant-level AI rate limit check (after per-user check passes)
+            tenant_limit = getattr(request.state, "_ai_tenant_limit", None)
+            if tenant_limit is not None:
+                tenant_id = getattr(request.state.user, "tenant_id", None) if hasattr(request.state, "user") else None
+                if tenant_id:
+                    operation = getattr(request.state, "_ai_operation", "unknown")
+                    tenant_key = f"ai_tenant:{tenant_id}:{operation}"
+                    tenant_window = settings.ai_rate_limit_tenant_window_seconds
+                    if redis_client:
+                        tenant_allowed = await self._check_redis(
+                            redis_client, tenant_key, tenant_limit, tenant_window
+                        )
+                    else:
+                        tenant_allowed = self._check_local(
+                            tenant_key, tenant_limit, tenant_window
+                        )
+                    if not tenant_allowed:
+                        logger.warning(
+                            "Tenant AI rate limit exceeded",
+                            extra={
+                                "tenant_id": tenant_id,
+                                "tenant_limit": tenant_limit,
+                                "path": request.url.path,
+                                "operation": operation,
+                            },
+                        )
+                        return JSONResponse(
+                            status_code=429,
+                            content={
+                                "error": "tenant_rate_limit_exceeded",
+                                "message": f"Tenant AI request limit ({tenant_limit}) reached. Try again later.",
+                            },
+                            headers={
+                                "Retry-After": str(tenant_window),
+                                "X-RateLimit-Limit": str(rate_limit),
+                                "X-RateLimit-Remaining": "0",
+                            },
+                        )
 
             response = await call_next(request)
             # Add rate limit headers

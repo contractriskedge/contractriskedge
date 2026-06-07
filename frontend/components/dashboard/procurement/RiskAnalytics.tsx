@@ -41,7 +41,7 @@ export function SpendTrendChart({ data }: { data: SpendTrend[] }) {
   return (
     <SectionCard title="Spend Trend (Monthly)" subtitle="Total procurement spend by category ($M)">
       <div className="h-64">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <AreaChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
             <defs>{["cloud", "software", "consulting", "hardware", "services"].map((k) => (
               <linearGradient key={k} id={`grad-${k}`} x1="0" y1="0" x2="0" y2="1">
@@ -72,7 +72,7 @@ export function VendorCategoryChart({ data }: { data: VendorCategory[] }) {
   return (
     <SectionCard title="Vendor Category Breakdown" subtitle="Spend and risk by category">
       <div className="h-64">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <BarChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
             <XAxis dataKey="category" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} angle={-20} textAnchor="end" height={40} />
@@ -95,7 +95,7 @@ export function GeoRiskChart({ data }: { data: GeoRisk[] }) {
   return (
     <SectionCard title="Geographic Supplier Risk" subtitle="Risk exposure by country">
       <div className="h-64">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <BarChart data={[...data].sort((a, b) => b.avgRisk - a.avgRisk)} layout="vertical" margin={{ top: 5, right: 30, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" horizontal={false} />
             <XAxis type="number" domain={[0, 10]} tick={{ fontSize: 11, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
@@ -117,7 +117,7 @@ export function SupplierRiskTrendChart({ data }: { data: RiskTrend[] }) {
   return (
     <SectionCard title="Supplier Risk Trend" subtitle="Risk distribution over time">
       <div className="h-56">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <BarChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
             <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
@@ -141,7 +141,7 @@ export function SpendConcentrationChart({ data }: { data: VendorCategory[] }) {
   return (
     <SectionCard title="Spend Concentration" subtitle="Category distribution">
       <div className="h-56 flex items-center">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={190}>
           <PieChart>
             <Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={2} dataKey="value">
               {pieData.map((_, i) => (

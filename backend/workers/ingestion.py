@@ -155,6 +155,8 @@ async def _validate_upload(helper: WorkerAsyncHelper, task, upload_id: str, tena
     name="confirm_storage",
     queue="ingestion",
     max_retries=MAX_RETRIES,
+    retry_backoff=True,
+    retry_backoff_max=300,
     acks_late=True,
 )
 def confirm_storage_task(self, upload_id: str, tenant_id: str, user_id: str):

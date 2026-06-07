@@ -2,7 +2,11 @@
 
 import React, { useState, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Search, ChevronLeft, ChevronRight, ArrowUpDown, FileText, Clock, AlertTriangle, DollarSign, MoreHorizontal } from "lucide-react";
+import {
+  Search, ChevronLeft, ChevronRight, ArrowUpDown, FileText,
+  MoreHorizontal, Eye, Edit3, CheckCircle2,
+  XCircle, Archive, Trash2, History, ExternalLink,
+} from "lucide-react";
 import type { ObligationRecord, ObligationType } from "./types";
 import { RISK_BG, RISK_TEXT, RISK_BG_LIGHT, STATUS_CONFIG, OBLIGATION_TYPES } from "./types";
 
@@ -12,6 +16,12 @@ interface ObligationTableProps {
   obligations: ObligationRecord[];
   onSelect: (o: ObligationRecord) => void;
   onToggleFavorite?: (id: string) => void;
+  onComplete?: (id: string) => void;
+  onCancel?: (id: string) => void;
+  onArchive?: (id: string) => void;
+  onDelete?: (id: string) => void;
+  onViewAudit?: (id: string) => void;
+  isAdmin?: boolean;
 }
 
 function TypeBadge({ type }: { type: ObligationType }) {
@@ -19,13 +29,41 @@ function TypeBadge({ type }: { type: ObligationType }) {
   return <span className="text-[9px] px-1.5 py-0.5 rounded bg-navy-50 text-navy-700 capitalize">{t?.label || type}</span>;
 }
 
-export function ObligationTable({ obligations, onSelect }: ObligationTableProps) {
+/** Format ISO timestamp to user-friendly date (e.g., "Jun 30, 2026"). */
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  } catch {
+    return "—";
+  }
+}
+
+/** Compute days remaining from now until a due date. */
+function daysRemaining(dueDate: string | null | undefined): number | null {
+  if (!dueDate) return null;
+  try {
+    const due = new Date(dueDate);
+    if (isNaN(due.getTime())) return null;
+    const now = new Date();
+    return Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  } catch {
+    return null;
+  }
+}
+
+export function ObligationTable({
+  obligations, onSelect, onComplete, onCancel, onArchive, onDelete, onViewAudit, isAdmin,
+}: ObligationTableProps) {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("dueDate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(0);
+  const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const pageSize = 12;
 
   const handleSort = (k: SortKey) => {
@@ -46,9 +84,9 @@ export function ObligationTable({ obligations, onSelect }: ObligationTableProps)
       if (sortKey === "financialImpact") return (a.financialImpact - b.financialImpact) * d;
       if (sortKey === "aiRiskPrediction") return (a.aiRiskPrediction - b.aiRiskPrediction) * d;
       if (sortKey === "slaRemaining") return (a.slaRemaining - b.slaRemaining) * d;
-      const p = { pending: 0, in_progress: 1, escalated: 2, overdue: 3, completed: 4, waived: 5 };
-      if (sortKey === "status") return (p[a.status] - p[b.status]) * d;
-      return a[sortKey].localeCompare(b[sortKey]) * d;
+      const p: Record<string, number> = { draft: 0, pending: 1, in_progress: 2, active: 3, escalated: 4, overdue: 5, completed: 6, cancelled: 7, archived: 8, waived: 9 };
+      if (sortKey === "status") return ((p[a.status] ?? 5) - (p[b.status] ?? 5)) * d;
+      return String(a[sortKey] ?? "").localeCompare(String(b[sortKey] ?? "")) * d;
     });
     return list;
   }, [obligations, search, sortKey, sortDir, typeFilter, statusFilter]);
@@ -62,6 +100,8 @@ export function ObligationTable({ obligations, onSelect }: ObligationTableProps)
     </th>
   );
 
+  const isTerminal = (s: string) => ["completed", "cancelled", "archived"].includes(s);
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
@@ -73,8 +113,10 @@ export function ObligationTable({ obligations, onSelect }: ObligationTableProps)
           </select>
           <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(0); }} className="text-[10px] border border-gray-200 rounded-md px-2 py-1.5 text-gray-600 bg-white" aria-label="Status">
             <option value="all">All Status</option>
-            <option value="pending">Pending</option><option value="in_progress">In Progress</option>
-            <option value="overdue">Overdue</option><option value="escalated">Escalated</option><option value="completed">Completed</option>
+            <option value="draft">Draft</option><option value="pending">Pending</option>
+            <option value="active">Active</option><option value="overdue">Overdue</option>
+            <option value="escalated">Escalated</option><option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option><option value="archived">Archived</option>
           </select>
           <div className="relative w-44"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
             <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} placeholder="Search..." className="w-full text-[11px] border border-gray-200 rounded-lg pl-7 pr-3 py-1.5 focus:border-navy-400 focus:ring-1 focus:ring-navy-400" /></div>
@@ -94,24 +136,44 @@ export function ObligationTable({ obligations, onSelect }: ObligationTableProps)
               <th className="text-left py-2.5 px-2.5 text-[10px] font-semibold text-gray-500 uppercase">SLA</th>
               <SortHeader label="Financial" k="financialImpact" />
               <SortHeader label="AI Risk" k="aiRiskPrediction" />
-              <th className="py-2.5 px-2.5 w-8" />
+              <th className="py-2.5 px-2.5 w-16">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
             {pageData.map((o, i) => {
-              const sc = STATUS_CONFIG[o.status];
+              const sc = STATUS_CONFIG[o.status] ?? { color: "text-gray-600", bg: "bg-gray-100", label: o.status ?? "Unknown" };
+              const dr = daysRemaining(o.dueDate);
+              const isMenuOpen = menuOpen === o.id;
               return (
                 <motion.tr key={o.id} initial={{ opacity: 0, y: 2 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
-                  className="hover:bg-navy-50/40 transition-colors cursor-pointer" onClick={() => onSelect(o)}>
+                  className="hover:bg-navy-50/40 transition-colors cursor-pointer relative" onClick={() => onSelect(o)}>
                   <td className="py-2.5 px-2.5">
                     <span className="font-medium text-gray-800 text-[11px]">{o.name}</span>
-                    <div className="text-[9px] text-gray-400 mt-0.5">{o.contractName}</div>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      {o.contractName && (
+                        <span className="text-[9px] text-gray-400 flex items-center gap-0.5">
+                          <ExternalLink className="w-2.5 h-2.5" />{o.contractName}
+                        </span>
+                      )}
+                      {o.sourceClause && (
+                        <span className="text-[9px] text-gray-400">· {o.sourceClause}</span>
+                      )}
+                    </div>
                   </td>
                   <td className="py-2.5 px-2.5 text-gray-600 text-[10px]">{o.vendor}</td>
                   <td className="py-2.5 px-2.5"><TypeBadge type={o.type} /></td>
                   <td className="py-2.5 px-2.5 text-gray-600 text-[10px]">{o.owner}</td>
                   <td className="py-2.5 px-2.5">
-                    <span className={`tabular-nums text-[10px] ${o.status === "overdue" || o.status === "escalated" ? "text-red-600 font-medium" : "text-gray-600"}`}>{o.dueDate}</span>
+                    <div className="flex flex-col">
+                      <span className={`tabular-nums text-[10px] ${o.status === "overdue" || o.status === "escalated" ? "text-red-600 font-medium" : "text-gray-600"}`}>
+                        {fmtDate(o.dueDate)}
+                      </span>
+                      {dr !== null && o.status !== "completed" && o.status !== "archived" && o.status !== "cancelled" && (
+                        <span className={`text-[8px] ${dr <= 0 ? "text-red-500 font-medium" : dr <= 7 ? "text-orange-500" : "text-gray-400"}`}>
+                          {dr <= 0 ? `${Math.abs(dr)}d overdue` : `${dr}d remaining`}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="py-2.5 px-2.5"><span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${sc.bg} ${sc.color}`}>{sc.label}</span></td>
                   <td className="py-2.5 px-2.5">
@@ -138,7 +200,40 @@ export function ObligationTable({ obligations, onSelect }: ObligationTableProps)
                       <span className="text-[9px] text-gray-500 tabular-nums">{o.aiRiskPrediction}%</span>
                     </div>
                   </td>
-                  <td className="py-2.5 px-2.5"><MoreHorizontal className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100" /></td>
+                  <td className="py-2.5 px-2.5 relative" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => setMenuOpen(isMenuOpen ? null : o.id)}
+                      className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-navy-700 transition-colors"
+                      aria-label="Actions"
+                    >
+                      <MoreHorizontal className="w-3.5 h-3.5" />
+                    </button>
+                    {isMenuOpen && (
+                      <>
+                        <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(null)} />
+                        {/* Flip menu upward for last 2 rows to avoid overflow */}
+                        <div className={`absolute right-0 z-20 w-44 bg-white rounded-lg border border-gray-200 shadow-lg py-1 ${pageData.length - i <= 2 ? "bottom-full mb-1" : "top-8"}`}>
+                          <ActionItem icon={Eye} label="View" onClick={() => { setMenuOpen(null); onSelect(o); }} />
+                          <ActionItem icon={Edit3} label="Edit" onClick={() => { setMenuOpen(null); onSelect(o); }} />
+                          {!isTerminal(o.status) && (
+                            <>
+                              <ActionItem icon={CheckCircle2} label="Complete" onClick={() => { setMenuOpen(null); onComplete?.(o.id); }} />
+                              <ActionItem icon={XCircle} label="Cancel" onClick={() => { setMenuOpen(null); onCancel?.(o.id); }} />
+                            </>
+                          )}
+                          {o.status !== "archived" && (
+                            <ActionItem icon={Archive} label="Archive" onClick={() => { setMenuOpen(null); onArchive?.(o.id); }} />
+                          )}
+                          <ActionItem icon={History} label="Audit History" onClick={() => { setMenuOpen(null); onViewAudit?.(o.id); }} />
+                          {isAdmin && (
+                            <div className="border-t border-gray-100 mt-1 pt-1">
+                              <ActionItem icon={Trash2} label="Delete Permanently" onClick={() => { setMenuOpen(null); onDelete?.(o.id); }} danger />
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </td>
                 </motion.tr>
               );
             })}
@@ -159,5 +254,18 @@ export function ObligationTable({ obligations, onSelect }: ObligationTableProps)
         </div>
       )}
     </div>
+  );
+}
+
+function ActionItem({ icon: Icon, label, onClick, danger }: { icon: React.ElementType; label: string; onClick: () => void; danger?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-2 px-3 py-1.5 text-[10px] transition-colors ${
+        danger ? "text-red-600 hover:bg-red-50" : "text-gray-700 hover:bg-gray-50"
+      }`}
+    >
+      <Icon className="w-3 h-3" /> {label}
+    </button>
   );
 }

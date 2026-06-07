@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 import type { ContractDetail, Obligation, DocumentVersion, AiFinding } from "./types";
 import { RISK_BG, RISK_TEXT, RISK_BG_LIGHT } from "@/components/dashboard/contracts/types";
+import { formatDate } from "@/lib/date-utils";
 
 // ── Props ───────────────────────────────────────────────────────────────────
 
@@ -130,11 +131,14 @@ export function MetadataPanel({
     icon,
     children,
     defaultOpen = true,
+    right,
   }: {
     title: string;
     icon: React.ReactNode;
     children: React.ReactNode;
     defaultOpen?: boolean;
+    /** Optional accessory rendered in the header (e.g. completion count). */
+    right?: React.ReactNode;
   }) => {
     const [open, setOpen] = useState(defaultOpen);
     return (
@@ -148,6 +152,7 @@ export function MetadataPanel({
             <span className="text-[11px] font-semibold text-navy-700 dark:text-navy-200 uppercase tracking-wider">
               {title}
             </span>
+            {right}
           </div>
           {open ? (
             <ChevronUp className="w-3 h-3 text-gray-400" />
@@ -160,23 +165,69 @@ export function MetadataPanel({
     );
   };
 
+  /**
+   * MetaRow — show a friendly placeholder for blank/empty values so the
+   * panel never looks half-finished. The placeholder is visually muted
+   * with a dashed underline so the reader can tell at a glance which
+   * fields are still pending extraction.
+   */
+  const PLACEHOLDER = "—";
+  const isEmpty = (v: React.ReactNode): boolean => {
+    if (v === null || v === undefined) return true;
+    if (typeof v === "string") return v.trim() === "" || v === PLACEHOLDER;
+    if (typeof v === "number") return false;
+    return false;
+  };
+
   const MetaRow = ({
     label,
     value,
     icon,
+    placeholder = "Not Extracted",
   }: {
     label: string;
     value: React.ReactNode;
     icon?: React.ReactNode;
-  }) => (
-    <div className="flex items-center justify-between py-1">
-      <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-        {icon}{label}
-      </span>
-      <span className="text-[10px] font-medium text-gray-800 dark:text-gray-200 text-right max-w-[60%] truncate">
-        {value}
-      </span>
-    </div>
+    placeholder?: string;
+  }) => {
+    const empty = isEmpty(value);
+    return (
+      <div className="flex items-center justify-between py-1">
+        <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+          {icon}{label}
+        </span>
+        {empty ? (
+          <span
+            className="text-[10px] font-medium text-gray-400 dark:text-gray-500 italic border-b border-dashed border-gray-300 dark:border-navy-600"
+            title="This field has not been extracted yet"
+          >
+            {placeholder}
+          </span>
+        ) : (
+          <span className="text-[10px] font-medium text-gray-800 dark:text-gray-200 text-right max-w-[60%] truncate">
+            {value}
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  /**
+   * metadataCompletion — count how many of the "expected" fields are
+   * populated. Used to render a small "Extraction N/M" badge in the
+   * panel header so the user knows at a glance how much metadata is
+   * still pending.
+   */
+  const completionFields: Array<[string, unknown]> = [
+    ["vendor", contract.vendor],
+    ["counterparty", contract.counterparty],
+    ["type", contract.contract_type],
+    ["business_unit", contract.business_unit],
+    ["geography", contract.geography],
+    ["owner", contract.owner],
+  ];
+  const completionDone = completionFields.filter(([, v]) => !isEmpty(v)).length;
+  const completionTotal = completionFields.length;
   );
 
   return (
@@ -229,13 +280,24 @@ export function MetadataPanel({
       </div>
 
       {/* ── Contract Details ──────────────────────────────────────────── */}
-      <Section title="Details" icon={<FileText className="w-3.5 h-3.5" />}>
+      <Section
+        title="Details"
+        icon={<FileText className="w-3.5 h-3.5" />}
+        right={
+          <span
+            className="text-[9px] font-medium text-gray-400 dark:text-gray-500"
+            title="How many of the core metadata fields have been extracted"
+          >
+            Metadata {completionDone}/{completionTotal}
+          </span>
+        }
+      >
         <MetaRow label="Vendor" value={contract.vendor} icon={<Building2 className="w-3 h-3" />} />
         <MetaRow label="Counterparty" value={contract.counterparty} icon={<User className="w-3 h-3" />} />
-        <MetaRow label="Type" value={contract.contract_type} icon={<FileType className="w-3 h-3" />} />
+        <MetaRow label="Type" value={contract.contract_type} icon={<FileType className="w-3 h-3" />} placeholder="Pending Review" />
         <MetaRow label="Business Unit" value={contract.business_unit} />
         <MetaRow label="Geography" value={contract.geography} icon={<Globe className="w-3 h-3" />} />
-        <MetaRow label="Owner" value={contract.owner} icon={<User className="w-3 h-3" />} />
+        <MetaRow label="Owner" value={contract.owner} icon={<User className="w-3 h-3" />} placeholder="Unassigned" />
         <MetaRow label="Status" value={
           <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${
             contract.status === "active" ? "bg-green-100 text-green-700" :
@@ -247,24 +309,30 @@ export function MetadataPanel({
           </span>
         } />
         <MetaRow label="Workflow" value={
-          <span className="text-[9px] font-medium capitalize">{contract.workflow_stage.replace(/_/g, " ")}</span>
+          <span className="text-[9px] font-medium capitalize">
+            {contract.workflow_stage ? contract.workflow_stage.replace(/_/g, " ") : "—"}
+          </span>
         } />
       </Section>
 
       {/* ── Financial ─────────────────────────────────────────────────── */}
       <Section title="Financial" icon={<DollarSign className="w-3.5 h-3.5" />}>
-        <MetaRow label="Value" value={`${contract.currency} ${contract.financial_value.toLocaleString()}`} />
+        <MetaRow
+          label="Value"
+          value={contract.financial_value > 0 ? `${contract.currency} ${contract.financial_value.toLocaleString()}` : ""}
+          placeholder="Not Available"
+        />
         <MetaRow label="Auto-Renewal" value={contract.auto_renew ? "Yes" : "No"} />
         <MetaRow label="Has DPA" value={contract.has_dpa ? "Yes" : "No"} />
       </Section>
 
       {/* ── Dates ──────────────────────────────────────────────────────── */}
       <Section title="Dates" icon={<Calendar className="w-3.5 h-3.5" />}>
-        <MetaRow label="Effective" value={new Date(contract.effective_date).toLocaleDateString()} icon={<Calendar className="w-3 h-3" />} />
-        <MetaRow label="Expiration" value={new Date(contract.expiration_date).toLocaleDateString()} icon={<Clock className="w-3 h-3" />} />
-        <MetaRow label="Renewal" value={new Date(contract.renewal_date).toLocaleDateString()} icon={<RefreshCw className="w-3 h-3" />} />
-        <MetaRow label="Last Activity" value={new Date(contract.last_activity).toLocaleDateString()} icon={<Clock className="w-3 h-3" />} />
-        <MetaRow label="Created" value={new Date(contract.created_at).toLocaleDateString()} />
+        <MetaRow label="Effective" value={formatDate(contract.effective_date)} icon={<Calendar className="w-3 h-3" />} />
+        <MetaRow label="Expiration" value={formatDate(contract.expiration_date)} icon={<Clock className="w-3 h-3" />} />
+        <MetaRow label="Renewal" value={formatDate(contract.renewal_date)} icon={<RefreshCw className="w-3 h-3" />} />
+        <MetaRow label="Last Activity" value={formatDate(contract.last_activity)} icon={<Clock className="w-3 h-3" />} />
+        <MetaRow label="Created" value={formatDate(contract.created_at)} />
       </Section>
 
       {/* ── AI Summary ────────────────────────────────────────────────── */}
@@ -332,7 +400,7 @@ export function MetadataPanel({
                       <p className="text-[10px] text-gray-700 dark:text-gray-300 truncate">{ob.description}</p>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         <span className={`text-[8px] px-1 py-0.5 rounded ${st.bg} ${st.color}`}>{st.label}</span>
-                        <span className="text-[8px] text-gray-400">Due: {new Date(ob.due_date).toLocaleDateString()}</span>
+                        <span className="text-[8px] text-gray-400">Due: {formatDate(ob.due_date)}</span>
                         <span className="text-[8px] text-gray-400">{ob.owner}</span>
                       </div>
                     </div>
@@ -370,7 +438,7 @@ export function MetadataPanel({
                       v{v.version_number} {v.label && `- ${v.label}`}
                     </p>
                     <p className="text-[8px] text-gray-400">
-                      {v.uploaded_by} · {new Date(v.uploaded_at).toLocaleDateString()}
+                      {v.uploaded_by} · {formatDate(v.uploaded_at)}
                     </p>
                   </div>
                 </div>

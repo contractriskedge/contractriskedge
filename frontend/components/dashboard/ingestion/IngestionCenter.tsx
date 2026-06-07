@@ -1,19 +1,18 @@
 "use client";
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { PanelLeft, PanelRight, Loader2, AlertCircle, RefreshCw, Upload, FileText, Activity } from "lucide-react";
+import { PanelLeft, Loader2, AlertCircle, RefreshCw, Upload, FileText, Activity, Link2, RotateCcw } from "lucide-react";
 import type { ImportJob, IngestionSource, DocumentType, ImportJobStatus, CompactKpi, ProcessingQueue, SavedFilter } from "./types";
 import { IngestionKpiCards } from "./IngestionKpiCards";
 import { IngestionToolbar } from "./IngestionToolbar";
 import { IngestionLeftSidebar } from "./IngestionLeftSidebar";
 import { IngestionCenterPanel } from "./IngestionCenterPanel";
-import { IngestionRightPanel } from "./IngestionRightPanel";
 import { useUploads, useUploadFile, useRetryUpload, useUploadStatus, useQueueStats } from "@/services/hooks/useUploads";
 import type { UploadSummary, UploadStatusResponse } from "@/services/api/uploads";
 import { uploadService } from "@/services/api/uploads";
 import { applyUploadStatus, pipelineFromIngestionState, jobStatusFromIngestionState } from "./uploadBackend";
 import { reviewService } from "@/services/api/reviews";
-import { mockExtractionInsights, mockDuplicateGroups } from "./mockData";
+import { PageHeader } from "@/components/shared/PageHeader";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -114,8 +113,10 @@ function deriveKpis(uploads: UploadSummary[] | undefined, total: number | undefi
     { id: "processing-queue", label: "Processing Queue", value: running.toLocaleString(), subtitle: `${completed} completed`, trend: running > 0 ? 8 : 0, trendDirection: running > 0 ? "up" : "neutral", icon: "ListOrdered", severity: running > 5 ? "warning" : "info", tooltip: `${running} documents in queue` },
     { id: "failed-jobs", label: "Failed Jobs", value: failed.toLocaleString(), trend: 100, trendDirection: failed > 0 ? "down" : "neutral", icon: "AlertTriangle", severity: failed > 0 ? "critical" : "success", tooltip: `${failed} failed imports` },
     { id: "avg-processing-time", label: "Avg Processing Time", value: "2.4m", subtitle: "per document", trend: -8, trendDirection: "down", icon: "Clock", severity: "info", tooltip: "Average processing time per document" },
-    { id: "ocr-accuracy", label: "OCR Accuracy", value: "97.4%", trend: 1.8, trendDirection: "up", icon: "ScanEye", severity: "success", tooltip: "97.4% average OCR accuracy" },
-    { id: "high-risk-contracts", label: "High Risk Contracts", value: "12", trend: -5, trendDirection: "down", icon: "ShieldAlert", severity: "warning", tooltip: "12 contracts flagged as high risk" },
+    { id: "ocr-success-rate", label: "OCR Success Rate", value: "97.4%", trend: 1.8, trendDirection: "up", icon: "ScanEye", severity: "success", tooltip: "97.4% OCR success rate" },
+    { id: "extraction-success-rate", label: "Extraction Success Rate", value: "94.2%", trend: 2.1, trendDirection: "up", icon: "FileSearch", severity: "success", tooltip: "94.2% AI extraction success rate" },
+    { id: "avg-queue-wait", label: "Avg Queue Wait", value: "1.8m", subtitle: "per document", trend: -12, trendDirection: "down", icon: "Clock", severity: "info", tooltip: "Average queue wait time per document" },
+    { id: "processing-throughput", label: "Processing Throughput", value: "24/hr", trend: 5, trendDirection: "up", icon: "Activity", severity: "info", tooltip: "Documents processed per hour" },
   ];
 }
 
@@ -127,7 +128,6 @@ interface IngestionCenterProps {
 
 export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {}) {
   const [showLeftSidebar, setShowLeftSidebar] = useState(true);
-  const [showRightPanel, setShowRightPanel] = useState(true);
   const [showActivityFeed, setShowActivityFeed] = useState(false);
   const [compactMode, setCompactMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -318,10 +318,6 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
   const queues: ProcessingQueue[] = useMemo(() => queueStats?.queues ?? [], [queueStats]);
   const kpis = useMemo(() => deriveKpis(uploads, total), [uploads, total]);
 
-  const failedCount = jobs.filter(j => j.status === "failed").length;
-  const insights = mockExtractionInsights;
-  const duplicateGroups = mockDuplicateGroups;
-
   // ── Loading state ──────────────────────────────────────────────────
   if (isLoading) {
     return (
@@ -352,8 +348,48 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
 
   return (
     <div className="h-full flex flex-col bg-gray-50 dark:bg-navy-900">
+      {/* Page Header */}
+      <div className="px-3 pt-3 pb-2">
+        <PageHeader
+          title="Ingestion Pipeline"
+          description="Monitor contract uploads, OCR, extraction, AI processing, and pipeline health."
+          actions={
+            <>
+              <button
+                onClick={() => {
+                  const input = document.createElement("input");
+                  input.type = "file";
+                  input.multiple = true;
+                  input.accept = ".pdf,.docx,.doc,.txt,.png,.jpg";
+                  input.onchange = (e) => handleUpload((e.target as HTMLInputElement).files);
+                  input.click();
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gold-500 text-white hover:bg-gold-600 transition-colors"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                Upload Contract
+              </button>
+              <button
+                onClick={handleConnectSource}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-navy-700 text-white hover:bg-navy-800 transition-colors"
+              >
+                <Link2 className="w-3.5 h-3.5" />
+                Connect Source
+              </button>
+              <button
+                onClick={handleRetryAllFailed}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Retry Failed
+              </button>
+            </>
+          }
+        />
+      </div>
+
       {/* KPI Row */}
-      <div className="px-3 pt-2 pb-1.5">
+      <div className="px-3 pb-1.5">
         <IngestionKpiCards metrics={kpis} onKpiClick={handleKpiClick} />
       </div>
 
@@ -443,25 +479,6 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
           compactMode={compactMode}
           searchQuery={searchQuery}
         />
-
-        {/* Right Toggle */}
-        {!showRightPanel && (
-          <button onClick={() => setShowRightPanel(true)}
-            className="flex items-center gap-1 px-1.5 py-1 bg-white dark:bg-navy-800 border-l border-gray-200 dark:border-navy-700 text-gray-400 hover:text-navy-600 transition-colors">
-            <PanelRight className="w-3.5 h-3.5" />
-          </button>
-        )}
-
-        {showRightPanel && (
-          <div className="overflow-hidden flex-shrink-0">
-            <IngestionRightPanel
-              insights={insights}
-              duplicateGroups={duplicateGroups}
-              failedCount={failedCount}
-              policyViolations={3}
-            />
-          </div>
-        )}
       </div>
     </div>
   );

@@ -432,6 +432,36 @@ class AnalyticsService:
         result = await self.session.execute(sql, {"tid": self.tenant_id, "active_statuses": ACTIVE_REVIEW_STATUSES})
         return [{"bucket": r.bucket, "count": r.count} for r in result.fetchall()]
 
+    async def get_sla_breach_trend(self, days: int = 30) -> list[dict]:
+        """SLA breach trend — daily breach counts for the last N days."""
+        sql = sa_text("""
+            WITH dates AS (
+                SELECT generate_series(
+                    DATE(NOW() - :days * INTERVAL '1 day'),
+                    DATE(NOW()),
+                    '1 day'::interval
+                )::date AS dt
+            )
+            SELECT
+                d.dt::text AS date,
+                COUNT(DISTINCT r.review_id)::int AS count,
+                COUNT(DISTINCT r.review_id) FILTER (
+                    WHERE rf.risk_score IS NOT NULL AND rf.risk_score >= 0.7
+                )::int AS critical
+            FROM dates d
+            LEFT JOIN contract_reviews r
+                ON DATE(r.updated_at) = d.dt
+                AND r.tenant_id = :tid
+                AND r.is_deleted = FALSE
+                AND r.sla_breached = TRUE
+            LEFT JOIN review_findings rf
+                ON rf.review_id = r.review_id
+            GROUP BY d.dt
+            ORDER BY d.dt
+        """)
+        result = await self.session.execute(sql, {"tid": self.tenant_id, "days": days})
+        return [{"date": r.date, "count": r.count, "critical": r.critical} for r in result.fetchall()]
+
     async def get_executive_summary(self) -> dict:
         """Executive-level portfolio intelligence."""
         # Total contracts with reviews

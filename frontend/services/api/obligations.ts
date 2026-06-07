@@ -422,8 +422,30 @@ export const obligationsService = {
   // ── List / Paginated ──────────────────────────────────────────
 
   /** List obligations with pagination and filtering */
-  listObligations: (params?: ObligationListParams) =>
-    api.get<PaginatedObligations>(`${OBLIGATIONS_BASE}/`, params as Record<string, unknown>),
+  listObligations: (params?: ObligationListParams) => {
+    const query = new URLSearchParams();
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.page_size) query.set("page_size", String(params.page_size));
+    if (params?.search) query.set("search", params.search);
+    if (params?.status) query.set("status", params.status);
+    if (params?.obligation_type) query.set("obligation_type", params.obligation_type);
+    if (params?.risk_level) query.set("risk_level", params.risk_level);
+    if (params?.sla_status) query.set("sla_status", params.sla_status);
+    if (params?.vendor) query.set("vendor", params.vendor);
+    if (params?.owner) query.set("owner", params.owner);
+    if (params?.assignee) query.set("assignee", params.assignee);
+    if (params?.department) query.set("department", params.department);
+    if (params?.business_unit) query.set("business_unit", params.business_unit);
+    if (params?.geography) query.set("geography", params.geography);
+    if (params?.is_favorite !== undefined) query.set("is_favorite", String(params.is_favorite));
+    if (params?.is_recurring !== undefined) query.set("is_recurring", String(params.is_recurring));
+    if (params?.sort_by) query.set("sort_by", params.sort_by);
+    if (params?.sort_order) query.set("sort_order", params.sort_order);
+    const qs = query.toString();
+    return api.get<PaginatedObligations>(
+      qs ? `${OBLIGATIONS_BASE}/?${qs}` : `${OBLIGATIONS_BASE}/`,
+    );
+  },
 
   // ── KPIs / Analytics ──────────────────────────────────────────
 
@@ -437,9 +459,35 @@ export const obligationsService = {
   getObligation: (id: string) =>
     api.get<ObligationResponse>(`${OBLIGATIONS_BASE}/${id}`),
 
-  /** Create a new obligation */
-  createObligation: (body: ObligationCreateRequest) =>
-    api.post<ObligationResponse>(`${OBLIGATIONS_BASE}/`, body),
+  /** Create a new obligation — maps camelCase frontend fields to snake_case backend */
+  createObligation: (body: ObligationCreateRequest) => {
+    // Map camelCase → snake_case for backend compatibility
+    const snake: Record<string, unknown> = {
+      name: body.name,
+      obligation_type: body.obligationType,
+      status: body.status,
+    };
+    if (body.description !== undefined) snake.description = body.description;
+    if (body.contractId !== undefined) snake.contract_id = body.contractId;
+    if (body.contractName !== undefined) snake.contract_name = body.contractName;
+    if (body.vendor !== undefined) snake.vendor = body.vendor;
+    if (body.owner !== undefined) snake.owner = body.owner;
+    if (body.assignee !== undefined) snake.assignee = body.assignee;
+    if (body.dueDate !== undefined) snake.due_date = body.dueDate;
+    if (body.riskScore !== undefined) snake.risk_score = body.riskScore;
+    if (body.riskLevel !== undefined) snake.risk_level = body.riskLevel;
+    if (body.financialImpact !== undefined) snake.financial_impact = body.financialImpact;
+    if (body.currency !== undefined) snake.currency = body.currency;
+    if (body.clauseReference !== undefined) snake.clause_reference = body.clauseReference;
+    if (body.department !== undefined) snake.department = body.department;
+    if (body.businessUnit !== undefined) snake.business_unit = body.businessUnit;
+    if (body.geography !== undefined) snake.geography = body.geography;
+    if (body.isRecurring !== undefined) snake.is_recurring = body.isRecurring;
+    if (body.recurrencePattern !== undefined) snake.recurrence_pattern = body.recurrencePattern;
+    if (body.notes !== undefined) snake.notes = body.notes;
+    if (body.tags !== undefined) snake.tags = body.tags;
+    return api.post<ObligationResponse>(`${OBLIGATIONS_BASE}/`, snake);
+  },
 
   /** Update an existing obligation */
   updateObligation: (id: string, body: ObligationUpdateRequest) =>
@@ -449,20 +497,46 @@ export const obligationsService = {
   deleteObligation: (id: string) =>
     api.delete<void>(`${OBLIGATIONS_BASE}/${id}`),
 
+  // ── Lifecycle Actions ────────────────────────────────────────
+
+  /** Complete an obligation */
+  completeObligation: (id: string) =>
+    api.post<ObligationResponse>(`${OBLIGATIONS_BASE}/${id}/complete`),
+
+  /** Cancel an obligation */
+  cancelObligation: (id: string) =>
+    api.post<ObligationResponse>(`${OBLIGATIONS_BASE}/${id}/cancel`),
+
+  /** Archive an obligation (soft-delete) */
+  archiveObligation: (id: string) =>
+    api.post<ObligationResponse>(`${OBLIGATIONS_BASE}/${id}/archive`),
+
+  /** Get audit history for an obligation */
+  getAuditHistory: (id: string) =>
+    api.get<ObligationAuditLogResponse[]>(`${OBLIGATIONS_BASE}/${id}/audit`),
+
   // ── Calendar / Upcoming / Overdue ─────────────────────────────
 
   /** Get obligation calendar events within a date range */
-  getCalendar: (startDate: string, endDate: string) =>
-    api.get<{ data: TimelineEventResponse[] }>(`${OBLIGATIONS_BASE}/calendar`, {
-      start_date: startDate,
-      end_date: endDate,
-    } as Record<string, unknown>),
+  getCalendar: (startDate: string, endDate: string) => {
+    const query = new URLSearchParams();
+    if (startDate) query.set("start_date", startDate);
+    if (endDate) query.set("end_date", endDate);
+    const qs = query.toString();
+    return api.get<{ data: TimelineEventResponse[] }>(
+      qs ? `${OBLIGATIONS_BASE}/calendar?${qs}` : `${OBLIGATIONS_BASE}/calendar`,
+    );
+  },
 
   /** Get upcoming obligations within a given number of days */
-  getUpcoming: (days: number) =>
-    api.get<{ data: ObligationResponse[] }>(`${OBLIGATIONS_BASE}/upcoming`, {
-      days: String(days),
-    } as Record<string, unknown>),
+  getUpcoming: (days: number) => {
+    const query = new URLSearchParams();
+    if (days !== undefined && days !== null) query.set("days", String(days));
+    const qs = query.toString();
+    return api.get<{ data: ObligationResponse[] }>(
+      qs ? `${OBLIGATIONS_BASE}/upcoming?${qs}` : `${OBLIGATIONS_BASE}/upcoming`,
+    );
+  },
 
   /** Get overdue obligations */
   getOverdue: () =>

@@ -146,27 +146,55 @@ export const executiveKeys = {
 
 export const executiveService = {
   /** Get the full executive dashboard */
-  getDashboard: (params: { period?: TimePeriod; start?: string; end?: string; tenant_id?: string }) =>
-    api.get<ExecutiveDashboard>("/executive/dashboard", params as Record<string, unknown>),
+  getDashboard: (params: { period?: TimePeriod; start?: string; end?: string; tenant_id?: string }) => {
+    const query = new URLSearchParams();
+    if (params.period) query.set("period", params.period);
+    if (params.start) query.set("start", params.start);
+    if (params.end) query.set("end", params.end);
+    if (params.tenant_id) query.set("tenant_id", params.tenant_id);
+    const qs = query.toString();
+    return api.get<ExecutiveDashboard>(qs ? `/executive/dashboard?${qs}` : "/executive/dashboard");
+  },
 
   /** Get trend data for a specific metric */
-  getTrends: (metric: string, params: { period?: TimePeriod; start?: string; end?: string }) =>
-    api.get<TrendData>(`/executive/trends/${metric}`, params as Record<string, unknown>),
+  getTrends: (metric: string, params: { period?: TimePeriod; start?: string; end?: string }) => {
+    const query = new URLSearchParams();
+    if (params.period) query.set("period", params.period);
+    if (params.start) query.set("start", params.start);
+    if (params.end) query.set("end", params.end);
+    const qs = query.toString();
+    return api.get<TrendData>(qs ? `/executive/trends/${metric}?${qs}` : `/executive/trends/${metric}`);
+  },
 
   /** Get risk heatmap data */
-  getHeatmap: (dimension: string, params: { period?: TimePeriod; start?: string; end?: string }) =>
-    api.get<RiskHeatmap>(`/executive/heatmap/${dimension}`, params as Record<string, unknown>),
+  getHeatmap: (dimension: string, params: { period?: TimePeriod; start?: string; end?: string }) => {
+    const query = new URLSearchParams();
+    if (params.period) query.set("period", params.period);
+    if (params.start) query.set("start", params.start);
+    if (params.end) query.set("end", params.end);
+    const qs = query.toString();
+    return api.get<RiskHeatmap>(qs ? `/executive/heatmap/${dimension}?${qs}` : `/executive/heatmap/${dimension}`);
+  },
 
   /** Get workflow bottlenecks */
   getBottlenecks: () => api.get<{ data: Bottleneck[] }>("/executive/bottlenecks"),
 
   /** Get SLA breach forecasts */
-  getForecasts: (metric?: string) =>
-    api.get<{ data: Forecast[] }>("/executive/forecasts", metric ? { metric } as Record<string, unknown> : undefined),
+  getForecasts: (metric?: string) => {
+    const query = new URLSearchParams();
+    if (metric) query.set("metric", metric);
+    const qs = query.toString();
+    return api.get<{ data: Forecast[] }>(qs ? `/executive/forecasts?${qs}` : "/executive/forecasts");
+  },
 
   /** Get reviewer efficiency metrics */
-  getReviewerEfficiency: (params?: { period?: TimePeriod; limit?: number }) =>
-    api.get<{ data: ReviewerEfficiency[] }>("/executive/efficiency", params as Record<string, unknown>),
+  getReviewerEfficiency: (params?: { period?: TimePeriod; limit?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.period) query.set("period", params.period);
+    if (params?.limit !== undefined) query.set("limit", String(params.limit));
+    const qs = query.toString();
+    return api.get<{ data: ReviewerEfficiency[] }>(qs ? `/executive/efficiency?${qs}` : "/executive/efficiency");
+  },
 
   /** Export a report */
   exportReport: (body: ReportExportRequest) =>

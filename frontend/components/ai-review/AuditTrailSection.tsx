@@ -20,6 +20,7 @@ import {
   CheckCircle2, XCircle, RefreshCw, UserCheck, ArrowUpRight,
   ThumbsUp, FileText, Clock, Shield, PlusCircle,
   ChevronDown, ChevronUp, Search, Download, Filter,
+  Edit3, TrendingDown,
 } from "lucide-react";
 import { useReviewContext } from "./ReviewContext";
 import { useAuditTrailEvents } from "./hooks";
@@ -40,6 +41,15 @@ const EVENT_CONFIG: Record<string, { icon: React.ElementType; color: string; bg:
   policy_waived: { icon: Shield, color: "text-gray-500", bg: "bg-gray-100 dark:bg-gray-800", label: "Waived" },
   recommendation_applied: { icon: CheckCircle2, color: "text-emerald-500", bg: "bg-emerald-100 dark:bg-emerald-900/20", label: "Applied" },
   version_created: { icon: FileText, color: "text-blue-500", bg: "bg-blue-100 dark:bg-blue-900/20", label: "Version" },
+  // ── Sprint 24B: Missing event types ──
+  redline_generated: { icon: Edit3, color: "text-purple-500", bg: "bg-purple-100 dark:bg-purple-900/20", label: "Redline Generated" },
+  redline_accepted: { icon: CheckCircle2, color: "text-green-500", bg: "bg-green-100 dark:bg-green-900/20", label: "Redline Accepted" },
+  redline_rejected: { icon: XCircle, color: "text-gray-500", bg: "bg-gray-100 dark:bg-gray-800", label: "Redline Rejected" },
+  redline_modified: { icon: Edit3, color: "text-amber-500", bg: "bg-amber-100 dark:bg-amber-900/20", label: "Redline Modified" },
+  risk_reduced: { icon: TrendingDown, color: "text-green-500", bg: "bg-green-100 dark:bg-green-900/20", label: "Risk Reduced" },
+  review_closed: { icon: XCircle, color: "text-gray-500", bg: "bg-gray-100 dark:bg-gray-800", label: "Closed" },
+  finding_escalated: { icon: AlertTriangle, color: "text-orange-500", bg: "bg-orange-100 dark:bg-orange-900/20", label: "Escalated" },
+  finding_waived: { icon: Shield, color: "text-amber-500", bg: "bg-amber-100 dark:bg-amber-900/20", label: "Waived" },
 };
 
 const DEFAULT_CONFIG = { icon: Activity, color: "text-gray-400", bg: "bg-gray-100 dark:bg-gray-800", label: "Event" };

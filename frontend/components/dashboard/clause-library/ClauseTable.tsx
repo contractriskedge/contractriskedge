@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { motion } from "framer-motion";
+import { useRouter } from "next/navigation";
 import { Search, ChevronLeft, ChevronRight, ArrowUpDown, FileText, Heart, Star, MoreHorizontal, Brain } from "lucide-react";
 import type { ClauseRecord, ClauseStatus } from "./types";
 import { RISK_BG, RISK_TEXT, RISK_BG_LIGHT } from "./types";
@@ -22,7 +23,21 @@ const statusConfig: Record<ClauseStatus, { color: string; bg: string; label: str
 };
 
 export function ClauseTable({ clauses, onSelect, onToggleFavorite }: ClauseTableProps) {
+  const router = useRouter();
   const [search, setSearch] = useState("");
+
+  const handleRowClick = useCallback(
+    (c: ClauseRecord) => {
+      // Prefer the dedicated detail page so the URL is shareable and the
+      // drawer can be opened on top of the list view from elsewhere.
+      if (typeof window !== "undefined" && (window.event as MouseEvent | undefined)?.shiftKey) {
+        onSelect(c);
+      } else {
+        router.push(`/clause-library/${c.id}`);
+      }
+    },
+    [onSelect, router],
+  );
   const [sortKey, setSortKey] = useState<SortKey>("usageFrequency");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
@@ -91,7 +106,7 @@ export function ClauseTable({ clauses, onSelect, onToggleFavorite }: ClauseTable
               const sc = statusConfig[c.approvalStatus];
               return (
                 <motion.tr key={c.id} initial={{ opacity: 0, y: 2 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
-                  className="hover:bg-navy-50/40 transition-colors cursor-pointer" onClick={() => onSelect(c)}>
+                  className="hover:bg-navy-50/40 transition-colors cursor-pointer" onClick={() => handleRowClick(c)}>
                   <td className="py-2.5 px-2.5" onClick={(e) => { e.stopPropagation(); onToggleFavorite(c.id); }}>
                     <Heart className={`w-3 h-3 ${c.isFavorite ? "text-red-400 fill-red-400" : "text-gray-300 hover:text-red-300"} transition-colors`} />
                   </td>

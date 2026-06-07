@@ -106,10 +106,10 @@ export function ExecutiveCommandCenter() {
     {
       id: "cost-governance",
       title: "Cost Governance",
-      component: <CostGovernanceSnapshotWidget dashboard={widgetData.costGovernance ? (() => {
+      component: <CostGovernanceSnapshotWidget dashboard={widgetData.costGovernance && widgetData.costGovernance.estimated_ai_cost > 10 ? (() => {
         const used = widgetData.costGovernance.estimated_ai_cost;
         const monthly = widgetData.costGovernance.monthly_projection;
-        const totalBudget = Math.max(monthly * 3, 1); // prevent NaN from division by zero
+        const totalBudget = Math.max(monthly * 3, 1);
         const remaining = Math.max(0, totalBudget - used);
         return {
           budgetUsed: used,

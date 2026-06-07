@@ -61,6 +61,20 @@ class ExtractionRepository(BaseRepository):
     async def store_page(
         self, upload_id: str, tenant_id: str, page: ExtractedPage, method: str,
     ) -> DocumentPage:
+        # Idempotency check: skip if this page already exists for this upload.
+        # Prevents IntegrityError from uq_page_per_upload constraint when
+        # extraction tasks are accidentally duplicated.
+        existing = await self.session.execute(
+            select(DocumentPage).where(
+                DocumentPage.upload_id == upload_id,
+                DocumentPage.tenant_id == tenant_id,
+                DocumentPage.page_number == page.page_number,
+            )
+        )
+        existing_page = existing.scalar_one_or_none()
+        if existing_page is not None:
+            return existing_page
+
         doc_page = DocumentPage(
             upload_id=upload_id,
             tenant_id=tenant_id,

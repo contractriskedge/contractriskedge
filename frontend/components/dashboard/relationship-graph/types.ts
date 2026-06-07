@@ -1,36 +1,24 @@
-// ── Enterprise Relationship Graph Types ─────────────────────────────────────
+// ── Backend Graph Schema Types (from GET /api/v1/relationships/graph) ───────
 
 export type NodeType =
-  | "master_service_agreement" | "amendment" | "statement_of_work" | "dpa"
-  | "nda" | "license" | "addendum" | "vendor" | "business_unit"
-  | "obligation" | "insurance" | "compliance" | "procurement";
+  | "review" | "upload" | "finding" | "redline"
+  | "negotiation" | "obligation" | "workflow" | "vendor";
 
 export type EdgeType =
-  | "parent_child" | "amendment" | "dependency" | "renewal"
-  | "obligation" | "financial_exposure" | "compliance_link" | "sla_link";
+  | "uploaded_as" | "reviewed_in" | "redlined_in"
+  | "negotiates" | "obligates" | "workflow_for" | "vendor_for";
 
 export type GraphMode =
   | "relationship" | "risk_propagation" | "financial_exposure"
   | "vendor_ecosystem" | "compliance_dependency" | "renewal_timeline" | "obligation_flow";
 
-export type RiskLevel = "critical" | "high" | "medium" | "low" | "info";
-
 export interface GraphNodeData {
   id: string;
-  label: string;
   type: NodeType;
-  riskScore: number;
-  riskLevel: RiskLevel;
-  status: string;
-  vendor?: string;
-  businessUnit?: string;
-  geography?: string;
-  financialValue?: number;
-  expiryDate?: string;
-  owner?: string;
-  depth: number;
-  cluster?: number;
-  // D3 layout
+  label: string;
+  tenant_id: string;
+  metadata: Record<string, unknown>;
+  // D3 layout fields (set by D3 simulation)
   x?: number;
   y?: number;
   fx?: number | null;
@@ -45,20 +33,20 @@ export interface GraphEdgeData {
   target: string;
   type: EdgeType;
   label: string;
-  strength: number;
-  animated: boolean;
+  metadata: Record<string, unknown>;
 }
 
 export interface GraphData {
   nodes: GraphNodeData[];
   edges: GraphEdgeData[];
-  metadata: {
-    totalNodes: number;
-    totalEdges: number;
-    clusters: number;
-    highRiskChains: number;
-    avgDepth: number;
-  };
+}
+
+export interface RelationshipGraphResponse {
+  nodes: GraphNodeData[];
+  edges: GraphEdgeData[];
+  total_nodes: number;
+  total_edges: number;
+  generated_at: string;
 }
 
 export interface GraphKpi {
@@ -95,46 +83,35 @@ export interface TimelineEvent {
 }
 
 export const NODE_COLORS: Record<NodeType, string> = {
-  master_service_agreement: "#6366F1",
-  amendment: "#F59E0B",
-  statement_of_work: "#06B6D4",
-  dpa: "#EC4899",
-  nda: "#22C55E",
-  license: "#8B5CF6",
-  addendum: "#14B8A6",
+  review: "#6366F1",
+  upload: "#06B6D4",
+  finding: "#EF4444",
+  redline: "#F59E0B",
+  negotiation: "#8B5CF6",
+  obligation: "#22C55E",
+  workflow: "#3B82F6",
   vendor: "#F97316",
-  business_unit: "#3B82F6",
-  obligation: "#EF4444",
-  insurance: "#0EA5E9",
-  compliance: "#84CC16",
-  procurement: "#A855F7",
 };
 
 export const EDGE_COLORS: Record<EdgeType, string> = {
-  parent_child: "#6366F1",
-  amendment: "#F59E0B",
-  dependency: "#EF4444",
-  renewal: "#22C55E",
-  obligation: "#F97316",
-  financial_exposure: "#DC2626",
-  compliance_link: "#84CC16",
-  sla_link: "#06B6D4",
+  uploaded_as: "#6366F1",
+  reviewed_in: "#EF4444",
+  redlined_in: "#F59E0B",
+  negotiates: "#8B5CF6",
+  obligates: "#22C55E",
+  workflow_for: "#3B82F6",
+  vendor_for: "#F97316",
 };
 
 export const NODE_LABELS: Record<NodeType, string> = {
-  master_service_agreement: "MSA",
-  amendment: "AMD",
-  statement_of_work: "SOW",
-  dpa: "DPA",
-  nda: "NDA",
-  license: "LIC",
-  addendum: "ADD",
-  vendor: "VDR",
-  business_unit: "BU",
+  review: "REV",
+  upload: "DOC",
+  finding: "FND",
+  redline: "RED",
+  negotiation: "NEG",
   obligation: "OBL",
-  insurance: "INS",
-  compliance: "CMP",
-  procurement: "PRO",
+  workflow: "WF",
+  vendor: "VDR",
 };
 
 export const GRAPH_MODES: { id: GraphMode; label: string; icon: string; description: string }[] = [
@@ -150,3 +127,23 @@ export const GRAPH_MODES: { id: GraphMode; label: string; icon: string; descript
 export const RISK_BG = { critical: "bg-red-500", high: "bg-orange-500", medium: "bg-yellow-500", low: "bg-green-500", info: "bg-blue-500" };
 export const RISK_TEXT = { critical: "text-red-700", high: "text-orange-700", medium: "text-yellow-700", low: "text-green-700", info: "text-blue-700" };
 export const RISK_BG_LIGHT = { critical: "bg-red-50", high: "bg-orange-50", medium: "bg-yellow-50", low: "bg-green-50", info: "bg-blue-50" };
+
+/** Extract a human-readable status from a node's metadata. */
+export function getNodeStatus(node: GraphNodeData): string {
+  return (node.metadata?.status as string) || "";
+}
+
+/** Extract risk severity from a node's metadata. */
+export function getNodeSeverity(node: GraphNodeData): string {
+  return (node.metadata?.severity as string) || (node.metadata?.risk_level as string) || "info";
+}
+
+/** Get a display label for a node type. */
+export function getNodeTypeLabel(type: NodeType): string {
+  const labels: Record<NodeType, string> = {
+    review: "Review", upload: "Document", finding: "Finding",
+    redline: "Redline", negotiation: "Negotiation", obligation: "Obligation",
+    workflow: "Workflow", vendor: "Vendor",
+  };
+  return labels[type] || type;
+}

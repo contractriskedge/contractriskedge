@@ -57,6 +57,7 @@ export interface ReviewSummary {
   updated_at: string;
   completed_at: string | null;
   age_hours: number;
+  computed_status?: string;
 }
 
 export type ReviewStatus =
@@ -109,7 +110,7 @@ export interface Finding {
   feedback_type: string | null;
 }
 
-export type FindingStatus = "open" | "acknowledged" | "resolved" | "dismissed" | "false_positive";
+export type FindingStatus = "open" | "acknowledged" | "resolved" | "dismissed" | "false_positive" | "accepted" | "rejected" | "modified" | "waived" | "escalated" | "mitigated";
 
 // ── AI Feedback Loop ────────────────────────────────────────────────────────
 
@@ -131,18 +132,31 @@ export interface AiFeedback {
 export interface PolicyViolation {
   id: string;
   policy_name: string;
-  policy_version: string;
+  policy_version?: string;
   clause_type: string;
   severity: RiskLevel;
-  description: string;
-  expected: string;
-  actual: string;
-  recommendation: string;
-  page_number: number;
-  compliance_impact: "critical" | "high" | "medium" | "low" | "none";
-  regulation: string;
+  description?: string;
+  expected?: string;
+  actual?: string;
+  recommendation?: string;
+  page_number?: number;
+  compliance_impact?: "critical" | "high" | "medium" | "low" | "none";
+  regulation?: string;
   status: "open" | "waived" | "resolved";
-  created_at: string;
+  created_at?: string;
+  // New end-to-end fields from the policy engine pipeline
+  finding_id?: string;
+  finding_title?: string;
+  finding_description?: string;
+  rule_id?: string;
+  playbook_id?: string;
+  rule_description?: string;
+  effect?: string;
+  is_mandatory?: boolean;
+  waiver_status?: "pending" | "approved" | "rejected" | "expired";
+  waiver_justification?: string;
+  waiver_requested_by?: string;
+  waiver_requested_at?: string;
 }
 
 // ── Missing Clause ──────────────────────────────────────────────────────────
@@ -321,7 +335,7 @@ export interface ReviewContextState {
   error: string | null;
 }
 
-export type ReviewSection = "summary" | "findings" | "redline" | "versions" | "policy" | "recommendations" | "risk_reduction" | "workflow" | "explainability" | "audit";
+export type ReviewSection = "summary" | "overview" | "findings" | "redline" | "versions" | "policy" | "recommendations" | "risk_reduction" | "workflow" | "explainability" | "audit" | "governance" | "history";
 
 // ── Keyboard Shortcuts ──────────────────────────────────────────────────────
 

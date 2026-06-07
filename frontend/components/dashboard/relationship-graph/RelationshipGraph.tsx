@@ -1,30 +1,41 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Share2, Download, RefreshCw, Search, CheckCircle2 } from "lucide-react";
+import { Share2, Download, RefreshCw, Search, CheckCircle2, Loader2, AlertCircle } from "lucide-react";
 import { GraphKpiCards } from "./GraphKpiCards";
 import { GraphCanvas } from "./GraphCanvas";
 import { RelationshipAiInsights } from "./AiInsights";
 import { NodeDetailDrawer } from "./NodeDetailDrawer";
 import { GraphFilterBar } from "./GraphFilterBar";
 import { RelationshipTimeline } from "./Timeline";
-import type { GraphNodeData, GraphMode } from "./types";
+import { useRelationshipGraph } from "./useRelationshipGraph";
+import type { GraphNodeData, GraphMode, GraphData, GraphKpi, RelationshipGraphResponse } from "./types";
 
-const mockGraphData = { nodes: [], edges: [] };
-const graphKpis = [];
-const relationshipInsights = [];
-const timelineEvents = [];
+interface RelationshipGraphProps {
+  /** Optional review_id to center the graph on */
+  reviewId?: string;
+  /** Optional upload_id to center the graph on (alternative to reviewId) */
+  uploadId?: string;
+  /** Graph traversal depth (1=direct FKs, 2=indirect) */
+  depth?: number;
+}
 
-export function RelationshipGraph() {
+export function RelationshipGraph({ reviewId, uploadId, depth = 1 }: RelationshipGraphProps) {
   const [selectedNode, setSelectedNode] = useState<GraphNodeData | null>(null);
   const [graphMode, setGraphMode] = useState<GraphMode>("relationship");
   const [filters, setFilters] = useState({ vendor: "", type: "", riskLevel: "" });
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [graphKey, setGraphKey] = useState(0);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [toast, setToast] = useState<{ message: string; visible: boolean }>({ message: "", visible: false });
+
+  // Fetch graph data from backend API
+  const { data: graphData, isLoading, error, refetch, isFetching } = useRelationshipGraph({
+    review_id: reviewId,
+    upload_id: uploadId,
+    depth,
+  });
 
   const showToast = useCallback((message: string) => {
     setToast({ message, visible: true });
@@ -44,19 +55,17 @@ export function RelationshipGraph() {
   }, []);
 
   const handleRefresh = useCallback(() => {
-    setIsRefreshing(true);
+    refetch();
     setGraphKey((k) => k + 1);
     setSelectedNode(null);
     showToast("Graph refreshed");
-    setTimeout(() => setIsRefreshing(false), 600);
-  }, [showToast]);
+  }, [refetch, showToast]);
 
   const handleSmartSearch = useCallback(() => {
     setIsSearchOpen((prev) => !prev);
   }, []);
 
   const handleExportGraph = useCallback(() => {
-    // Export SVG content as SVG file
     const svgEl = document.querySelector("#graph-canvas-svg");
     if (svgEl) {
       const serializer = new XMLSerializer();
@@ -73,6 +82,95 @@ export function RelationshipGraph() {
     }
   }, [showToast]);
 
+  // Build GraphData from API response
+  const graphDataForCanvas: GraphData = useMemo(() => {
+    if (!graphData) return { nodes: [], edges: [] };
+    return {
+      nodes: graphData.nodes.map((n) => ({
+        ...n,
+        // D3 will set x/y during simulation
+      })),
+      edges: graphData.edges.map((e) => ({
+        ...e,
+      })),
+    };
+  }, [graphData]);
+
+  // Build KPI metrics from graph data
+  const graphKpis: GraphKpi[] = useMemo(() => {
+    if (!graphData) return [];
+    const nodeTypes = new Map<string, number>();
+    for (const n of graphData.nodes) {
+      nodeTypes.set(n.type, (nodeTypes.get(n.type) || 0) + 1);
+    }
+    return [
+      {
+        id: "total-nodes",
+        label: "Total Entities",
+        value: String(graphData.total_nodes),
+        trend: 0, trendDirection: "neutral",
+        icon: "Share2", color: "from-indigo-500 to-indigo-600",
+        severity: "info", tooltip: "Total nodes in the graph",
+      },
+      {
+        id: "total-edges",
+        label: "Relationships",
+        value: String(graphData.total_edges),
+        trend: 0, trendDirection: "neutral",
+        icon: "GitBranch", color: "from-purple-500 to-purple-600",
+        severity: "info", tooltip: "Total relationships in the graph",
+      },
+      {
+        id: "review-count",
+        label: "Reviews",
+        value: String(nodeTypes.get("review") || 0),
+        trend: 0, trendDirection: "neutral",
+        icon: "FileText", color: "from-blue-500 to-blue-600",
+        severity: "info", tooltip: "Number of reviews",
+      },
+      {
+        id: "finding-count",
+        label: "Findings",
+        value: String(nodeTypes.get("finding") || 0),
+        trend: 0, trendDirection: "neutral",
+        icon: "AlertTriangle", color: "from-red-500 to-red-600",
+        severity: nodeTypes.get("finding") && (nodeTypes.get("finding") || 0) > 10 ? "warning" : "info",
+        tooltip: "Number of findings",
+      },
+    ];
+  }, [graphData]);
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 text-indigo-400 animate-spin mx-auto mb-3" />
+          <p className="text-sm text-gray-500">Loading relationship graph...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error && !graphData) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center max-w-md">
+          <AlertCircle className="w-10 h-10 text-red-400 mx-auto mb-3" />
+          <p className="text-sm font-medium text-gray-900 mb-1">Failed to load graph</p>
+          <p className="text-xs text-gray-500 mb-4">{(error as Error)?.message || "An unexpected error occurred"}</p>
+          <button onClick={() => refetch()} className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700">
+            <RefreshCw className="w-3.5 h-3.5" /> Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Empty state
+  const hasData = graphData && graphData.nodes.length > 0;
+
   return (
     <div className="space-y-4 pb-24">
       {/* Header */}
@@ -83,7 +181,11 @@ export function RelationshipGraph() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-navy-900">Contract Relationship Intelligence</h1>
-            <p className="text-xs text-gray-500 mt-0.5">Enterprise dependency mapping and relationship analysis</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {hasData
+                ? `${graphData.total_nodes} entities · ${graphData.total_edges} relationships`
+                : "No relationship data available"}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -99,10 +201,10 @@ export function RelationshipGraph() {
           </button>
           <button
             onClick={handleRefresh}
-            disabled={isRefreshing}
+            disabled={isFetching}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`} /> Refresh
+            <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? "animate-spin" : ""}`} /> Refresh
           </button>
           <button
             onClick={handleExportGraph}
@@ -122,7 +224,7 @@ export function RelationshipGraph() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search contracts, vendors, clauses..."
+              placeholder="Search nodes by name or type..."
               className="w-full text-sm border border-gray-200 rounded-lg pl-9 pr-3 py-2 focus:border-navy-400 focus:ring-1 focus:ring-navy-400"
               autoFocus
             />
@@ -152,22 +254,34 @@ export function RelationshipGraph() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Left: AI Insights */}
         <div className="lg:col-span-1 space-y-4">
-          <RelationshipAiInsights insights={relationshipInsights} />
-          <RelationshipTimeline events={timelineEvents} />
+          <RelationshipAiInsights insights={[]} />
+          <RelationshipTimeline events={[]} />
         </div>
 
         {/* Center: Graph */}
         <div className="lg:col-span-3">
-          <GraphCanvas
-            key={graphKey}
-            data={mockGraphData}
-            mode={graphMode}
-            onNodeSelect={handleNodeSelect}
-            selectedNodeId={selectedNode?.id || null}
-            filterVendor={filters.vendor}
-            filterType={filters.type}
-            filterRisk={filters.riskLevel}
-          />
+          {hasData ? (
+            <GraphCanvas
+              key={graphKey}
+              data={graphDataForCanvas}
+              mode={graphMode}
+              onNodeSelect={handleNodeSelect}
+              selectedNodeId={selectedNode?.id || null}
+              filterVendor={filters.vendor}
+              filterType={filters.type}
+              filterRisk={filters.riskLevel}
+            />
+          ) : (
+            <div className="flex items-center justify-center h-96 bg-gray-50 dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700">
+              <div className="text-center">
+                <Share2 className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                <p className="text-sm font-medium text-gray-500">No relationship data</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Select a review to see its entity relationship graph.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

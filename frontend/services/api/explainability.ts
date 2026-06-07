@@ -133,8 +133,17 @@ export const explainabilityService = {
     api.get<EvidenceChain>(`/reviews/${reviewId}/findings/${findingId}/evidence`),
 
   /** Get precedent contracts with similar findings */
-  getPrecedents: (reviewId: string, findingId: string, options?: { limit?: number; min_similarity?: number }) =>
-    api.get<{ data: PrecedentLink[] }>(`/reviews/${reviewId}/findings/${findingId}/precedents`, options as Record<string, unknown>),
+  getPrecedents: (reviewId: string, findingId: string, options?: { limit?: number; min_similarity?: number }) => {
+    const query = new URLSearchParams();
+    if (options?.limit !== undefined) query.set("limit", String(options.limit));
+    if (options?.min_similarity !== undefined) query.set("min_similarity", String(options.min_similarity));
+    const qs = query.toString();
+    return api.get<{ data: PrecedentLink[] }>(
+      qs
+        ? `/reviews/${reviewId}/findings/${findingId}/precedents?${qs}`
+        : `/reviews/${reviewId}/findings/${findingId}/precedents`,
+    );
+  },
 
   /** Get regulation citations relevant to a review */
   getRegulationCitations: (reviewId: string) =>

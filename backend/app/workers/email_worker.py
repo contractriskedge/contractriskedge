@@ -26,7 +26,7 @@ TASK_NAME = "send_email"
 # Try to register as Celery task; gracefully degrade if Celery unavailable
 celery_app = None
 try:
-    from app.workers.celery_app import celery_app as _celery
+    from workers.celery_app import celery_app as _celery
     celery_app = _celery
 except ImportError:
     logger.warning("Celery not available — email worker task not registered")

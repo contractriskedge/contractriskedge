@@ -29,7 +29,7 @@ import {
   PanelLeft, PanelRight, Search, CheckCircle2, XCircle, AlertTriangle,
   Clock, Zap, Target, MessageSquare, Edit3, GitCompare,
   ChevronDown, ChevronUp, ListChecks, Loader2,
-  TrendingUp, TrendingDown, Minus, BarChart3,
+  TrendingUp, TrendingDown, Minus, BarChart3, Cpu,
 } from "lucide-react";
 import { ReviewContextProvider, useReviewContext } from "./ReviewContext";
 import { DocumentViewer } from "./DocumentViewer";
@@ -146,26 +146,58 @@ function EnterpriseReviewPlatformInner() {
     };
   }, [setShowLeftPanel]);
 
-  // ── Sections ─────────────────────────────────────────────────────────
+  // ── Sections — Full tab bar with all 10 sections ──────────────────
 
   const sections: SectionConfig[] = useMemo(() => [
-    { id: "summary", label: "Summary", icon: LayoutDashboard, shortcut: "S" },
-    { id: "findings", label: "Findings", icon: Brain, shortcut: "1",
-      badge: (c) => { const n = c.findings.filter(f => (f.status || "open") === "open").length; return n > 0 ? `(${n})` : undefined; } },
-    { id: "redline", label: "Redline", icon: Edit3, shortcut: "2",
-      badge: () => apiRedlines.length > 0 ? `(${apiRedlines.length})` : undefined },
-    { id: "versions", label: "Versions", icon: GitCompare, shortcut: "V",
-      badge: () => docVersions.length > 0 ? `(${docVersions.length})` : undefined },
-    { id: "policy", label: "Policy", icon: Shield, shortcut: "3",
-      badge: (c) => { const n = c.policyViolations?.filter(v => (v.status || "open") === "open").length; return n && n > 0 ? `(${n})` : undefined; } },
-    { id: "recommendations", label: "Recs", icon: Lightbulb, shortcut: "4",
-      badge: (c) => { const n = c.recommendations?.filter(r => r.status === "pending").length; return n && n > 0 ? `(${n})` : undefined; } },
-    { id: "risk_reduction", label: "Risk Reduction", icon: TrendingDown, shortcut: "R" },
-    { id: "workflow", label: "Workflow", icon: Workflow, shortcut: "5",
-      badge: (c) => c.workflow?.stages?.length ? `(${c.workflow.stages.length})` : undefined },
-    { id: "explainability", label: "Explain", icon: BarChart3, shortcut: "6" },
-    { id: "audit", label: "Audit", icon: Activity, shortcut: "" },
-  ], [apiRedlines, docVersions]);
+    {
+      id: "overview" as ReviewSection, label: "Overview", icon: LayoutDashboard, shortcut: "S",
+      badge: (c) => {
+        const openFindings = c.findings.filter(f => (f.status || "open") === "open").length;
+        const pendingRecs = c.recommendations?.filter(r => r.status === "pending").length ?? 0;
+        const total = openFindings + pendingRecs;
+        return total > 0 ? `(${total})` : undefined;
+      },
+    },
+    {
+      id: "findings" as ReviewSection, label: "Findings", icon: Brain, shortcut: "1",
+      badge: (c) => { const n = c.findings.filter(f => (f.status || "open") === "open").length; return n > 0 ? `(${n})` : undefined; },
+    },
+    {
+      id: "redline" as ReviewSection, label: "Redlines", icon: Edit3, shortcut: "2",
+      badge: () => apiRedlines.length > 0 ? `(${apiRedlines.length})` : undefined,
+    },
+    {
+      id: "policy" as ReviewSection, label: "Policy", icon: Shield, shortcut: "3",
+      badge: (c) => {
+        const violations = c.policyViolations?.filter(v => (v.status || "open") === "open").length ?? 0;
+        return violations > 0 ? `(${violations})` : undefined;
+      },
+    },
+    {
+      id: "recommendations" as ReviewSection, label: "Recs", icon: Lightbulb, shortcut: "4",
+      badge: (c) => {
+        const pending = c.recommendations?.filter(r => r.status === "pending").length ?? 0;
+        return pending > 0 ? `(${pending})` : undefined;
+      },
+    },
+    {
+      id: "risk_reduction" as ReviewSection, label: "Risk", icon: TrendingDown, shortcut: "5",
+    },
+    {
+      id: "workflow" as ReviewSection, label: "Workflow", icon: Workflow, shortcut: "6",
+    },
+    {
+      id: "explainability" as ReviewSection, label: "Explain", icon: Cpu, shortcut: "7",
+    },
+    {
+      id: "audit" as ReviewSection, label: "Audit", icon: Activity, shortcut: "8",
+      badge: () => auditBadgeCount > 0 ? `(${auditBadgeCount})` : undefined,
+    },
+    {
+      id: "versions" as ReviewSection, label: "Versions", icon: FileText, shortcut: "V",
+      badge: () => docVersions.length > 0 ? `(${docVersions.length})` : undefined,
+    },
+  ], [apiRedlines, docVersions, auditBadgeCount]);
 
   // ── Filtered Reviews ─────────────────────────────────────────────────
 
@@ -490,16 +522,28 @@ function EnterpriseReviewPlatformInner() {
             </div>
           ) : (
             <div className="flex-1 overflow-y-auto">
-              {activeSection === "summary" && <ReviewSummarySection />}
+              {/* Overview = Summary + Explainability + Risk Reduction */}
+              {(activeSection === "overview" || activeSection === "summary" || activeSection === "explainability" || activeSection === "risk_reduction") && (
+                <div className="divide-y divide-gray-100 dark:divide-navy-700">
+                  <ReviewSummarySection />
+                  <RiskReductionSection />
+                  <ExplainabilitySection />
+                </div>
+              )}
+              {/* Findings */}
               {activeSection === "findings" && <FindingsSection />}
+              {/* Redlines */}
               {activeSection === "redline" && <RedlineWorkspace />}
-              {activeSection === "versions" && <VersionsSection />}
+              {/* Policy */}
               {activeSection === "policy" && <PolicyIssuesSection />}
+              {/* Recommendations */}
               {activeSection === "recommendations" && <RecommendationsSection />}
-              {activeSection === "risk_reduction" && <RiskReductionSection />}
+              {/* Workflow — standalone tab */}
               {activeSection === "workflow" && <WorkflowSection />}
-              {activeSection === "explainability" && <ExplainabilitySection />}
+              {/* Audit */}
               {activeSection === "audit" && <AuditTrailSection />}
+              {/* Versions */}
+              {activeSection === "versions" && <VersionsSection />}
             </div>
           )}
         </div>
@@ -719,11 +763,17 @@ function CompactContextPanel() {
 interface EnterpriseReviewPlatformProps {
   preselectedReviewId?: string;
   preselectedContractId?: string;
+  /** Optional initial section to land on (e.g. "redline" from a deep link). */
+  initialSection?: ReviewSection;
 }
 
-export function EnterpriseReviewPlatform({ preselectedReviewId, preselectedContractId }: EnterpriseReviewPlatformProps) {
+export function EnterpriseReviewPlatform({ preselectedReviewId, preselectedContractId, initialSection }: EnterpriseReviewPlatformProps) {
   return (
-    <ReviewContextProvider preselectedReviewId={preselectedReviewId} preselectedContractId={preselectedContractId}>
+    <ReviewContextProvider
+      preselectedReviewId={preselectedReviewId}
+      preselectedContractId={preselectedContractId}
+      initialSection={initialSection}
+    >
       <EnterpriseReviewPlatformInner />
     </ReviewContextProvider>
   );

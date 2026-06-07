@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   MessageSquare, PenTool, AlertTriangle, Clock, Brain, ArrowUpCircle,
   GitBranch, Target, PanelLeft, PanelRight, Activity, Search,
+  FileOutput, Send,
 } from "lucide-react";
 import type {
   CompareMode, PanelMode, NegotiationStage, NegotiationKpi,
@@ -20,6 +21,7 @@ import { TopToolbar } from "./TopToolbar";
 import { ActivityTimeline } from "./ActivityTimeline";
 import { IssueDetailDrawer } from "./IssueDetailDrawer";
 import { NegotiationClauseDrawer } from "./NegotiationClauseDrawer";
+import { PageHeader } from "@/components/shared/PageHeader";
 
 // ── Hooks ───────────────────────────────────────────────────────
 
@@ -288,8 +290,41 @@ export function NegotiationCenter() {
 
   return (
     <div className="h-full flex flex-col bg-gray-50 dark:bg-navy-900">
-      {/* KPI Row */}
+      {/* Page Header */}
       <div className="px-4 pt-3 pb-2">
+        <PageHeader
+          title="Negotiation Center"
+          description="Resolve redlines and negotiate contract language with counterparties."
+          actions={
+            <>
+              <button
+                onClick={() => {}}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gold-500 text-white hover:bg-gold-600 transition-colors"
+              >
+                <Send className="w-3.5 h-3.5" />
+                Launch Negotiation
+              </button>
+              <button
+                onClick={() => {}}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-navy-700 text-white hover:bg-navy-800 transition-colors"
+              >
+                <PenTool className="w-3.5 h-3.5" />
+                Create Redline
+              </button>
+              <button
+                onClick={() => {}}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <FileOutput className="w-3.5 h-3.5" />
+                Export Redlines
+              </button>
+            </>
+          }
+        />
+      </div>
+
+      {/* KPI Row */}
+      <div className="px-4 pb-2">
         <NegotiationKpiCards metrics={kpiCards} />
       </div>
 

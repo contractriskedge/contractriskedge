@@ -204,12 +204,13 @@ export function PolicyCenter() {
         {activeTab === "dashboard" && (
           <div className="p-4 space-y-4">
             {/* KPI Cards — from real API data */}
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               {[
                 { label: "Active Policies", value: activeCount, color: "text-green-600", icon: CheckCircle2 },
                 { label: "Open Violations", value: openViolations.length, color: "text-red-600", icon: AlertTriangle },
-                { label: "Categories", value: categories.length, color: "text-blue-600", icon: BookOpen },
-                { label: "High Risk", value: highRiskCount, color: "text-orange-600", icon: TrendingUp },
+                { label: "High Risk Policies", value: highRiskCount, color: "text-orange-600", icon: TrendingUp },
+                { label: "Policy Coverage", value: policies.length > 0 ? `${Math.round((categories.filter(c => c.count > 0).length / Math.max(categories.length, 1)) * 100)}%` : "—", color: "text-blue-600", icon: Shield },
+                { label: "Contracts Impacted", value: evaluations.length > 0 ? `${evaluations.length}` : "—", subtitle: evaluations.length === 0 ? "No impacted contracts" : undefined, color: evaluations.length > 0 ? "text-purple-600" : "text-gray-400", icon: FileText },
               ].map(kpi => (
                 <div key={kpi.label} className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-3">
                   <div className="flex items-center justify-between mb-1">
@@ -217,32 +218,77 @@ export function PolicyCenter() {
                     <kpi.icon className={`w-3 h-3 ${kpi.color}`} />
                   </div>
                   <div className={`text-lg font-bold ${kpi.color}`}>{kpi.value}</div>
+                  {(kpi as any).subtitle && <p className="text-[7px] text-gray-400 mt-0.5">{(kpi as any).subtitle}</p>}
                 </div>
               ))}
             </div>
 
-            {/* Category Breakdown — from real playbook data */}
-            {categories.length > 0 && (
+            {/* Two-column layout for middle section */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Category Breakdown — from real playbook data */}
+              {categories.length > 0 && (
+                <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-3">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <BookOpen className="w-3 h-3 text-gray-400" />
+                    <span className="text-[9px] font-semibold text-gray-500 uppercase">Policies by Category</span>
+                  </div>
+                  <div className="space-y-1">
+                    {categories.map(cat => (
+                      <div key={cat.id} className="flex items-center justify-between py-1 px-2 rounded hover:bg-gray-50 dark:hover:bg-navy-750">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[8px] px-1 py-0.5 rounded font-medium text-gray-700 dark:text-gray-300 capitalize">
+                            {CATEGORY_ICONS[cat.id]}{" "}
+                            {cat.label}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-16 h-1.5 bg-gray-100 dark:bg-navy-700 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full bg-indigo-500" style={{ width: `${(cat.count / Math.max(...categories.map(c => c.count))) * 100}%` }} />
+                          </div>
+                          <span className="text-[9px] font-medium text-gray-600 dark:text-gray-400 w-8 text-right">{cat.count}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Violations by Status — from real evaluation data */}
               <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-3">
                 <div className="flex items-center gap-1.5 mb-2">
-                  <BookOpen className="w-3 h-3 text-gray-400" />
-                  <span className="text-[9px] font-semibold text-gray-500 uppercase">Policy Categories</span>
+                  <AlertTriangle className="w-3 h-3 text-red-400" />
+                  <span className="text-[9px] font-semibold text-gray-500 uppercase">Violations Overview</span>
                 </div>
-                <div className="space-y-1">
-                  {categories.map(cat => (
-                    <div key={cat.id} className="flex items-center justify-between py-1 px-2 rounded hover:bg-gray-50 dark:hover:bg-navy-750">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[8px] px-1 py-0.5 rounded font-medium text-gray-700 dark:text-gray-300 capitalize">
-                          {CATEGORY_ICONS[cat.id]}{" "}
-                          {cat.label}
-                        </span>
+                {evaluations.length === 0 ? (
+                  <p className="text-[9px] text-gray-400 py-4 text-center">No evaluations recorded yet</p>
+                ) : (
+                  <div className="space-y-2">
+                    {/* Status breakdown */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="text-center p-2 rounded-lg bg-red-50 dark:bg-red-900/10">
+                        <p className="text-sm font-bold text-red-600">{openViolations.length}</p>
+                        <p className="text-[8px] text-red-500">Open</p>
                       </div>
-                      <span className="text-[9px] font-medium text-gray-600 dark:text-gray-400">{cat.count} policy</span>
+                      <div className="text-center p-2 rounded-lg bg-green-50 dark:bg-green-900/10">
+                        <p className="text-sm font-bold text-green-600">{resolvedViolations.length}</p>
+                        <p className="text-[8px] text-green-500">Resolved</p>
+                      </div>
+                      <div className="text-center p-2 rounded-lg bg-gray-50 dark:bg-navy-750">
+                        <p className="text-sm font-bold text-gray-600">{evaluations.length}</p>
+                        <p className="text-[8px] text-gray-500">Total</p>
+                      </div>
                     </div>
-                  ))}
-                </div>
+                    {/* Resolution rate */}
+                    <div className="flex items-center justify-between px-2 py-1.5 rounded bg-gray-50 dark:bg-navy-750">
+                      <span className="text-[8px] text-gray-500">Resolution Rate</span>
+                      <span className="text-[9px] font-semibold text-navy-900 dark:text-white">
+                        {evaluations.length > 0 ? `${Math.round((resolvedViolations.length / evaluations.length) * 100)}%` : "—"}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
 
             {/* Recent Violations — from real evaluation data */}
             <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-3">
@@ -277,6 +323,99 @@ export function PolicyCenter() {
                 </div>
               )}
             </div>
+
+            {/* Policy Coverage Summary */}
+            {policies.length > 0 && (
+              <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-3">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <Shield className="w-3 h-3 text-indigo-400" />
+                  <span className="text-[9px] font-semibold text-gray-500 uppercase">Policy Coverage Summary</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                  <div>
+                    <p className="text-sm font-bold text-navy-900 dark:text-white">{categories.length}</p>
+                    <p className="text-[8px] text-gray-500">Categories Covered</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-navy-900 dark:text-white">
+                      {policies.filter(p => p.status === "published" || p.enabled !== false).length}
+                    </p>
+                    <p className="text-[8px] text-gray-500">Published Policies</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-navy-900 dark:text-white">
+                      {policies.filter(p => p.tags?.length > 0).length}
+                    </p>
+                    <p className="text-[8px] text-gray-500">Tagged Policies</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-navy-900 dark:text-white">
+                      {policies.reduce((max, p) => Math.max(max, p.version || p.version_count || 1), 0)}
+                    </p>
+                    <p className="text-[8px] text-gray-500">Latest Version</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Most Violated Policies — from real evaluation data */}
+            {evaluations.length > 0 && (
+              <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-3">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <AlertTriangle className="w-3 h-3 text-red-400" />
+                  <span className="text-[9px] font-semibold text-gray-500 uppercase">Most Violated Policies</span>
+                </div>
+                {(() => {
+                  // Aggregate violations by playbook/policy name
+                  const violByPolicy: Record<string, { count: number; status: string }> = {};
+                  evaluations.forEach((v: any) => {
+                    const name = v.playbook_name || `Policy ${(v.evaluation_id || "").slice(0, 8)}`;
+                    if (!violByPolicy[name]) violByPolicy[name] = { count: 0, status: v.status || "open" };
+                    violByPolicy[name].count++;
+                    if (v.status === "failed" || v.status === "open") violByPolicy[name].status = "open";
+                  });
+                  const sorted = Object.entries(violByPolicy)
+                    .sort(([, a], [, b]) => b.count - a.count)
+                    .slice(0, 8);
+                  return sorted.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-navy-700">
+                            <th className="pb-2 font-medium">Policy</th>
+                            <th className="pb-2 font-medium text-right">Violations</th>
+                            <th className="pb-2 font-medium text-right">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sorted.map(([name, info]) => (
+                            <tr key={name} className="border-b border-gray-50 dark:border-navy-700">
+                              <td className="py-2 font-medium text-navy-900 dark:text-white text-[9px]">{name}</td>
+                              <td className="py-2 text-right">
+                                <span className={`font-semibold ${info.count > 2 ? "text-red-600" : info.count > 0 ? "text-amber-600" : "text-gray-600"}`}>
+                                  {info.count}
+                                </span>
+                              </td>
+                              <td className="py-2 text-right">
+                                <span className={`text-[7px] font-medium px-1 py-0.5 rounded-full ${
+                                  info.status === "open" || info.status === "failed"
+                                    ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                                    : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                                }`}>
+                                  {info.status}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="text-[9px] text-gray-400 py-2 text-center">No violation data available.</p>
+                  );
+                })()}
+              </div>
+            )}
           </div>
         )}
 

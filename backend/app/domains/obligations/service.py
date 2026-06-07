@@ -23,6 +23,7 @@ from app.domains.obligations.schemas import (
     VendorRiskResponse, SlaPredictionResponse, TimelineEventResponse,
     FinancialExposureResponse, ValueAtRiskResponse, RiskAnalysisResponse,
     AnomalyResponse, NotificationHistoryResponse, AiReviewRequest,
+    ObligationAuditLogResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,22 @@ class ObligationService:
 
     # ── CRUD ───────────────────────────────────────────────────────────
 
+    async def _log_audit(
+        self, obligation_id: str, action: str, actor: str | None = None,
+        changes: dict | None = None, comment: str | None = None,
+    ) -> None:
+        """Record an audit event for an obligation lifecycle action."""
+        log = ObligationAuditLog(
+            id=uuid.uuid4(),
+            tenant_id=uuid.UUID(self.tenant_id),
+            obligation_id=uuid.UUID(obligation_id),
+            action=action,
+            actor=actor or "system",
+            changes=changes,
+            comment=comment,
+        )
+        self.session.add(log)
+
     async def list_obligations(
         self, page=1, page_size=20, status=None, obligation_type=None,
         vendor=None, risk_level=None, sla_status=None, search=None,
@@ -112,8 +129,14 @@ class ObligationService:
 
     async def get_obligation(self, obligation_id: str) -> ObligationResponse:
         from sqlalchemy import select
+        # Validate that obligation_id is a valid UUID before querying
+        try:
+            uid = uuid.UUID(obligation_id)
+        except ValueError:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Obligation not found")
         q = select(Obligation).where(
-            and_(Obligation.id == uuid.UUID(obligation_id), Obligation.tenant_id == uuid.UUID(self.tenant_id))
+            and_(Obligation.id == uid, Obligation.tenant_id == uuid.UUID(self.tenant_id))
         )
         o = (await self.session.execute(q)).scalar_one_or_none()
         if not o:
@@ -122,13 +145,14 @@ class ObligationService:
         return self._to_response(o)
 
     async def create_obligation(self, data: ObligationCreate) -> ObligationResponse:
+        status = data.status or "draft"
         o = Obligation(
             id=uuid.uuid4(),
             tenant_id=uuid.UUID(self.tenant_id),
             name=data.name,
             description=data.description,
             obligation_type=data.obligation_type,
-            status=data.status or "pending",
+            status=status,
             contract_id=data.contract_id,
             contract_name=data.contract_name,
             vendor=data.vendor,
@@ -151,29 +175,152 @@ class ObligationService:
         self.session.add(o)
         await self.session.flush()
         await self.session.refresh(o)
+        await self._log_audit(str(o.id), "created", comment=f"Obligation '{o.name}' created with status '{status}'")
         return self._to_response(o)
 
     async def update_obligation(self, obligation_id: str, data: ObligationUpdate) -> ObligationResponse:
         from sqlalchemy import select
+        try:
+            uid = uuid.UUID(obligation_id)
+        except ValueError:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Obligation not found")
         q = select(Obligation).where(
-            and_(Obligation.id == uuid.UUID(obligation_id), Obligation.tenant_id == uuid.UUID(self.tenant_id))
+            and_(Obligation.id == uid, Obligation.tenant_id == uuid.UUID(self.tenant_id))
         )
         o = (await self.session.execute(q)).scalar_one_or_none()
         if not o:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Obligation not found")
+
+        old_status = o.status
+        old_assignee = o.assignee
         update_data = data.model_dump(exclude_unset=True)
         for key, val in update_data.items():
             setattr(o, key, val)
         o.updated_at = datetime.now(timezone.utc)
         await self.session.flush()
         await self.session.refresh(o)
+
+        # Audit: log status changes
+        if "status" in update_data and update_data["status"] != old_status:
+            await self._log_audit(
+                obligation_id, f"status_changed:{old_status}→{update_data['status']}",
+                changes={"old_status": old_status, "new_status": update_data["status"]},
+            )
+        elif "assignee" in update_data and update_data["assignee"] != old_assignee:
+            await self._log_audit(
+                obligation_id, "assigned",
+                comment=f"Assigned to {update_data['assignee']}",
+                changes={"old_assignee": old_assignee, "new_assignee": update_data["assignee"]},
+            )
+        else:
+            await self._log_audit(obligation_id, "updated")
+
+        return self._to_response(o)
+
+    # ── Lifecycle Actions ────────────────────────────────────────────
+
+    async def complete_obligation(self, obligation_id: str) -> ObligationResponse:
+        """Mark an obligation as completed."""
+        o = await self._get_obligation_or_404(obligation_id)
+        if o.status in ("completed", "archived", "cancelled"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail=f"Cannot complete obligation in '{o.status}' state")
+        o.status = "completed"
+        o.completed_date = datetime.now(timezone.utc)
+        o.updated_at = datetime.now(timezone.utc)
+        await self.session.flush()
+        await self.session.refresh(o)
+        await self._log_audit(obligation_id, "completed")
+        return self._to_response(o)
+
+    async def cancel_obligation(self, obligation_id: str) -> ObligationResponse:
+        """Cancel an obligation."""
+        o = await self._get_obligation_or_404(obligation_id)
+        if o.status in ("completed", "archived", "cancelled"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail=f"Cannot cancel obligation in '{o.status}' state")
+        o.status = "cancelled"
+        o.updated_at = datetime.now(timezone.utc)
+        await self.session.flush()
+        await self.session.refresh(o)
+        await self._log_audit(obligation_id, "cancelled")
+        return self._to_response(o)
+
+    async def archive_obligation(self, obligation_id: str) -> ObligationResponse:
+        """Archive an obligation (soft-delete)."""
+        o = await self._get_obligation_or_404(obligation_id)
+        if o.status == "archived":
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Obligation is already archived")
+        o.status = "archived"
+        o.updated_at = datetime.now(timezone.utc)
+        await self.session.flush()
+        await self.session.refresh(o)
+        await self._log_audit(obligation_id, "archived")
         return self._to_response(o)
 
     async def delete_obligation(self, obligation_id: str) -> bool:
+        """Permanently delete an obligation (admin only)."""
+        o = await self._get_obligation_or_404(obligation_id)
+        await self._log_audit(obligation_id, "deleted")
+        await self.session.delete(o)
+        await self.session.flush()
+        return True
+
+    async def get_audit_history(self, obligation_id: str) -> list[ObligationAuditLogResponse]:
+        """Get audit history for an obligation."""
         from sqlalchemy import select
+        try:
+            uid = uuid.UUID(obligation_id)
+        except ValueError:
+            return []
+        result = await self.session.execute(
+            select(ObligationAuditLog).where(
+                and_(
+                    ObligationAuditLog.obligation_id == uid,
+                    ObligationAuditLog.tenant_id == uuid.UUID(self.tenant_id),
+                )
+            ).order_by(ObligationAuditLog.created_at.desc())
+        )
+        return [
+            ObligationAuditLogResponse(
+                id=str(log.id),
+                tenant_id=str(log.tenant_id) if log.tenant_id else None,
+                obligation_id=str(log.obligation_id),
+                action=log.action,
+                actor=log.actor,
+                changes=log.changes,
+                comment=log.comment,
+                created_at=log.created_at,
+            )
+            for log in result.scalars().all()
+        ]
+
+    async def _get_obligation_or_404(self, obligation_id: str) -> Obligation:
+        """Get obligation model or raise 404."""
+        from sqlalchemy import select
+        try:
+            uid = uuid.UUID(obligation_id)
+        except ValueError:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Obligation not found")
         q = select(Obligation).where(
-            and_(Obligation.id == uuid.UUID(obligation_id), Obligation.tenant_id == uuid.UUID(self.tenant_id))
+            and_(Obligation.id == uid, Obligation.tenant_id == uuid.UUID(self.tenant_id))
+        )
+        o = (await self.session.execute(q)).scalar_one_or_none()
+        if not o:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Obligation not found")
+        return o
+        from sqlalchemy import select
+        try:
+            uid = uuid.UUID(obligation_id)
+        except ValueError:
+            return False
+        q = select(Obligation).where(
+            and_(Obligation.id == uid, Obligation.tenant_id == uuid.UUID(self.tenant_id))
         )
         o = (await self.session.execute(q)).scalar_one_or_none()
         if not o:
@@ -304,7 +451,7 @@ class ObligationService:
                 SlaMetric.tenant_id == uuid.UUID(self.tenant_id),
                 or_(
                     SlaMetric.status == "breached",
-                    SlaMetric.performance < SlaMetric.sla_target,
+                    SlaMetric.status == "at_risk",
                 ),
             ).order_by(SlaMetric.measured_at.desc())
         )
@@ -664,6 +811,10 @@ class ObligationService:
         self.session.add(r)
         await self.session.flush()
         await self.session.refresh(r)
+        await self._log_audit(
+            data.obligation_id, "reminder_sent",
+            comment=f"Reminder '{data.reminder_type}' scheduled for {data.remind_at.isoformat()}",
+        )
         return ObligationReminderResponse(
             id=str(r.id),
             tenant_id=str(r.tenant_id) if r.tenant_id else None,
@@ -700,6 +851,10 @@ class ObligationService:
 
         await self.session.flush()
         await self.session.refresh(e)
+        await self._log_audit(
+            data.obligation_id, "escalated",
+            comment=f"Escalated to {data.escalated_to} (level {data.escalation_level})",
+        )
         return ObligationEscalationResponse(
             id=str(e.id),
             tenant_id=str(e.tenant_id) if e.tenant_id else None,

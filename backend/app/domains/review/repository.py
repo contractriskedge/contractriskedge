@@ -449,6 +449,13 @@ class ReviewRepository(BaseRepository):
         # This handles the common case where the same reviewer is assigned twice.
         existing = await self.get_existing_assignment(review_id, tenant_id, assignee_id)
         if existing:
+            # Still sync the denormalized field on contract_reviews to handle
+            # cases where it may have drifted (e.g., after a previous partial failure).
+            await self.session.execute(
+                update(ContractReview).where(ContractReview.review_id == review_id)
+                .values(assigned_to=assignee_id, assigned_by=assigned_by)
+            )
+            await self.session.flush()
             return existing
 
         # If no existing assignment, attempt to create a new one.
@@ -467,6 +474,12 @@ class ReviewRepository(BaseRepository):
             await self.session.rollback()
             existing = await self.get_existing_assignment(review_id, tenant_id, assignee_id)
             if existing:
+                # Sync denormalized field even on concurrent-insert path
+                await self.session.execute(
+                    update(ContractReview).where(ContractReview.review_id == review_id)
+                    .values(assigned_to=assignee_id, assigned_by=assigned_by)
+                )
+                await self.session.flush()
                 return existing
             # If still no existing (unlikely), re-raise.
             raise

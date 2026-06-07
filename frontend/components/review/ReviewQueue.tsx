@@ -27,7 +27,7 @@ import {
   FileText, AlertTriangle, Clock, User, ArrowUpDown, Lock,
   Search, Check, X, Loader2, UserPlus, ArrowUpRight,
   CheckSquare, Square, ChevronDown, Eye, ThumbsUp, ThumbsDown, Download,
-  ListChecks, Brain, Filter,
+  ListChecks, Brain, Filter, Star,
 } from "lucide-react";
 import { reviewService } from "@/services/api/reviews";
 import { api } from "@/services/api/client";
@@ -35,7 +35,9 @@ import type { ReviewDetail, WorkloadMetrics } from "@/services/api/client";
 import { ApprovalModal } from "./ApprovalModal";
 import { EscalationModal } from "./EscalationModal";
 import { getAllowedActions, isImmutable, getStatusLabel } from "@/lib/workflow";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { useFavorites } from "@/hooks/useFavorites";
 
 // ── Hooks ───────────────────────────────────────────────────────
 
@@ -372,7 +374,9 @@ interface ReviewQueueProps {
 export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const favorites = useFavorites(user?.tenant_id, user?.sub);
   const [queueFilter, setQueueFilter] = useState<string>("all");
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const isMyReviews = queueFilter === "my";
 
   const { data, isLoading } = useReviewsList();
@@ -402,11 +406,20 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
       if (previous) {
         queryClient.setQueryData(["reviews", "queue"], {
           ...previous,
-          data: previous.data.map((review) =>
-            review.review_id === reviewId
-              ? { ...review, assigned_to: assigneeName, status: "in_review", workflow_stage: "reviewer" }
-              : review,
-          ),
+          data: previous.data.map((review) => {
+            if (review.review_id !== reviewId) return review;
+            // Only optimistically transition if currently ai_analyzed/draft —
+            // otherwise the server may reject the auto-transition.
+            const optimisticallyAssigned =
+              review.status === "ai_analyzed" || review.status === "draft";
+            return {
+              ...review,
+              assigned_to: assigneeName,
+              ...(optimisticallyAssigned
+                ? { status: "in_review", workflow_stage: "reviewer" }
+                : {}),
+            };
+          }),
         });
       }
       return { previous };
@@ -503,21 +516,66 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
 
     // Queue filter (role-based)
     if (queueFilter === "my") {
-      if (user?.email) {
-        list = list.filter((r) => r.assigned_to?.toLowerCase() === user.email.toLowerCase());
+      // Match by user identifier (sub / email) — the backend stores the
+      // assignee as a user id (e.g. "dev-user"), not an email address, so we
+      // also compare against the user.sub to support dev mode where the JWT
+      // sub is the same string used by the seeder.
+      const identifiers = [
+        user?.sub,
+        user?.email,
+      ]
+        .filter(Boolean)
+        .map((s) => (s as string).toLowerCase());
+      if (identifiers.length > 0) {
+        list = list.filter((r) => {
+          const a = (r.assigned_to || "").toLowerCase();
+          if (!a || a === "unassigned") return false;
+          return identifiers.some((id) => a === id || a.includes(id));
+        });
       } else {
         list = list.filter((r) => r.assigned_to && r.assigned_to !== "Unassigned");
       }
     } else if (queueFilter === "legal") {
-      list = list.filter((r) => r.status === "legal_approval" || r.workflow_stage === "legal_approval");
+      // Match by workflow_stage "legal_ops" (set by both LEGAL_REVIEW and
+      // LEGAL_APPROVAL statuses per derive_workflow_stage) OR by any
+      // legal-related status value the backend may surface.
+      list = list.filter(
+        (r) =>
+          r.workflow_stage === "legal_ops" ||
+          r.workflow_stage === "legal_approval" ||
+          r.status === "legal_review" ||
+          r.status === "legal_approval",
+      );
     } else if (queueFilter === "executive") {
-      list = list.filter((r) => r.status === "exec_approval" || r.workflow_stage === "executive");
+      // Match by workflow_stage "executive" (set by EXEC_APPROVAL) OR by the
+      // exec_approval status the backend may surface.
+      list = list.filter(
+        (r) => r.workflow_stage === "executive" || r.status === "exec_approval",
+      );
     } else if (queueFilter === "compliance") {
-      list = list.filter((r) => r.workflow_stage === "compliance");
+      // Match by workflow_stage "compliance" OR by any compliance-related
+      // status the backend may surface.
+      list = list.filter(
+        (r) =>
+          r.workflow_stage === "compliance" ||
+          r.status === "compliance_review" ||
+          r.status === "compliance",
+      );
     } else if (queueFilter === "escalated") {
-      list = list.filter((r) => r.status === "escalated");
+      // Match by status "escalated" OR by workflow_stage "escalated".
+      list = list.filter(
+        (r) => r.status === "escalated" || r.workflow_stage === "escalated",
+      );
     } else if (queueFilter === "overdue") {
       list = list.filter((r) => r.sla_status === "overdue" || r.sla_status === "critical_overdue");
+    } else if (queueFilter === "favorites") {
+      // Show only the user's favorited reviews (or contract ids, since the
+      // review and contract are 1:1 in this app).
+      list = list.filter((r) =>
+        favorites.isFavorite(r.review_id) ||
+        favorites.isFavorite(r.document_id || "") ||
+        favorites.isFavorite(r.contract_id || ""),
+      );
     }
 
     // Stage filter (set by queue tabs)
@@ -585,32 +643,121 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* ── Workload Metrics Bar (full-width KPI strip) ── */}
-      {metrics && (
-        <div className="grid grid-cols-6 gap-px bg-gray-200 dark:bg-navy-700 border-b border-gray-200 dark:border-navy-700">
-          {[
-            { label: "Total", value: metrics.total, color: "text-gray-900 dark:text-white", bg: "bg-white dark:bg-navy-800" },
-            { label: "Unassigned", value: metrics.unassigned, color: "text-amber-600", bg: "bg-amber-50 dark:bg-amber-900/10" },
-            { label: "In Review", value: metrics.in_review, color: "text-purple-600", bg: "bg-purple-50 dark:bg-purple-900/10" },
-            { label: "Overdue", value: metrics.overdue, color: "text-red-600", bg: "bg-red-50 dark:bg-red-900/10" },
-            { label: "Escalated", value: metrics.escalated, color: "text-orange-600", bg: "bg-orange-50 dark:bg-orange-900/10" },
-            { label: "Critical", value: metrics.critical, color: "text-rose-600", bg: "bg-rose-50 dark:bg-rose-900/10" },
-          ].map((item) => (
-            <div key={item.label} className={`${item.bg} px-4 py-2.5 text-center`}>
-              <p className={`text-lg font-bold ${item.color}`}>{item.value}</p>
-              <p className="text-[9px] text-gray-500 dark:text-gray-400 uppercase tracking-wider">{item.label}</p>
-            </div>
-          ))}
+      {/* ── Unified Header with Metrics Strip ── */}
+      <div className="bg-white dark:bg-navy-800 border-b border-gray-200 dark:border-navy-700">
+        <div className="flex items-center justify-between px-4 py-2">
+          <div className="flex items-center gap-2">
+            <h1 className="text-sm font-bold text-navy-900 dark:text-white">Review Queue</h1>
+            <span className="text-[10px] text-gray-400">
+              {filtered.length === reviews.length
+                ? `(${reviews.length} total)`
+                : `(${filtered.length} of ${reviews.length} shown)`}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => {
+                if (selectedIds.size > 0) {
+                  const firstId = Array.from(selectedIds)[0];
+                  const review = reviews.find((r) => r.review_id === firstId);
+                  if (review) setAssignTarget(review.review_id);
+                }
+              }}
+              disabled={selectedIds.size === 0}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-lg bg-navy-700 text-white hover:bg-navy-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              <UserPlus className="w-3 h-3" />
+              Assign
+            </button>
+            <button
+              onClick={() => {
+                if (selectedIds.size > 0) {
+                  bulkApproveMut.mutate(Array.from(selectedIds));
+                }
+              }}
+              disabled={selectedIds.size === 0}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-lg bg-navy-700 text-white hover:bg-navy-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              <CheckSquare className="w-3 h-3" />
+              Bulk
+            </button>
+            <button
+              onClick={() => {}}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              <Download className="w-3 h-3" />
+              Export
+            </button>
+          </div>
         </div>
-      )}
+        {metrics && (
+          <>
+            {/* Stage Breakdown */}
+            <div className="grid grid-cols-7 border-t border-gray-100 dark:border-navy-700">
+              {[
+                { label: "Total", value: metrics.total, color: "text-gray-900 dark:text-white" },
+                { label: "AI Analyzed", value: metrics.ai_analyzed, color: "text-blue-600" },
+                { label: "Ready For Review", value: metrics.ready_for_review, color: "text-amber-600" },
+                { label: "Assigned", value: metrics.assigned, color: "text-purple-600" },
+                { label: "In Review", value: metrics.in_review, color: "text-indigo-600" },
+                { label: "Overdue", value: metrics.overdue, color: "text-red-600" },
+                { label: "Closed", value: metrics.closed, color: "text-green-600" },
+              ].map((item) => (
+                <div key={item.label} className="px-2 py-1.5 text-center border-r border-gray-100 dark:border-navy-700 last:border-0">
+                  <p className={`text-sm font-bold ${item.color}`}>{item.value}</p>
+                  <p className="text-[7px] text-gray-500 dark:text-gray-400 uppercase tracking-wider">{item.label}</p>
+                </div>
+              ))}
+            </div>
+            {/* Risk Distribution */}
+            <div className="flex items-center gap-3 px-3 py-1.5 border-t border-gray-100 dark:border-navy-700 bg-gray-50/50 dark:bg-navy-900/30">
+              <span className="text-[8px] font-semibold text-gray-500 uppercase tracking-wider">Risk</span>
+              <div className="flex items-center gap-2 flex-1">
+                {[
+                  { label: "Critical", value: metrics.critical_risk, color: "bg-red-500" },
+                  { label: "High", value: metrics.high_risk, color: "bg-orange-500" },
+                  { label: "Medium", value: metrics.medium_risk, color: "bg-amber-500" },
+                  { label: "Low", value: metrics.low_risk, color: "bg-green-500" },
+                ].map((r) => {
+                  const pct = metrics.total > 0 ? (r.value / metrics.total) * 100 : 0;
+                  return (
+                    <div key={r.label} className="flex items-center gap-1.5 text-[9px]">
+                      <div className={`w-1.5 h-1.5 rounded-full ${r.color}`} />
+                      <span className="text-gray-600 dark:text-gray-400">{r.label}</span>
+                      <span className="font-medium text-navy-900 dark:text-white">{r.value}</span>
+                      <span className="text-gray-400">({Math.round(pct)}%)</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            {/* Queue Aging */}
+            <div className="flex items-center gap-3 px-3 py-1.5 border-t border-gray-100 dark:border-navy-700 bg-gray-50/50 dark:bg-navy-900/30">
+              <span className="text-[8px] font-semibold text-gray-500 uppercase tracking-wider">Aging</span>
+              <div className="flex items-center gap-2 flex-1">
+                {[
+                  { label: "0-2d", value: metrics.age_0_2_days, color: "bg-green-400" },
+                  { label: "3-5d", value: metrics.age_3_5_days, color: "bg-amber-400" },
+                  { label: "6-10d", value: metrics.age_6_10_days, color: "bg-orange-400" },
+                  { label: "10d+", value: metrics.age_10_plus_days, color: "bg-red-400" },
+                ].map((a) => {
+                  const pct = metrics.total > 0 ? (a.value / metrics.total) * 100 : 0;
+                  return (
+                    <div key={a.label} className="flex items-center gap-1.5 text-[9px]">
+                      <div className={`w-8 h-1.5 rounded-full ${a.color}`} style={{ width: `${Math.max(pct, 2)}%` }} />
+                      <span className="text-gray-600 dark:text-gray-400">{a.label}</span>
+                      <span className="font-medium text-navy-900 dark:text-white">{a.value}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
 
       {/* ── Search & Filter Bar ── */}
       <div className="flex items-center justify-between px-4 py-2 bg-white dark:bg-navy-800 border-b border-gray-200 dark:border-navy-700">
-        <div className="flex items-center gap-2">
-          <FileText className="w-4 h-4 text-gray-400" />
-          <span className="text-sm font-semibold text-navy-900 dark:text-white">Queue</span>
-          <span className="text-[10px] text-gray-400">({reviews.length} total)</span>
-        </div>
         <div className="flex items-center gap-2">
           <div className="relative">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
@@ -644,6 +791,7 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
           { id: "compliance", label: "Compliance Queue", stage: "compliance" },
           { id: "escalated", label: "Escalated" },
           { id: "overdue", label: "Overdue" },
+          { id: "favorites", label: "Favorites", icon: Star, count: favorites.count },
         ].map((q) => (
           <button
             key={q.id}
@@ -652,13 +800,17 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
               if (q.stage) setStageFilter(q.stage);
               else setStageFilter("");
             }}
-            className={`px-3 py-1.5 text-[10px] font-medium rounded-md whitespace-nowrap transition-colors ${
+            className={`px-3 py-1.5 text-[10px] font-medium rounded-md whitespace-nowrap transition-colors inline-flex items-center gap-1 ${
               queueFilter === q.id
                 ? "bg-navy-900 text-white dark:bg-navy-600 dark:text-white shadow-sm"
                 : "text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-navy-700"
             }`}
           >
+            {q.icon && <q.icon className={`w-3 h-3 ${queueFilter === q.id ? "fill-current" : ""}`} />}
             {q.label}
+            {q.count !== undefined && q.count > 0 && (
+              <span className="text-[9px] font-bold tabular-nums opacity-80">({q.count})</span>
+            )}
           </button>
         ))}
       </div>
@@ -732,8 +884,25 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
       {filtered.length === 0 ? (
         <div className="flex flex-col items-center py-16 text-center flex-1">
           <FileText className="w-10 h-10 text-gray-300 dark:text-gray-600 mb-3" />
-          <p className="text-sm text-gray-500 dark:text-gray-400">No reviews found</p>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Complete an upload to generate a review.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">No reviews match the current filter</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+            {reviews.length === 0
+              ? "Complete an upload to generate a review."
+              : `${reviews.length} review${reviews.length === 1 ? "" : "s"} exist but are hidden by the active filters.`}
+          </p>
+          {reviews.length > 0 && (queueFilter !== "all" || stageFilter || statusFilter || searchQuery) && (
+            <button
+              onClick={() => {
+                setQueueFilter("all");
+                setStageFilter("");
+                setStatusFilter("all");
+                setSearchQuery("");
+              }}
+              className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-medium rounded-md bg-navy-600 text-white hover:bg-navy-700 transition-colors"
+            >
+              <X className="w-3 h-3" /> Clear filters
+            </button>
+          )}
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto">
@@ -810,6 +979,20 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                             <p className="text-[12px] font-semibold text-navy-900 dark:text-white truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                               {contractName}
                             </p>
+                            <button
+                              type="button"
+                              aria-label={favorites.isFavorite(review.review_id) ? "Unfavorite review" : "Favorite review"}
+                              aria-pressed={favorites.isFavorite(review.review_id)}
+                              data-testid="review-favorite-toggle"
+                              onClick={(e) => { e.stopPropagation(); favorites.toggle(review.review_id); }}
+                              className={`flex-shrink-0 p-0.5 rounded transition-colors ${
+                                favorites.isFavorite(review.review_id)
+                                  ? "text-amber-500 hover:text-amber-600"
+                                  : "text-gray-300 dark:text-navy-500 opacity-0 group-hover:opacity-100 hover:text-amber-500"
+                              }`}
+                            >
+                              <Star className={`w-3.5 h-3.5 ${favorites.isFavorite(review.review_id) ? "fill-current" : ""}`} />
+                            </button>
                             <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 ${
                               review.priority === "critical"
                                 ? "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-300"

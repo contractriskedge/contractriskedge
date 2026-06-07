@@ -169,6 +169,19 @@ async def get_review_aging(
 )
 
 
+@router.get("/sla-breach-trend"
+)
+async def get_sla_breach_trend(
+    days: int = Query(30, ge=7, le=90),
+    service: AnalyticsService = Depends(get_analytics_service)
+,
+    _: None = Depends(require_permission(Permissions.AUDIT_READ)),
+):
+    """SLA breach trend — daily breach counts for the last N days."""
+    return await service.get_sla_breach_trend(days
+)
+
+
 @router.get("/executive-summary"
 )
 async def get_executive_summary(

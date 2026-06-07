@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, ClipboardCheck, Clock, AlertTriangle, DollarSign, Activity, Shield, FileText, User, Calendar, Brain, Link } from "lucide-react";
+import { X, ClipboardCheck, Clock, AlertTriangle, DollarSign, Activity, Shield, FileText, User, Calendar, Brain, Link, ExternalLink } from "lucide-react";
 import type { ObligationRecord } from "./types";
 import { RISK_BG, RISK_TEXT, RISK_BG_LIGHT, STATUS_CONFIG, OBLIGATION_TYPES } from "./types";
 
@@ -23,6 +24,7 @@ interface DrawerProps {
 }
 
 export function ObligationDetailDrawer({ obligation, onClose, onToggleFavorite }: DrawerProps) {
+  const router = useRouter();
   const [tab, setTab] = useState<TabId>("overview");
 
   return (
@@ -79,7 +81,13 @@ function OverviewTab({ o }: { o: ObligationRecord }) {
       <div className="bg-gray-50 rounded-lg p-3 space-y-0.5 divide-y divide-gray-100">
         <MetaRow label="Status" value={<span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${sc.bg} ${sc.color}`}>{sc.label}</span>} />
         <MetaRow label="Type" value={OBLIGATION_TYPES.find((t) => t.id === o.type)?.label || o.type} />
-        <MetaRow label="Contract" value={o.contractName} icon={<FileText className="w-3 h-3" />} />
+        <MetaRow label="Contract" value={
+          o.contractId ? (
+            <button onClick={() => router.push(`/contracts/${o.contractId}`)} className="text-[10px] text-blue-600 hover:text-blue-800 inline-flex items-center gap-0.5">
+              {o.contractName || o.contractId.slice(0, 8)} <ExternalLink className="w-2.5 h-2.5" />
+            </button>
+          ) : (o.contractName || "—")
+        } icon={<FileText className="w-3 h-3" />} />
         <MetaRow label="Vendor" value={o.vendor} />
         <MetaRow label="Owner" value={o.owner} icon={<User className="w-3 h-3" />} />
         <MetaRow label="Assignee" value={o.assignee} />
@@ -87,7 +95,13 @@ function OverviewTab({ o }: { o: ObligationRecord }) {
         {o.completedDate && <MetaRow label="Completed" value={o.completedDate} icon={<Calendar className="w-3 h-3" />} />}
         <MetaRow label="Risk Score" value={<RiskBadge score={o.riskScore} />} />
         <MetaRow label="Financial Impact" value={`$${o.financialImpact}M`} icon={<DollarSign className="w-3 h-3" />} />
-        <MetaRow label="Clause Reference" value={o.clauseReference} />
+        <MetaRow label="Clause Reference" value={
+          o.clauseReference ? (
+            <button onClick={() => router.push(`/clause-library?search=${encodeURIComponent(o.clauseReference)}`)} className="text-[10px] text-blue-600 hover:text-blue-800 inline-flex items-center gap-0.5">
+              {o.clauseReference} <ExternalLink className="w-2.5 h-2.5" />
+            </button>
+          ) : "—"
+        } />
         <MetaRow label="Department" value={o.department} />
         <MetaRow label="Business Unit" value={o.businessUnit} />
         <MetaRow label="Geography" value={o.geography} />
