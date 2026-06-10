@@ -64,19 +64,21 @@ async def search_get(
     strategy: str = Query("hybrid", pattern="^(hybrid|vector|keyword)$"),
     clause_type: Optional[str] = Query(None),
     contract_id: Optional[str] = Query(None),
+    entity_types: Optional[str] = Query(None, description="Comma-separated: chunk,finding,obligation"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     service: SearchService = Depends(get_search_service),
     _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
 ):
     """GET-based search with query parameter support."""
+    types_list = entity_types.split(",") if entity_types else ["chunk"]
     request = SearchRequest(
         query=q, strategy=strategy,
         clause_type=clause_type, contract_id=contract_id,
-        page=page, page_size=page_size
-)
-    return await service.search(request
-)
+        entity_types=types_list,
+        page=page, page_size=page_size,
+    )
+    return await service.search(request)
 
 
 @router.get("/findings")
@@ -100,6 +102,27 @@ async def search_findings(
     return await service.search_findings(
         query=q, severity=severity, clause_type=clause_type,
         resolution=resolution, review_id=review_id,
+        page=page, page_size=page_size
+)
+
+
+@router.get("/obligations")
+async def search_obligations(
+    q: str = Query(..., min_length=1, max_length=500),
+    status: Optional[str] = Query(None),
+    contract_id: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    service: SearchService = Depends(get_search_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Search across obligations by name, description, vendor, and contract name.
+
+    Supports filtering by status and contract_id.
+    Returns matching obligations with relevance scoring.
+    """
+    return await service.search_obligations(
+        query=q, status=status, contract_id=contract_id,
         page=page, page_size=page_size
 )
 

@@ -431,9 +431,14 @@ export function ReviewDashboard({ onReviewSelect }: ReviewDashboardProps) {
                       className="hover:bg-gray-50 transition-colors"
                     >
                       <td className="px-4 py-3">
-                        <p className="font-medium text-gray-900 truncate max-w-[200px]">
-                          {contract.name}
-                        </p>
+                        <div className="flex items-center gap-1.5">
+                          {contract.contractNumber && (
+                            <span className="text-[10px] font-mono text-gray-400 flex-shrink-0">{contract.contractNumber}</span>
+                          )}
+                          <p className="font-medium text-gray-900 truncate max-w-[180px]">
+                            {contract.name}
+                          </p>
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-gray-600 capitalize">{contract.contractType}</td>
                       <td className="px-4 py-3">

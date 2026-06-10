@@ -337,7 +337,7 @@ class IngestionOrchestrator:
                 "upload_id": upload_id,
                 "tenant_id": self._tenant_id,
                 "correlation_id": metrics.correlation_id,
-                "filename": filename,
+                "file_name": filename,
                 "content_type": content_type,
                 "file_size": len(file_data),
             },
@@ -409,7 +409,7 @@ class IngestionOrchestrator:
 
             await self._event_bus.emit(IngestionStatusChanged(
                 tenant_id=self._tenant_id,
-                actor_id=self._user.id if self._user else "system",
+                actor_id=getattr(self._user, "id", None) or "system",
                 data={
                     "upload_id": upload_id,
                     "state": str(IngestionState.ANALYSIS_PENDING),
@@ -1033,7 +1033,7 @@ class IngestionOrchestrator:
 
         await self._event_bus.emit(UploadCompleted(
             tenant_id=self._tenant_id,
-            actor_id=self._user.id if self._user else "system",
+            actor_id=getattr(self._user, "id", None) or "system",
             data={
                 "upload_id": upload_id,
                 "state": str(IngestionState.REVIEW_READY),
@@ -1079,7 +1079,7 @@ class IngestionOrchestrator:
 
         await self._event_bus.emit(UploadFailed(
             tenant_id=self._tenant_id,
-            actor_id=self._user.id if self._user else "system",
+            actor_id=getattr(self._user, "id", None) or "system",
             data={
                 "upload_id": upload_id,
                 "error": error_message,

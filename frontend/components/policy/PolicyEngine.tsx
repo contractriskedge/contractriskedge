@@ -171,6 +171,18 @@ export function PolicyEngine() {
     staleTime: 120_000,
   });
 
+  const { data: tenantRulesData, isLoading: rulesLoading } = useQuery({
+    queryKey: [...policyKeys.all, "tenant-rules"],
+    queryFn: () => policyService.listRules({ page_size: 100, is_active: true }),
+    staleTime: 120_000,
+  });
+
+  const { data: traceabilityData } = useQuery({
+    queryKey: [...policyKeys.all, "traceability"],
+    queryFn: () => policyService.getTraceability(),
+    staleTime: 120_000,
+  });
+
   const { data: uploadsData, isLoading: uploadsLoading } = useQuery({
     queryKey: ["uploads", "list"],
     queryFn: () => uploadService.list({ page_size: 100 }),
@@ -204,6 +216,8 @@ export function PolicyEngine() {
   // ── Derived data ───────────────────────────────────────────────
   const policies = (playbooksData?.data ?? []) as any[];
   const evaluations = (evaluationsData?.data ?? []) as any[];
+  const tenantRules = (tenantRulesData?.data ?? []) as any[];
+  const traceabilityChains = (traceabilityData?.chains ?? []) as any[];
   const uploads = (uploadsData?.data ?? []) as any[];
   const clauses = (clausesData?.data ?? []) as any[];
 
@@ -332,6 +346,8 @@ export function PolicyEngine() {
             highRiskCount={highRiskCount}
             openViolationsCount={openViolations.length}
             resolvedViolationsCount={resolvedViolations.length}
+            traceabilityChains={traceabilityChains}
+            uploads={uploads}
             onOpenPolicy={openPolicyDrawer}
           />
         )}
@@ -352,7 +368,9 @@ export function PolicyEngine() {
 
         {activeTab === "rules" && (
           <RulesTab
-            policies={policies}
+            rules={tenantRules}
+            rulesLoading={rulesLoading}
+            policyCount={policies.length}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
             onOpenPolicy={openPolicyDrawer}
@@ -377,8 +395,9 @@ export function PolicyEngine() {
 
         {activeTab === "traceability" && (
           <TraceabilityTab
-            policies={policies}
-            evaluations={evaluations}
+            chains={traceabilityChains}
+            totalFindings={traceabilityData?.total_findings_linked ?? 0}
+            totalRedlines={traceabilityData?.total_redlines ?? 0}
           />
         )}
 
@@ -429,12 +448,15 @@ interface DashboardTabProps {
   highRiskCount: number;
   openViolationsCount: number;
   resolvedViolationsCount: number;
+  traceabilityChains: any[];
+  uploads: any[];
   onOpenPolicy: (id: string) => void;
 }
 
 function DashboardTab({
   policies, evaluations, categories, lifecycleCounts,
-  activeCount, highRiskCount, openViolationsCount, resolvedViolationsCount, onOpenPolicy,
+  activeCount, highRiskCount, openViolationsCount, resolvedViolationsCount,
+  traceabilityChains, uploads, onOpenPolicy,
 }: DashboardTabProps) {
   return (
     <div className="p-4 space-y-4">
@@ -569,6 +591,99 @@ function DashboardTab({
           </div>
         </div>
       )}
+
+      {/* ── Top Violated Policies ──────────────────────────────── */}
+      {traceabilityChains.filter((c: any) => (c.deviations_found || 0) > 0).length > 0 && (
+        <div className="rounded-lg border border-red-200 dark:border-red-800 bg-white dark:bg-navy-800 p-3">
+          <div className="flex items-center gap-1.5 mb-2">
+            <AlertTriangle className="w-3 h-3 text-red-500" />
+            <span className="text-[9px] font-semibold text-gray-500 uppercase">Top Violated Policies</span>
+          </div>
+          <div className="space-y-1">
+            {[...traceabilityChains]
+              .filter((c: any) => (c.deviations_found || 0) > 0)
+              .sort((a: any, b: any) => (b.deviations_found || 0) - (a.deviations_found || 0))
+              .slice(0, 5)
+              .map((c: any) => (
+                <div key={c.playbook_id} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-50 dark:hover:bg-navy-750">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
+                    <span className="text-[10px] font-medium text-navy-900 dark:text-white truncate">{c.playbook_name}</span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="text-[9px] font-semibold text-red-600">{c.deviations_found} violations</span>
+                    <span className="text-[8px] text-gray-400">· {c.finding_count} findings</span>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Contracts at Risk ──────────────────────────────────── */}
+      {uploads.filter((u: any) => u.ingestion_state === "review_ready").length > 0 && (
+        <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-white dark:bg-navy-800 p-3">
+          <div className="flex items-center gap-1.5 mb-2">
+            <FileText className="w-3 h-3 text-amber-500" />
+            <span className="text-[9px] font-semibold text-gray-500 uppercase">Contracts at Risk</span>
+          </div>
+          <div className="space-y-1">
+            {uploads
+              .filter((u: any) => u.ingestion_state === "review_ready")
+              .slice(0, 5)
+              .map((u: any) => (
+                <div key={u.upload_id} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-50 dark:hover:bg-navy-750">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <FileText className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                    <span className="text-[10px] text-navy-900 dark:text-white truncate">{u.filename || u.original_filename}</span>
+                  </div>
+                  <span className="text-[8px] font-medium px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 flex-shrink-0">
+                    {u.ingestion_state?.replace(/_/g, " ")}
+                  </span>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Recent Violations ──────────────────────────────────── */}
+      {(() => {
+        // Build a playbook name lookup from traceability chains
+        const pbNameMap: Record<string, string> = {};
+        traceabilityChains.forEach((c: any) => {
+          if (c.playbook_id) pbNameMap[c.playbook_id] = c.playbook_name;
+        });
+        // Filter evaluations that have actual violations (rules_failed or deviations)
+        const violations = evaluations.filter((v: any) => (v.rules_failed || 0) > 0 || (v.deviations_found || 0) > 0);
+        if (violations.length === 0) return null;
+        return (
+          <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-3">
+            <div className="flex items-center gap-1.5 mb-2">
+              <ListChecks className="w-3 h-3 text-gray-400" />
+              <span className="text-[9px] font-semibold text-gray-500 uppercase">Recent Violations</span>
+            </div>
+            <div className="space-y-1">
+              {violations.slice(0, 5).map((v: any, i: number) => {
+                const pbName = pbNameMap[v.playbook_id] || v.playbook_name || `Evaluation #${i + 1}`;
+                return (
+                  <div key={v.evaluation_id || i} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-50 dark:hover:bg-navy-750">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
+                      <span className="text-[10px] text-navy-900 dark:text-white truncate">{pbName}</span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className="text-[8px] font-medium px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">
+                        {v.rules_failed || 0} failed
+                      </span>
+                      <span className="text-[8px] text-gray-400">{v.deviations_found || 0} deviations</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -655,61 +770,52 @@ function PoliciesTab({
 // ── Rules Tab ─────────────────────────────────────────────────────
 
 interface RulesTabProps {
-  policies: any[];
+  rules: any[];
+  rulesLoading: boolean;
+  policyCount: number;
   searchQuery: string;
   setSearchQuery: (v: string) => void;
   onOpenPolicy: (id: string) => void;
 }
 
-/** Flatten a policy's condition tree into a list of rows we can render
- *  in the rules table. */
-function flattenRules(p: any): Array<{
-  rule_id: string;
-  rule_name: string;
-  field: string;
-  operator: string;
-  value: string;
-  severity: string;
-  risk_score: number;
-  category: string;
-  required_clauses: string[];
-  exception: string;
-}> {
-  const group = p.rules;
-  if (!group || !Array.isArray(group.conditions)) return [];
-  const out: ReturnType<typeof flattenRules> = [];
-  for (const c of group.conditions) {
-    if (c && c.conditions) {
-      out.push(...flattenRules(p));
-      continue;
-    }
-    out.push({
-      rule_id: c.condition_id ?? `${p.policy_id}-${c.field}`,
-      rule_name: c.label ?? c.field,
-      field: c.field,
-      operator: c.operator,
-      value: typeof c.value === "string" ? c.value : JSON.stringify(c.value ?? ""),
-      severity: p.priority >= 80 ? "critical" : p.priority >= 65 ? "high" : p.priority >= 40 ? "medium" : "low",
-      risk_score: (p.priority ?? 50) / 10,
-      category: p.category ?? "other",
-      required_clauses: p.tags ?? [],
-      exception: group.type === "OR" ? "Some conditions satisfy" : "All conditions must match",
-    });
-  }
-  return out;
+function ruleSeverity(rule: any): string {
+  if (rule.is_mandatory) return "critical";
+  const p = rule.priority ?? 50;
+  if (p >= 90) return "high";
+  if (p >= 70) return "medium";
+  return "low";
 }
 
-function RulesTab({ policies, searchQuery, setSearchQuery, onOpenPolicy }: RulesTabProps) {
+function ruleConditionSummary(rule: any): string {
+  const cond = rule.conditions;
+  if (!cond || !Array.isArray(cond.conditions) || cond.conditions.length === 0) {
+    return rule.target_category ? `category = ${rule.target_category}` : "—";
+  }
+  const first = cond.conditions[0];
+  if (first?.field) {
+    const val = typeof first.value === "string" ? first.value : JSON.stringify(first.value ?? "");
+    return `${first.field} ${first.operator ?? ""} ${val}`.trim();
+  }
+  return `${cond.type ?? "AND"} group (${cond.conditions.length} conditions)`;
+}
+
+function RulesTab({ rules, rulesLoading, policyCount, searchQuery, setSearchQuery, onOpenPolicy }: RulesTabProps) {
   const allRules = useMemo(() => {
-    const out: Array<ReturnType<typeof flattenRules>[0] & { policy_id: string; policy_name: string }> = [];
-    for (const p of policies) {
-      const pid = p.playbook_id || p.policy_id;
-      for (const r of flattenRules(p)) {
-        out.push({ ...r, policy_id: pid, policy_name: p.name });
-      }
-    }
-    return out;
-  }, [policies]);
+    return rules.map(r => ({
+      rule_id: r.rule_id,
+      rule_name: r.name,
+      field: r.target_category ?? r.rule_type ?? "—",
+      operator: r.effect ?? "—",
+      value: ruleConditionSummary(r),
+      severity: ruleSeverity(r),
+      risk_score: (r.priority ?? 50) / 10,
+      category: r.target_category ?? r.rule_type ?? "other",
+      required_clauses: r.tags ?? [],
+      exception: r.is_mandatory ? "Mandatory — no exceptions" : `Effect: ${r.effect ?? "flag"}`,
+      policy_id: r.playbook_id,
+      policy_name: r.playbook_name ?? "Playbook",
+    }));
+  }, [rules]);
 
   const filtered = useMemo(() => {
     if (!searchQuery.trim()) return allRules;
@@ -726,7 +832,7 @@ function RulesTab({ policies, searchQuery, setSearchQuery, onOpenPolicy }: Rules
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xs font-semibold text-navy-900 dark:text-white">Policy Rules</h2>
-          <p className="text-[9px] text-gray-500">{allRules.length} rules across {policies.length} policies</p>
+          <p className="text-[9px] text-gray-500">{allRules.length} rules across {policyCount} policies</p>
         </div>
         <div className="relative w-64">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
@@ -752,7 +858,13 @@ function RulesTab({ policies, searchQuery, setSearchQuery, onOpenPolicy }: Rules
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-navy-700">
-              {filtered.length === 0 ? (
+              {rulesLoading ? (
+                <tr>
+                  <td colSpan={8} className="text-center py-6 text-[10px] text-gray-400">
+                    <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> Loading rules…
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="text-center py-6 text-[10px] text-gray-400">No rules to display</td>
                 </tr>
@@ -1011,7 +1123,10 @@ function ViolationsTab({ evaluations, policies, onOpenPolicy }: ViolationsTabPro
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-1.5 text-[8px]">
                       <div>
                         <span className="text-gray-400">Contract</span>
-                        <p className="text-gray-700 dark:text-gray-200 truncate">{v.document_name || v.contract_name || "—"}</p>
+                        <p className="text-gray-700 dark:text-gray-200 truncate">
+                          {v.contract_number ? <span className="font-mono text-[10px] text-gray-400 mr-1">{v.contract_number}</span> : ""}
+                          {v.document_name || v.contract_name || "—"}
+                        </p>
                       </div>
                       <div>
                         <span className="text-gray-400">Rule</span>
@@ -1065,53 +1180,58 @@ function ViolationsTab({ evaluations, policies, onOpenPolicy }: ViolationsTabPro
 // ── Traceability Tab ─────────────────────────────────────────────
 
 interface TraceabilityTabProps {
-  policies: any[];
-  evaluations: any[];
+  chains: any[];
+  totalFindings: number;
+  totalRedlines: number;
 }
 
-function TraceabilityTab({ policies, evaluations }: TraceabilityTabProps) {
+function TraceabilityTab({ chains, totalFindings, totalRedlines }: TraceabilityTabProps) {
   return (
     <div className="p-4 space-y-3">
       <div>
         <h2 className="text-xs font-semibold text-navy-900 dark:text-white">Policy Traceability</h2>
         <p className="text-[9px] text-gray-500">
           Policy → Rule → Clause Requirement → Finding → Redline → Resolution.
-          Every violation links back to the policy that triggered it, the rule that fired, the clause it concerns, and the redline that resolved it.
+          {totalFindings > 0 && (
+            <span className="ml-1 text-indigo-600">{totalFindings} linked findings, {totalRedlines} redlines.</span>
+          )}
         </p>
       </div>
 
-      {policies.length === 0 ? (
+      {chains.length === 0 ? (
         <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-6 text-center">
           <GitBranch className="w-6 h-6 text-gray-300 mx-auto mb-2" />
           <p className="text-[10px] text-gray-500">No policies to trace yet.</p>
         </div>
       ) : (
         <div className="space-y-2">
-          {policies.slice(0, 5).map((p, idx) => {
-            const pid = p.playbook_id || p.policy_id;
-            const ruleCount = p.rules?.conditions?.length ?? 0;
-            const lc = deriveLifecycle(p);
-            const linkedEvals = evaluations.filter((v: any) => v.playbook_name === p.name).slice(0, 2);
+          {chains.map((chain) => {
+            const lc: LifecycleState =
+              (chain.playbook_status || "").includes("publish") ? "published" : "draft";
             return (
-              <div key={pid} className="rounded-lg border border-gray-200 bg-white dark:border-navy-700 dark:bg-navy-800 p-3">
+              <div key={chain.playbook_id} className="rounded-lg border border-gray-200 bg-white dark:border-navy-700 dark:bg-navy-800 p-3">
                 <div className="flex items-center gap-2 text-[10px] mb-2">
                   <Shield className="w-3 h-3 text-indigo-500" />
-                  <span className="font-medium text-navy-900 dark:text-white flex-1 truncate">{p.name}</span>
+                  <span className="font-medium text-navy-900 dark:text-white flex-1 truncate">{chain.playbook_name}</span>
+                  <span className="text-[8px] text-gray-400">v{chain.policy_version}</span>
                   <span className={`px-1.5 py-0.5 rounded text-[8px] font-semibold uppercase ${LIFECYCLE_COLORS[lc].bg} ${LIFECYCLE_COLORS[lc].text}`}>{lc}</span>
                 </div>
                 <div className="flex items-center gap-1.5 text-[8px] text-gray-500 overflow-x-auto">
                   <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 whitespace-nowrap">Policy</span>
                   <ArrowRight className="w-2.5 h-2.5" />
-                  <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 whitespace-nowrap">{ruleCount} Rule{ruleCount === 1 ? "" : "s"}</span>
+                  <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 whitespace-nowrap">{chain.rule_count} Rule{chain.rule_count === 1 ? "" : "s"}</span>
                   <ArrowRight className="w-2.5 h-2.5" />
-                  <span className="px-1.5 py-0.5 rounded bg-cyan-50 text-cyan-700 whitespace-nowrap">{(p.tags?.length ?? 0)} Clause Req.</span>
+                  <span className="px-1.5 py-0.5 rounded bg-cyan-50 text-cyan-700 whitespace-nowrap">{chain.clause_requirement_count} Clause Req.</span>
                   <ArrowRight className="w-2.5 h-2.5" />
-                  <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 whitespace-nowrap">{linkedEvals.length} Finding{linkedEvals.length === 1 ? "" : "s"}</span>
+                  <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 whitespace-nowrap">{chain.finding_count} Finding{chain.finding_count === 1 ? "" : "s"}</span>
                   <ArrowRight className="w-2.5 h-2.5" />
-                  <span className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 whitespace-nowrap">0 Redline{idx === 0 ? "" : "s"}</span>
+                  <span className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 whitespace-nowrap">{chain.redline_count} Redline{chain.redline_count === 1 ? "" : "s"}</span>
                   <ArrowRight className="w-2.5 h-2.5" />
-                  <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-700 whitespace-nowrap">Resolution</span>
+                  <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-700 whitespace-nowrap">{chain.resolved_count} Resolved</span>
                 </div>
+                {chain.deviations_found > 0 && (
+                  <p className="text-[8px] text-amber-600 mt-1.5">{chain.deviations_found} evaluation deviation{chain.deviations_found === 1 ? "" : "s"}</p>
+                )}
               </div>
             );
           })}

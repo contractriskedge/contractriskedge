@@ -5,8 +5,10 @@
 
 import type { RedlineItem as ApiRedlineItem, LocatorResponse } from "@/services/api/client";
 import {
+  applyApiMappingValidation,
   reconcileRedlineAssociations,
   type LinkedFindingInput,
+  type RedlineMappingDetails,
 } from "@/lib/redlineIntegrity";
 
 type ApiRecord = Record<string, unknown>;
@@ -99,6 +101,13 @@ export function mapApiRedlineRecord(
   mismatch_warning: string | null;
   source_category: string | null;
   proposed_category: string | null;
+  mapping_valid: boolean;
+  mapping_status: "valid" | "invalid_mapping";
+  mapping_warning: string | null;
+  redline_title: string | null;
+  redline_category: string | null;
+  finding_category: string | null;
+  mapping_details: RedlineMappingDetails | null;
 } {
   const locator = raw.locator as LocatorResponse | undefined;
   const findingClauseText =
@@ -141,20 +150,36 @@ export function mapApiRedlineRecord(
     findingInput,
   );
 
+  const validated = applyApiMappingValidation(reconciled, {
+    mapping_valid: raw.mapping_valid as boolean | undefined,
+    mapping_status: raw.mapping_status ? String(raw.mapping_status) : undefined,
+    mapping_warning: raw.mapping_warning ? String(raw.mapping_warning) : null,
+    redline_title: raw.redline_title ? String(raw.redline_title) : null,
+    redline_category: raw.redline_category ? String(raw.redline_category) : null,
+    finding_title: raw.finding_title ? String(raw.finding_title) : null,
+    finding_category: raw.finding_category ? String(raw.finding_category) : null,
+    mapping_details: raw.mapping_details as RedlineMappingDetails | null | undefined,
+  });
+
+  const status =
+    !validated.mapping_valid && String(raw.status ?? "proposed") === "proposed"
+      ? "invalid_mapping"
+      : String(raw.status ?? "proposed");
+
   return {
     id: redlineId,
     redline_id: redlineId,
-    clause_type: reconciled.clause_type,
-    section: reconciled.section,
-    page: reconciled.page,
-    original_text: reconciled.original_text,
-    proposed_text: reconciled.proposed_text,
+    clause_type: validated.clause_type,
+    section: validated.section,
+    page: validated.page,
+    original_text: validated.original_text,
+    proposed_text: validated.proposed_text,
     is_pure_insert: texts.is_pure_insert,
     context_excerpt: texts.context_excerpt,
-    status: String(raw.status ?? "proposed"),
+    status,
     severity: String(raw.severity ?? raw.risk_level ?? "medium"),
-    finding_id: reconciled.finding_id,
-    finding_title: reconciled.finding_title,
+    finding_id: validated.finding_id,
+    finding_title: validated.finding_title,
     recommendation_id: raw.recommendation_id ? String(raw.recommendation_id) : null,
     author: String(raw.author ?? raw.reviewed_by ?? "AI Engine"),
     created_at: String(raw.created_at ?? new Date().toISOString()),
@@ -165,9 +190,16 @@ export function mapApiRedlineRecord(
         ? String(raw.modified_text)
         : undefined,
     operation: raw.operation ? String(raw.operation) : undefined,
-    mismatch_warning: reconciled.mismatch_warning,
-    source_category: reconciled.source_category,
-    proposed_category: reconciled.proposed_category,
+    mismatch_warning: validated.mismatch_warning,
+    source_category: validated.source_category,
+    proposed_category: validated.proposed_category,
+    mapping_valid: validated.mapping_valid,
+    mapping_status: validated.mapping_status,
+    mapping_warning: validated.mapping_warning,
+    redline_title: validated.redline_title,
+    redline_category: validated.redline_category,
+    finding_category: validated.finding_category,
+    mapping_details: validated.mapping_details,
   };
 }
 

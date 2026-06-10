@@ -39,6 +39,7 @@ function summaryToImportJob(summary: UploadSummary): ImportJob {
     classificationScore: status === "completed" ? 90 : 0,
     extractionScore: status === "completed" ? 88 : 0,
     pipeline: pipelineFromIngestionState(summary.ingestion_state, 0),
+    contractNumber: summary.contract_number,
     metadata: {
       contractTitle: summary.filename,
       counterparty: "",
@@ -144,7 +145,18 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
   // ── React Query: list uploads ──────────────────────────────────────
   const { data: listResponse, isLoading, isError, error, refetch } = useUploads({ page_size: 100 });
   const uploads: UploadSummary[] = listResponse?.data ?? [];
+  const hasActiveUploads = useMemo(
+    () => uploads.some((u) => !["review_ready", "failed", "cancelled", "quarantined"].includes(u.ingestion_state)),
+    [uploads],
+  );
   const total: number = listResponse?.pagination?.total ?? uploads.length;
+
+  // Keep the list fresh while any upload is still processing.
+  useEffect(() => {
+    if (!hasActiveUploads) return;
+    const timer = setInterval(() => refetch(), 5_000);
+    return () => clearInterval(timer);
+  }, [hasActiveUploads, refetch]);
 
   // ── Optimistic local jobs ─────────────────────────────────────────
   const [localJobs, setLocalJobs] = useState<ImportJob[]>([]);
@@ -217,11 +229,8 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
   if (!hasTerminal) prevTerminal.current = false;
 
   // ── Merge polled results into job overrides for live updates ──────
-  const prevPolledLength = useRef(0);
   useEffect(() => {
     if (polledResults.length === 0) return;
-    if (polledResults.length === prevPolledLength.current) return;
-    prevPolledLength.current = polledResults.length;
 
     const overrides: Record<string, Partial<ImportJob>> = {};
     for (const status of polledResults) {

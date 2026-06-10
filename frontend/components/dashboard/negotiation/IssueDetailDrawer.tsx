@@ -113,9 +113,11 @@ export function IssueDetailDrawer({ issue, isOpen, onClose, onStatusChange, onEs
                   <h5 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Assignee</h5>
                   <div className="flex items-center gap-1.5">
                     <div className="w-5 h-5 rounded-full bg-navy-500 flex items-center justify-center text-[8px] font-bold text-white">
-                      {issue.assigneeAvatar}
+                      {issue.assigneeAvatar || "—"}
                     </div>
-                    <span className="text-xs text-navy-900 dark:text-white">{issue.assignee}</span>
+                    <span className="text-xs text-navy-900 dark:text-white">
+                      {issue.assignee || <span className="italic text-gray-400">Unassigned</span>}
+                    </span>
                   </div>
                 </div>
                 <div>
@@ -123,7 +125,9 @@ export function IssueDetailDrawer({ issue, isOpen, onClose, onStatusChange, onEs
                   <div className="flex items-center gap-1">
                     <Calendar className="w-3 h-3 text-gray-400" />
                     <span className="text-xs text-navy-900 dark:text-white">
-                      {new Date(issue.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                      {issue.dueDate
+                        ? new Date(issue.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                        : <span className="italic text-gray-400">—</span>}
                     </span>
                   </div>
                 </div>
@@ -136,7 +140,9 @@ export function IssueDetailDrawer({ issue, isOpen, onClose, onStatusChange, onEs
                   <div className="flex items-center gap-1">
                     <Clock className="w-3 h-3 text-gray-400" />
                     <span className="text-xs text-navy-900 dark:text-white">
-                      {new Date(issue.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      {issue.createdAt
+                        ? new Date(issue.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                        : <span className="italic text-gray-400">—</span>}
                     </span>
                   </div>
                 </div>

@@ -23,6 +23,11 @@ import {
 } from "@/services/hooks";
 import { useQueryClient } from "@tanstack/react-query";
 import { EscalationModal } from "@/components/review/EscalationModal";
+import { UserPicker } from "@/components/shared/UserPicker";
+import {
+  getEscalationBlockReason,
+  isImmutable,
+} from "@/lib/workflow";
 import { platformKeys } from "./hooks";
 import type { Finding, ReviewSummary } from "./types";
 import type { ReviewSection } from "./types";
@@ -116,6 +121,12 @@ export function ReviewMoreActionsMenu({
   }, [open, closeMenu]);
 
   const runWorkflowRouting = async (targetStage: string, label: string) => {
+    if (reviewImmutable) {
+      setActionError(
+        escalationBlockReason ?? `Cannot route review in '${reviewStatus}' state`,
+      );
+      return;
+    }
     setBusyAction(label);
     setActionError(null);
     try {
@@ -297,6 +308,10 @@ export function ReviewMoreActionsMenu({
       icon: AlertTriangle,
       className: "text-orange-600",
       onClick: () => {
+        if (!canEscalateWorkflow) {
+          setActionError(escalateTitle);
+          return;
+        }
         closeMenu();
         setActiveModal("escalate");
       },
@@ -333,7 +348,7 @@ export function ReviewMoreActionsMenu({
     },
     {
       id: "locate",
-      label: "Locate Source Clause",
+      label: "View Source Location",
       icon: ExternalLink,
       className: "text-navy-600",
       onClick: handleLocateCurrentClause,
@@ -375,6 +390,17 @@ export function ReviewMoreActionsMenu({
     },
   ];
 
+  // Workflow-state guard: disable escalation when the review is in a
+  // terminal/locked state or already escalated. Mirrors the matrix in
+  // `lib/workflow.ts#getAllowedActions`.
+  const reviewStatus = review.status;
+  const reviewImmutable = isImmutable(reviewStatus);
+  const escalationBlockReason = getEscalationBlockReason(reviewStatus);
+  const canEscalateWorkflow = !reviewImmutable && escalationBlockReason === null;
+  const escalateTitle = !canEscalateWorkflow
+    ? (escalationBlockReason ?? `Cannot escalate in '${reviewStatus}' state`)
+    : "Escalate review";
+
   const isBusy = Boolean(busyAction) || assignMutation.isPending || escalateMutation.isPending;
 
   return (
@@ -411,6 +437,10 @@ export function ReviewMoreActionsMenu({
                 {menuItems.map((item, index) => {
                   const Icon = item.icon;
                   const showDividerBefore = index === 1 || index === 5 || index === 9;
+                  // The Escalate menu item is also blocked by the workflow
+                  // state guard (immutable status or already-escalated).
+                  const isItemBlocked =
+                    item.id === "escalate" && !canEscalateWorkflow;
                   return (
                     <React.Fragment key={item.id}>
                       {showDividerBefore && (
@@ -419,7 +449,11 @@ export function ReviewMoreActionsMenu({
                       <button
                         type="button"
                         role="menuitem"
-                        disabled={isBusy && item.id !== "locate" && item.id !== "redline"}
+                        disabled={
+                          (isBusy && item.id !== "locate" && item.id !== "redline") ||
+                          isItemBlocked
+                        }
+                        title={isItemBlocked ? escalateTitle : undefined}
                         onClick={(e) => {
                           e.stopPropagation();
                           item.onClick();
@@ -458,14 +492,16 @@ export function ReviewMoreActionsMenu({
           <div className="space-y-3">
             <div>
               <label className="block text-[10px] font-medium text-gray-600 dark:text-gray-300 mb-1">
-                Assignee ID or email
+                Reviewer
               </label>
-              <input
-                type="text"
+              <UserPicker
                 value={assigneeId}
-                onChange={(e) => setAssigneeId(e.target.value)}
-                placeholder="user-001 or reviewer@company.com"
-                className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs dark:border-navy-600 dark:bg-navy-700 dark:text-white"
+                onChange={setAssigneeId}
+                allowedRoles={["tenant_admin", "reviewer", "legal_ops", "compliance", "executive", "admin"]}
+                placeholder="Search by name, email, or role…"
+                size="sm"
+                allowNone
+                noneLabel="— Unassigned —"
               />
             </div>
             <div>
@@ -506,6 +542,7 @@ export function ReviewMoreActionsMenu({
             reviewTitle={review.contract_name}
             currentPriority={review.priority}
             currentStage={review.workflow_stage}
+            currentStatus={reviewStatus}
             onEscalate={async (reason, escalatedTo, raisePriority, targetStage) => {
               await escalateMutation.mutateAsync({
                 reason,

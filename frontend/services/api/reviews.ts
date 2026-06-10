@@ -213,6 +213,28 @@ export const reviewService = {
     );
   },
 
+  /** Regenerate a redline using the finding's category as mandatory filter */
+  regenerateRedline: (
+    reviewId: string,
+    body: {
+      finding_id: string;
+      finding_category: string;
+      redline_id: string;
+    },
+  ) =>
+    api.post<{
+      redline_id: string;
+      clause_type: string;
+      proposed_text: string;
+      rationale: string | null;
+      risk_level: string | null;
+      status: string;
+      finding_id: string;
+      finding_category: string;
+      finding_title: string;
+      message: string;
+    }>(`/reviews/${reviewId}/regenerate-redline`, body),
+
   /** Get risk score breakdown by clause category */
   getRiskBreakdown: (reviewId: string) =>
     api.get<RiskBreakdown>(`/reviews/${reviewId}/risk-breakdown`),
@@ -429,6 +451,23 @@ export const reviewService = {
   /** Get workload metrics */
   getWorkloadMetrics: () =>
     api.get<WorkloadMetrics>("/reviews/workload/metrics"),
+
+  /** Get per-reviewer workload snapshot */
+  getReviewersWorkload: () =>
+    api.get<{
+      reviewers: Array<{
+        user_id: string;
+        name: string;
+        email: string;
+        role: string;
+        active_reviews: number;
+        completed_today: number;
+        overdue_reviews: number;
+        avg_review_time_hours: number;
+        workload_pct: number;
+        sla_breaches: number;
+      }>;
+    }>("/reviews/reviewers/workload"),
 
   // ── Routing ──
 

@@ -31,13 +31,13 @@
 
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useRouter, notFound } from "next/navigation";
 import {
   ArrowLeft, FileText, Brain, Shield, AlertTriangle, CheckCircle2,
   Clock, User, RefreshCw, Download, Share2, ExternalLink,
   Edit3, GitCompare, MessageSquare, Activity, Calendar,
-  Building2, Globe, Loader2, ChevronDown, ChevronUp,
+  Building2, Globe, Loader2, ChevronDown, ChevronRight, ChevronUp,
   BarChart3, BookOpen, XCircle, DollarSign, GitBranch,
 } from "lucide-react";
 import {
@@ -47,9 +47,15 @@ import {
   useContractVersions,
   useContractFindings,
   useContractClauses,
+  useContractWorkflowHistory,
+  useContractObligationActivity,
 } from "./hooks";
+import { useRiskBreakdown } from "@/services/hooks";
+import type { GovernanceTraceability } from "@/services/api/client";
 import { RelatedReviewsPanel } from "./RelatedReviewsPanel";
 import { LifecycleHistoryPanel } from "./LifecycleHistoryPanel";
+import { WorkflowTimelinePanel, type TimelineEvent } from "./WorkflowTimelinePanel";
+import { AuditTrailPanel } from "./AuditTrailPanel";
 import { IntelligenceHub } from "./IntelligenceHub";
 import { formatDate } from "@/lib/date-utils";
 
@@ -63,22 +69,59 @@ interface ContractDetailWorkspaceProps {
 
 export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceProps) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"overview" | "insights" | "clauses" | "activity" | "versions" | "reviews" | "lifecycle">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "insights" | "clauses" | "activity" | "versions" | "reviews" | "lifecycle" | "workflow">("overview");
 
   // ── Data Fetching (repository-only) ──────────────────────────────────
 
   const { data: contract, isLoading: contractLoading, error: contractError } = useContractDetail(contractId);
   const { data: activityData } = useContractActivity(contractId);
   const { data: obligationsData } = useContractObligations(contractId);
+  const { data: obligationActivityData } = useContractObligationActivity(contractId);
   const { data: versionsData } = useContractVersions(contractId);
   const { data: findingsData } = useContractFindings(contractId);
   const { data: clausesData } = useContractClauses(contractId);
+  const { data: workflowHistoryData } = useContractWorkflowHistory(contractId);
 
-  const activityEvents = activityData?.events ?? [];
+  const activityEvents = useMemo(() => {
+    const contractEvents = activityData?.events ?? [];
+    const obligationEvents = obligationActivityData?.obligationEvents ?? [];
+    // Merge and sort newest first
+    return [...contractEvents, ...obligationEvents].sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  }, [activityData, obligationActivityData]);
   const obligations = obligationsData?.obligations ?? [];
   const versions = versionsData?.versions ?? [];
   const findings = findingsData?.findings ?? [];
   const clauses = clausesData?.clauses ?? [];
+  const workflowEvents = workflowHistoryData?.events ?? [];
+
+  // Map the backend timeline event shape into the TimelineEvent shape
+  // used by WorkflowTimelinePanel. The backend already provides a
+  // normalised audit-grade view; we just translate type strings.
+  const workflowTimeline: TimelineEvent[] = useMemo(() => {
+    return (workflowEvents ?? []).map((e) => {
+      const rawType = String(e.type ?? "stage_changed");
+      const type: TimelineEvent["type"] =
+        rawType === "approved" || rawType === "conditionally_approved" ? "approved" :
+        rawType === "rejected" ? "rejected" :
+        rawType === "escalated" ? "escalated" :
+        rawType === "assigned" ? "assigned" :
+        rawType === "ai_analyzed" || rawType === "ai_analysis_completed" ? "ai_analyzed" :
+        rawType === "completed" || rawType === "executed" ? "completed" :
+        "stage_changed";
+      return {
+        id: String(e.id ?? `${rawType}-${e.timestamp}-${e.actor}`),
+        type,
+        timestamp: String(e.timestamp ?? new Date().toISOString()),
+        actor: String(e.actor ?? "system"),
+        actorRole: e.role ? String(e.role) : undefined,
+        fromValue: e.previous_value ? String(e.previous_value) : undefined,
+        toValue: e.new_value ? String(e.new_value) : undefined,
+        reason: e.reason ? String(e.reason) : undefined,
+      };
+    });
+  }, [workflowEvents]);
 
   // ── Navigation Actions ───────────────────────────────────────────────
   // Routes that are known to exist:
@@ -169,8 +212,9 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
     // If the server actually returned a 404 for this contract id, hand off
     // to the route-level not-found page so the user sees a proper 404
     // screen. Otherwise, fall back to a generic error state.
-    const status = (contractError as { status_code?: number; status?: number } | null)?.status_code
-      ?? (contractError as { status_code?: number; status?: number } | null)?.status;
+    const apiErr = contractError as { status_code?: number; status?: number; message?: string } | null;
+    const status = apiErr?.status_code ?? apiErr?.status
+      ?? (apiErr?.message?.includes("not found") ? 404 : undefined);
     if (status === 404) {
       notFound();
     }
@@ -202,7 +246,10 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
             <FileText className="w-4 h-4 text-navy-600 dark:text-navy-300" />
             <div>
               <h1 className="text-sm font-semibold text-navy-900 dark:text-white leading-tight">{contract.name}</h1>
-              <p className="text-[10px] text-gray-500 dark:text-gray-400">{contract.filename} · {contract.total_pages} pages · v{versions.length > 0 ? versions[0].version_number : 1}</p>
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                {contract.contract_number ? `${contract.contract_number} · ` : ""}
+                {contract.filename} · {contract.total_pages} pages · v{versions.length > 0 ? versions[0].version_number : 1}
+              </p>
             </div>
           </div>
         </div>
@@ -275,7 +322,34 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                 <Brain className="w-3.5 h-3.5 text-navy-600" />
                 <span className="text-[10px] font-semibold text-navy-700 dark:text-navy-200 uppercase tracking-wider">AI Summary</span>
               </div>
-              <p className="text-[11px] text-gray-700 dark:text-gray-300 leading-relaxed">{contract.ai_summary}</p>
+              <p className="text-[11px] text-gray-700 dark:text-gray-300 leading-relaxed">
+                {contract.ai_summary || "AI analysis pending. The contract has been queued for processing."}
+              </p>
+              {/* Quick links */}
+              <div className="flex items-center gap-2 mt-2 pt-2 border-t border-navy-200/50 dark:border-navy-700/50">
+                <button
+                  onClick={openAiReview}
+                  className="inline-flex items-center gap-1 text-[9px] font-medium text-navy-700 dark:text-navy-300 hover:text-navy-900 dark:hover:text-white transition-colors"
+                >
+                  <Brain className="w-3 h-3" /> Open Review Workspace
+                </button>
+                {(findings?.length ?? 0) > 0 && (
+                  <button
+                    onClick={() => setActiveTab("insights")}
+                    className="inline-flex items-center gap-1 text-[9px] font-medium text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-100 transition-colors"
+                  >
+                    <FileText className="w-3 h-3" /> View Findings ({findings.length})
+                  </button>
+                )}
+                {(findings?.length ?? 0) > 0 && (
+                  <button
+                    onClick={openRedline}
+                    className="inline-flex items-center gap-1 text-[9px] font-medium text-rose-700 dark:text-rose-300 hover:text-rose-900 dark:hover:text-rose-100 transition-colors"
+                  >
+                    <Edit3 className="w-3 h-3" /> View Redlines
+                  </button>
+                )}
+              </div>
             </div>
 
             {(contract.missing_clauses?.length ?? 0) > 0 && (
@@ -303,6 +377,7 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
               { id: "overview" as const, label: "Overview", icon: FileText },
               { id: "insights" as const, label: "AI Insights", icon: Brain, badge: findings.length },
               { id: "clauses" as const, label: "Clauses", icon: BookOpen, badge: clauses.length },
+              { id: "workflow" as const, label: "Workflow", icon: GitBranch, badge: workflowTimeline.length },
               { id: "reviews" as const, label: "Related Reviews", icon: GitBranch },
               { id: "lifecycle" as const, label: "Lifecycle", icon: Clock },
               { id: "activity" as const, label: "Activity", icon: Activity, badge: activityEvents.length },
@@ -350,10 +425,23 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                   </div>
                   <div className="rounded-lg border border-gray-200 dark:border-navy-700 p-3">
                     <div className="text-[9px] font-semibold text-gray-500 uppercase mb-1">Obligations</div>
-                    <div className="text-lg font-bold text-navy-900 dark:text-white">{obligations.length}</div>
-                    <div className="text-[8px] text-gray-500 mt-0.5">{openObligations} pending or overdue</div>
+                    <div className="text-lg font-bold text-navy-900 dark:text-white">{obligationsData?.total ?? obligations.length}</div>
+                    <div className="flex items-center gap-2 mt-1 text-[8px]">
+                      <span className="text-green-600 font-medium">{obligationsData?.completed ?? 0} completed</span>
+                      <span className="text-gray-300">·</span>
+                      <span className="text-amber-600 font-medium">{obligationsData?.open ?? openObligations} open</span>
+                      {(obligationsData?.overdue ?? 0) > 0 && (
+                        <>
+                          <span className="text-gray-300">·</span>
+                          <span className="text-red-600 font-medium">{obligationsData?.overdue ?? 0} overdue</span>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
+
+                {/* Governance Traceability — linked policies and rules */}
+                <GovernanceTraceabilityCard contractId={contractId} />
 
                 {/* Key Details */}
                 <div className="rounded-lg border border-gray-200 dark:border-navy-700">
@@ -362,25 +450,30 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                   </div>
                   <div className="divide-y divide-gray-50 dark:divide-navy-800">
                     {[
-                      { label: "Vendor", value: contract.vendor, icon: Building2 },
-                      { label: "Counterparty", value: contract.counterparty, icon: User },
-                      { label: "Type", value: contract.contract_type, icon: FileText },
-                      { label: "Business Unit", value: contract.business_unit },
-                      { label: "Geography", value: contract.geography, icon: Globe },
-                      { label: "Owner", value: contract.owner, icon: User },
+                      { label: "Vendor", value: contract.vendor, icon: Building2, missing: "Extraction Pending" },
+                      { label: "Counterparty", value: contract.counterparty, icon: User, missing: "Extraction Pending" },
+                      { label: "Type", value: contract.contract_type, icon: FileText, missing: "Not Found In Contract" },
+                      { label: "Business Unit", value: contract.business_unit, missing: "Not Mapped" },
+                      { label: "Geography", value: contract.geography, icon: Globe, missing: "Not Mapped" },
+                      { label: "Owner", value: contract.owner, icon: User, missing: "Not Assigned" },
                       { label: "Status", value: (contract.status || "—").replace(/_/g, " ") },
                       { label: "Workflow Stage", value: contract.workflow_stage?.replace(/_/g, " ") ?? "—" },
-                      { label: "Financial Value", value: contract.financial_value != null ? `${contract.currency ?? ""} ${contract.financial_value.toLocaleString()}` : "—", icon: DollarSign },
+                      { label: "Financial Value", value: contract.financial_value != null && contract.financial_value > 0 ? `${contract.currency ?? ""} ${contract.financial_value.toLocaleString()}` : "—", icon: DollarSign, missing: "Not Found In Contract" },
                       { label: "Auto-Renewal", value: contract.auto_renew ? "Yes" : "No" },
                       { label: "Has DPA", value: contract.has_dpa ? "Yes" : "No" },
-                    ].map((row, i) => (
-                      <div key={i} className="flex items-center justify-between px-4 py-1.5">
-                        <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                          {row.icon && <row.icon className="w-3 h-3" />}{row.label}
-                        </span>
-                        <span className="text-[10px] font-medium text-gray-800 dark:text-gray-200 text-right max-w-[60%] truncate">{row.value}</span>
-                      </div>
-                    ))}
+                    ].map((row, i) => {
+                      const displayValue = row.missing && (!row.value || row.value === "" || row.value === "0")
+                        ? <span className="italic text-gray-400 dark:text-gray-500">{row.missing}</span>
+                        : row.value;
+                      return (
+                        <div key={i} className="flex items-center justify-between px-4 py-1.5">
+                          <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                            {row.icon && <row.icon className="w-3 h-3" />}{row.label}
+                          </span>
+                          <span className="text-[10px] font-medium text-gray-800 dark:text-gray-200 text-right max-w-[60%] truncate">{displayValue}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -420,18 +513,32 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                 {/* Obligations */}
                 <div className="rounded-lg border border-gray-200 dark:border-navy-700">
                   <div className="px-4 py-2 border-b border-gray-100 dark:border-navy-700 bg-gray-50 dark:bg-navy-850 flex items-center justify-between">
-                    <span className="text-[9px] font-semibold text-gray-500 uppercase">Obligations ({obligations.length})</span>
-                    {obligations.filter(o => o.status === "overdue").length > 0 && (
-                      <span className="text-[8px] font-medium text-red-600 bg-red-50 dark:bg-red-900/10 px-1.5 py-0.5 rounded">
-                        {obligations.filter(o => o.status === "overdue").length} overdue
+                    <span className="text-[9px] font-semibold text-gray-500 uppercase">
+                      Obligations ({obligationsData?.total ?? obligations.length})
+                    </span>
+                    <div className="flex items-center gap-1.5 text-[8px]">
+                      <span className="text-green-600 font-medium bg-green-50 dark:bg-green-900/10 px-1 py-0.5 rounded">
+                        {obligationsData?.completed ?? 0} done
                       </span>
-                    )}
+                      <span className="text-amber-600 font-medium bg-amber-50 dark:bg-amber-900/10 px-1 py-0.5 rounded">
+                        {obligationsData?.open ?? openObligations} open
+                      </span>
+                      {(obligationsData?.overdue ?? 0) > 0 && (
+                        <span className="text-red-600 font-medium bg-red-50 dark:bg-red-900/10 px-1 py-0.5 rounded">
+                          {obligationsData?.overdue ?? 0} overdue
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="divide-y divide-gray-50 dark:divide-navy-800">
                     {obligations.length === 0 ? (
                       <div className="px-4 py-3 text-[10px] text-gray-400 italic">No obligations tracked.</div>
                     ) : obligations.slice(0, 8).map(ob => (
-                      <div key={ob.id} className="flex items-start gap-2 px-4 py-2">
+                      <div
+                        key={ob.id}
+                        onClick={() => router.push(`/obligations?obligationId=${ob.id}`)}
+                        className="flex items-start gap-2 px-4 py-2 hover:bg-gray-50 dark:hover:bg-navy-750 cursor-pointer transition-colors"
+                      >
                         <span className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${
                           ob.status === "overdue" ? "bg-red-500" : ob.status === "completed" ? "bg-green-500" : ob.status === "in_progress" ? "bg-blue-500" : "bg-yellow-500"
                         }`} />
@@ -584,31 +691,19 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                 {activityEvents.length === 0 ? (
                   <div className="text-center py-8 text-xs text-gray-400">No activity recorded for this contract.</div>
                 ) : (
-                  <div className="relative">
-                    <div className="absolute left-4 top-2 bottom-2 w-px bg-gray-200 dark:bg-navy-700" />
-                    {activityEvents.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).map(event => {
-                      const Icon = EVENT_ICONS[event.type] || Activity;
-                      const colors: Record<string, string> = {
-                        contract_created: "bg-blue-100 text-blue-600", contract_uploaded: "bg-indigo-100 text-indigo-600",
-                        ai_analysis_completed: "bg-purple-100 text-purple-600", finding_resolved: "bg-green-100 text-green-600",
-                        comment_added: "bg-teal-100 text-teal-600", review_approved: "bg-green-100 text-green-600",
-                        status_changed: "bg-amber-100 text-amber-600", version_created: "bg-blue-100 text-blue-600",
-                      };
-                      const color = colors[event.type] || "bg-gray-100 text-gray-600";
-                      return (
-                        <div key={event.id} className="relative flex gap-3 pb-4">
-                          <div className={`relative z-10 w-8 h-8 rounded-full ${color} flex items-center justify-center flex-shrink-0`}>
-                            <Icon className="w-4 h-4" />
-                          </div>
-                          <div className="flex-1 min-w-0 pt-0.5">
-                            <p className="text-[11px] font-medium text-navy-900 dark:text-white">{event.action}</p>
-                            <p className="text-[9px] text-gray-400 mt-0.5">{event.actor} · {formatTime(event.timestamp)}</p>
-                            {event.details && <p className="text-[9px] text-gray-500 mt-0.5">{event.details}</p>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <AuditTrailPanel
+                    events={activityEvents.map((e) => ({
+                      id: e.id,
+                      type: e.type,
+                      actor: e.actor,
+                      role: undefined,
+                      action: e.action,
+                      timestamp: e.timestamp,
+                      previous_value: undefined,
+                      new_value: undefined,
+                      reason: e.details,
+                    }))}
+                  />
                 )}
               </div>
             )}
@@ -643,6 +738,18 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
               </div>
             )}
 
+            {activeTab === "workflow" && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-[9px] font-semibold text-gray-500 uppercase">Workflow Timeline</span>
+                    <p className="text-[10px] text-gray-400 mt-0.5">Status changes, assignments, escalations and approvals in audit order.</p>
+                  </div>
+                </div>
+                <WorkflowTimelinePanel events={workflowTimeline} />
+              </div>
+            )}
+
             {activeTab === "lifecycle" && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -652,6 +759,119 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
               </div>
             )}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Governance Traceability Card ──────────────────────────────────────────
+
+function GovernanceTraceabilityCard({ contractId }: { contractId: string }) {
+  // The contract ID maps to a review ID 1:1. Fetch governance data from
+  // the risk-breakdown endpoint which now includes governance_traceability.
+  const { data, isLoading, isError } = useRiskBreakdown(contractId);
+  const traceability: GovernanceTraceability | undefined = data?.governance_traceability;
+  const [expanded, setExpanded] = useState(false);
+
+  if (isLoading) {
+    return (
+      <div className="rounded-lg border border-indigo-200 bg-gradient-to-br from-indigo-50 to-blue-50 dark:border-indigo-800 dark:from-indigo-900/10 dark:to-blue-900/10 p-3 animate-pulse">
+        <div className="h-3 w-24 bg-indigo-200 rounded mb-2" />
+        <div className="h-8 w-full bg-indigo-100 rounded" />
+      </div>
+    );
+  }
+
+  if (isError || !traceability || traceability.linked_policy_count === 0) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-lg border border-indigo-200 bg-gradient-to-br from-indigo-50 to-blue-50 dark:border-indigo-800 dark:from-indigo-900/10 dark:to-blue-900/10 p-3">
+      <div className="flex items-center gap-1.5 mb-2">
+        <GitBranch className="w-3.5 h-3.5 text-indigo-700 dark:text-indigo-400" />
+        <span className="text-[9px] font-semibold uppercase tracking-wider text-indigo-800 dark:text-indigo-300">
+          Governance Traceability
+        </span>
+      </div>
+
+      {/* Full chain counts */}
+      <div className="grid grid-cols-3 gap-1.5 mb-2">
+        <div className="rounded-md border border-indigo-200 bg-white/70 dark:border-indigo-800 dark:bg-navy-800/50 p-1.5 text-center">
+          <p className="text-[7px] font-medium text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Policies</p>
+          <p className="text-sm font-bold text-indigo-700 dark:text-indigo-300 tabular-nums">{traceability.linked_policy_count}</p>
+        </div>
+        <div className="rounded-md border border-blue-200 bg-white/70 dark:border-blue-800 dark:bg-navy-800/50 p-1.5 text-center">
+          <p className="text-[7px] font-medium text-blue-600 dark:text-blue-400 uppercase tracking-wider">Rules</p>
+          <p className="text-sm font-bold text-blue-700 dark:text-blue-300 tabular-nums">{traceability.linked_rule_count}</p>
+        </div>
+        <div className="rounded-md border border-amber-200 bg-white/70 dark:border-amber-800 dark:bg-navy-800/50 p-1.5 text-center">
+          <p className="text-[7px] font-medium text-amber-600 dark:text-amber-400 uppercase tracking-wider">Requirements</p>
+          <p className="text-sm font-bold text-amber-700 dark:text-amber-300 tabular-nums">{traceability.linked_requirement_count}</p>
+        </div>
+        <div className="rounded-md border border-red-200 bg-white/70 dark:border-red-800 dark:bg-navy-800/50 p-1.5 text-center">
+          <p className="text-[7px] font-medium text-red-600 dark:text-red-400 uppercase tracking-wider">Violations</p>
+          <p className="text-sm font-bold text-red-700 dark:text-red-300 tabular-nums">{traceability.linked_violation_count}</p>
+        </div>
+        <div className="rounded-md border border-orange-200 bg-white/70 dark:border-orange-800 dark:bg-navy-800/50 p-1.5 text-center">
+          <p className="text-[7px] font-medium text-orange-600 dark:text-orange-400 uppercase tracking-wider">Findings</p>
+          <p className="text-sm font-bold text-orange-700 dark:text-orange-300 tabular-nums">{traceability.linked_finding_count}</p>
+        </div>
+        <div className="rounded-md border border-rose-200 bg-white/70 dark:border-rose-800 dark:bg-navy-800/50 p-1.5 text-center">
+          <p className="text-[7px] font-medium text-rose-600 dark:text-rose-400 uppercase tracking-wider">Redlines</p>
+          <p className="text-sm font-bold text-rose-700 dark:text-rose-300 tabular-nums">{traceability.linked_redline_count}</p>
+        </div>
+      </div>
+
+      {traceability.linked_policies.length > 0 && (
+        <>
+          <button
+            type="button"
+            onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-1 text-[9px] font-medium text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
+          >
+            {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+            <span>{traceability.linked_policies.length} polic{traceability.linked_policies.length === 1 ? "y" : "ies"} applied</span>
+          </button>
+
+          {expanded && (
+            <div className="mt-2 space-y-1">
+              {traceability.linked_policies.map((policy) => (
+                <div
+                  key={policy.playbook_id}
+                  className="flex items-center gap-2 rounded-md bg-white/60 dark:bg-navy-800/30 px-2 py-1.5 text-[9px]"
+                >
+                  <BookOpen className="w-2.5 h-2.5 text-indigo-500 flex-shrink-0" />
+                  <span className="font-medium text-gray-700 dark:text-gray-300 truncate">
+                    {policy.name}
+                  </span>
+                  {policy.version_label && (
+                    <span className="ml-auto text-[7px] font-semibold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 flex-shrink-0">
+                      v{policy.version_label}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Traceability chain summary */}
+      <div className="mt-2 pt-2 border-t border-indigo-200/50 dark:border-indigo-800/50">
+        <div className="flex items-center justify-between text-[7px] text-gray-500 dark:text-gray-400">
+          <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-indigo-500" /> Policy</span>
+          <span className="text-indigo-300">→</span>
+          <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-500" /> Rule</span>
+          <span className="text-indigo-300">→</span>
+          <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Req.</span>
+          <span className="text-indigo-300">→</span>
+          <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-500" /> Violation</span>
+          <span className="text-indigo-300">→</span>
+          <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-orange-500" /> Finding</span>
+          <span className="text-indigo-300">→</span>
+          <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-rose-500" /> Redline</span>
         </div>
       </div>
     </div>

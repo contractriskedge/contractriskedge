@@ -358,6 +358,38 @@ class PlaybookRepository(BaseRepository):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_all_rules(self, tenant_id: str, filters) -> tuple[list, int]:
+        """List all policy rules for a tenant with playbook join."""
+        from sqlalchemy import func
+
+        from app.domains.playbook.models import LegalPlaybook
+
+        base = (
+            select(PolicyRule, LegalPlaybook)
+            .join(LegalPlaybook, PolicyRule.playbook_id == LegalPlaybook.playbook_id)
+            .where(PolicyRule.tenant_id == tenant_id)
+        )
+        if filters.rule_type:
+            base = base.where(PolicyRule.rule_type == filters.rule_type)
+        if filters.effect:
+            base = base.where(PolicyRule.effect == filters.effect)
+        if filters.is_active is not None:
+            base = base.where(PolicyRule.is_active == filters.is_active)
+        if filters.is_mandatory is not None:
+            base = base.where(PolicyRule.is_mandatory == filters.is_mandatory)
+        if filters.search:
+            search = f"%{filters.search}%"
+            base = base.where(
+                PolicyRule.name.ilike(search) | LegalPlaybook.name.ilike(search)
+            )
+        count_q = select(func.count()).select_from(base.subquery())
+        total = await self.scalar(count_q) or 0
+        sort_col = getattr(PolicyRule, filters.sort_by, PolicyRule.priority)
+        order = sort_col.asc() if filters.sort_order == "asc" else sort_col.desc()
+        query = base.order_by(order).offset((filters.page - 1) * filters.page_size).limit(filters.page_size)
+        result = await self.session.execute(query)
+        return list(result.all()), total
+
     # ── Policy Evaluations ─────────────────────────────────────────
 
     async def create_evaluation(self, tenant_id: str, upload_id: str, **kwargs) -> PolicyEvaluation:

@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 # ── Upload Recovery Thresholds ────────────────────────────────────
 
-STUCK_UPLOAD_MINUTES = 30                # Uploads in non-terminal state for >30 min
+STUCK_UPLOAD_MINUTES = 10                # Uploads in non-terminal state for >10 min
 STUCK_INGESTION_REDISPATCH_MINUTES = 3   # Re-queue pipeline tasks sooner for OCR/extraction stalls
 
 # ── AI Run Recovery Thresholds ────────────────────────────────────
@@ -984,12 +984,14 @@ def _handle_stuck_upload(session, upload, tenant_id: str) -> str | None:
     if (
         int(age) >= STUCK_INGESTION_REDISPATCH_MINUTES
         and state in (
+            "uploaded",
             "ocr_pending",
             "ocr_processing",
             "storage_confirmed",
             "ocr_complete",
             "chunking_pending",
             "embedding_pending",
+            "analysis_pending",
             "validating",
             "validated",
         )

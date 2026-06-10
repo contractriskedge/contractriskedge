@@ -61,8 +61,29 @@ def assert_can_reassign(review_status: str, review_id: str) -> None:
 
 
 def assert_can_escalate(review_status: str, review_id: str) -> None:
-    """Assert the review can be escalated in the current state."""
+    """Assert the review can be escalated in the current state.
+
+    In addition to the generic immutability check, escalation is forbidden
+    when the review is already in the ESCALATED state. A review that is
+    already escalated must be approved, rejected, or routed to a
+    different stage via ``target_workflow_stage`` rather than re-escalated
+    through the generic escalation endpoint.
+    """
+    # 1. Block all terminal/locked states (approved, rejected, finalized,
+    #    executed, archived/closed).
     assert_review_mutable(review_status, "escalate", review_id)
+
+    # 2. Block re-escalation from ESCALATED state.
+    state = map_legacy_status(review_status)
+    if state == WorkflowState.ESCALATED:
+        raise ImmutableReviewError(
+            review_id=review_id,
+            status=review_status,
+            action=(
+                "escalate (review is already escalated; approve, reject, or "
+                "route to a different stage instead)"
+            ),
+        )
 
 
 def assert_can_approve_or_reject(review_status: str, review_id: str) -> None:

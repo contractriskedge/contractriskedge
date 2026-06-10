@@ -63,3 +63,28 @@ export async function fetchContractById(id: string): Promise<ContractRecord> {
 export async function fetchSavedViews(): Promise<SavedView[]> {
   return api.get<SavedView[]>("/contracts/views");
 }
+
+/** Lightweight contract search for the obligation creation contract selector.
+ *  Searches by contract name, contract number, vendor, and counterparty.
+ */
+export interface ContractSelectItem {
+  id: string;
+  name: string;
+  contract_number: string;
+  vendor: string;
+  counterparty: string;
+  risk_level: string;
+  risk_score: number;
+}
+
+export interface ContractSelectResponse {
+  data: ContractSelectItem[];
+  total: number;
+}
+
+export async function searchContractsForSelect(q?: string): Promise<ContractSelectResponse> {
+  const searchParams = new URLSearchParams();
+  if (q) searchParams.set("q", q);
+  const qs = searchParams.toString();
+  return api.get<ContractSelectResponse>(`/contracts/search-select${qs ? `?${qs}` : ""}`);
+}

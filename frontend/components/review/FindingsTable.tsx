@@ -12,7 +12,7 @@
 
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   AlertTriangle, ChevronDown, ChevronUp, CheckCircle2, XCircle, Lock,
   Filter, ArrowUpDown, Search, BookOpen,
@@ -26,7 +26,7 @@ import { isImmutable, getAllowedActions } from "@/lib/workflow";
 
 interface FindingsTableProps {
   reviewId: string;
-  onFindingSelect?: (chunkId: string | null) => void;
+  onFindingSelect?: (sourceLocation: FindingItem["source_location"]) => void;
   review?: ReviewDetail | null;
 }
 
@@ -59,6 +59,55 @@ const SEVERITY_STYLES: Record<string, { bg: string; dot: string; label: string }
     label: "text-blue-700 dark:text-blue-300",
   },
 };
+
+function confidencePercent(value: number | null | undefined) {
+  return value == null ? "—" : `${Math.round(value * 100)}%`;
+}
+
+function SourceLocationPanel({ finding }: { finding: FindingItem }) {
+  const source = finding.source_location;
+  if (!source) {
+    return (
+      <div className="mb-3 ml-7 rounded-lg border border-gray-200 bg-white/70 p-3 text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-400">
+        Source location unavailable. Finding generated from document-level analysis.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-3 ml-7 rounded-lg border border-blue-200 bg-white/80 p-3 dark:border-blue-800 dark:bg-gray-800/70">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">
+        Source Location
+      </p>
+      <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-600 dark:text-gray-300 sm:grid-cols-4">
+        <span>Page: <span className="font-semibold">{source.page_number ?? "—"}</span></span>
+        <span>Section: <span className="font-semibold">{source.section_heading || "—"}</span></span>
+        <span>Paragraph: <span className="font-semibold">{source.paragraph_index ?? "—"}</span></span>
+        <span>Confidence: <span className="font-semibold">{confidencePercent(source.confidence_score)}</span></span>
+      </div>
+    </div>
+  );
+}
+
+function TraceabilityChain({ finding }: { finding: FindingItem }) {
+  const source = finding.source_location?.source_text;
+  return (
+    <div className="mb-3 ml-7 rounded-lg border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-800/70">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        Traceability Chain
+      </p>
+      <div className="mt-2 space-y-1.5 text-xs text-gray-700 dark:text-gray-300">
+        <p><span className="font-semibold">Source Clause:</span> {source ? `${source.slice(0, 220)}${source.length > 220 ? "..." : ""}` : "Document-level analysis"}</p>
+        <p className="text-gray-400">↓</p>
+        <p><span className="font-semibold">AI Finding:</span> {finding.title}</p>
+        <p className="text-gray-400">↓</p>
+        <p><span className="font-semibold">Policy Match:</span> {finding.clause_type?.replace(/_/g, " ") || "Review policy"}</p>
+        <p className="text-gray-400">↓</p>
+        <p><span className="font-semibold">Generated Redline:</span> {finding.recommendation || "Recommendation pending"}</p>
+      </div>
+    </div>
+  );
+}
 
 export function FindingsTable({ reviewId, onFindingSelect, review }: FindingsTableProps) {
   const [severityFilter, setSeverityFilter] = useState<string>("");
@@ -257,6 +306,21 @@ export function FindingsTable({ reviewId, onFindingSelect, review }: FindingsTab
                       </div>
                     </div>
 
+                    {(finding.playbook_id || finding.rule_id) && (
+                      <div className="mb-3 ml-7 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 dark:border-indigo-800 dark:bg-indigo-900/10">
+                        <p className="text-[10px] font-semibold text-indigo-700 dark:text-indigo-300 uppercase tracking-wide flex items-center gap-1">
+                          <BookOpen className="h-3 w-3" /> Policy Linkage
+                        </p>
+                        <p className="mt-1 text-xs text-indigo-800 dark:text-indigo-200">
+                          {finding.policy_rule_name || finding.policy_name || "Linked policy rule"}
+                          {finding.policy_version ? ` · v${finding.policy_version}` : ""}
+                        </p>
+                        {finding.policy_owner && (
+                          <p className="text-[10px] text-gray-500 mt-0.5">Owner: {finding.policy_owner}</p>
+                        )}
+                      </div>
+                    )}
+
                     {/* Step 2: Business Impact */}
                     {exposureByFindingId.get(finding.finding_id)?.business_impact && (
                       <div className="mb-3 ml-7 rounded-lg border-l-2 border-red-300 bg-red-50/60 p-3 dark:border-red-700 dark:bg-red-900/10">
@@ -331,24 +395,22 @@ export function FindingsTable({ reviewId, onFindingSelect, review }: FindingsTab
                     )}
 
                     {/* Evidence: page numbers */}
-                    {finding.page_numbers.length > 0 && (
-                      <p className="mb-3 ml-7 text-xs text-gray-500 dark:text-gray-400">
-                        <span className="font-medium">Location:</span> Pages {finding.page_numbers.join(", ")}
-                      </p>
-                    )}
+                    <SourceLocationPanel finding={finding} />
+                    <TraceabilityChain finding={finding} />
 
                     {/* View in contract button */}
                     {onFindingSelect && (
                       <div className="mb-3 ml-7">
                         <button
+                          title="Navigate to the contract text that generated this finding."
                           onClick={(e) => {
                             e.stopPropagation();
-                            onFindingSelect(null);
+                            onFindingSelect(finding.source_location ?? null);
                           }}
                           className="inline-flex items-center gap-1.5 rounded-md bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-800"
                         >
                           <BookOpen className="h-3.5 w-3.5" />
-                          View in contract text
+                          View Source Location
                         </button>
                       </div>
                     )}
@@ -602,6 +664,90 @@ export function FindingsNavigator({ reviewId, total }: FindingsNavigatorProps) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Findings Navigation Bar ──────────────────────────────────────────
+
+interface FindingsNavigationBarProps {
+  findings: FindingItem[];
+  currentIndex: number;
+  onNavigate: (index: number) => void;
+}
+
+export function FindingsNavigationBar({ findings, currentIndex, onNavigate }: FindingsNavigationBarProps) {
+  const total = findings.length;
+  const current = currentIndex + 1;
+
+  const goNext = useCallback(() => {
+    if (currentIndex < total - 1) onNavigate(currentIndex + 1);
+  }, [currentIndex, total, onNavigate]);
+
+  const goPrev = useCallback(() => {
+    if (currentIndex > 0) onNavigate(currentIndex - 1);
+  }, [currentIndex, onNavigate]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Only handle when not typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+      if (e.key === "n" || e.key === "N") {
+        e.preventDefault();
+        goNext();
+      } else if (e.key === "p" || e.key === "P") {
+        e.preventDefault();
+        goPrev();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [goNext, goPrev]);
+
+  if (total === 0) return null;
+
+  return (
+    <div className="flex items-center gap-2 px-4 py-2 bg-white border-b border-gray-200 dark:bg-gray-800 dark:border-gray-700">
+      <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+        Finding {current} of {total}
+      </span>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={goPrev}
+          disabled={currentIndex <= 0}
+          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed dark:text-gray-300 dark:hover:bg-gray-700"
+          title="Previous (P)"
+        >
+          ◀ Prev
+        </button>
+        <button
+          onClick={goNext}
+          disabled={currentIndex >= total - 1}
+          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed dark:text-gray-300 dark:hover:bg-gray-700"
+          title="Next (N)"
+        >
+          Next ▶
+        </button>
+      </div>
+      <div className="ml-2 flex items-center gap-1">
+        <span className="text-[10px] text-gray-400">Jump to:</span>
+        <select
+          value={currentIndex}
+          onChange={(e) => onNavigate(Number(e.target.value))}
+          className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 focus:border-blue-500 focus:outline-none dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300"
+        >
+          {findings.map((f, i) => (
+            <option key={f.finding_id || i} value={i}>
+              #{i + 1} - {f.severity.toUpperCase()} - {f.title?.slice(0, 40)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="ml-auto text-[10px] text-gray-400">
+        <kbd className="rounded border border-gray-300 bg-gray-100 px-1 py-0.5 font-mono text-[9px] dark:border-gray-600 dark:bg-gray-700">N</kbd> next{' '}
+        <kbd className="rounded border border-gray-300 bg-gray-100 px-1 py-0.5 font-mono text-[9px] dark:border-gray-600 dark:bg-gray-700">P</kbd> prev
+      </div>
     </div>
   );
 }

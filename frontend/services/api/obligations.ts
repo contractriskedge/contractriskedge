@@ -35,6 +35,7 @@ export interface ObligationCreateRequest {
   obligationType: string;
   status?: string;
   contractId?: string;
+  contractUuidId?: string;
   contractName?: string;
   vendor?: string;
   owner?: string;
@@ -114,7 +115,9 @@ export interface ObligationResponse {
   obligation_type: string;
   status: string;
   contract_id: string | null;
+  contract_uuid_id: string | null;
   contract_name: string | null;
+  contract_number: string | null;
   vendor: string | null;
   owner: string | null;
   assignee: string | null;
@@ -357,6 +360,14 @@ export interface ObligationAuditLogResponse {
   created_at: string | null;
 }
 
+export interface ObligationsByContractResponse {
+  total: number;
+  open: number;
+  completed: number;
+  overdue: number;
+  obligations: ObligationResponse[];
+}
+
 export interface PaginationMeta {
   page: number;
   page_size: number;
@@ -469,6 +480,7 @@ export const obligationsService = {
     };
     if (body.description !== undefined) snake.description = body.description;
     if (body.contractId !== undefined) snake.contract_id = body.contractId;
+    if (body.contractUuidId !== undefined) snake.contract_uuid_id = body.contractUuidId;
     if (body.contractName !== undefined) snake.contract_name = body.contractName;
     if (body.vendor !== undefined) snake.vendor = body.vendor;
     if (body.owner !== undefined) snake.owner = body.owner;
@@ -605,4 +617,8 @@ export const obligationsService = {
   /** Get SLA predictions */
   getSlaPredictions: () =>
     api.get<{ data: SlaPredictionResponse[] }>(`${OBLIGATIONS_BASE}/sla-predictions`),
+
+  /** Get obligations by contract (counts + list) */
+  getByContract: (contractId: string) =>
+    api.get<ObligationsByContractResponse>(`${OBLIGATIONS_BASE}/by-contract/${contractId}`),
 };

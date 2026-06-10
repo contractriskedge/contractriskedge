@@ -27,7 +27,7 @@ import React, { useState } from "react";
 import {
   AlertTriangle, TrendingDown, Shield, CheckCircle2, Clock,
   ChevronDown, ChevronRight, XCircle, FileText, Info,
-  CornerDownRight, ArrowUp, ArrowDown, Zap,
+  CornerDownRight, ArrowUp, ArrowDown, Zap, DollarSign, BookOpen, GitBranch,
 } from "lucide-react";
 import { useRiskBreakdown, useGenerateMitigationRedline } from "@/services/hooks";
 import { AsyncBoundary } from "@/components/shared/AsyncBoundary";
@@ -120,6 +120,74 @@ function RiskGauge({ score, label, sublabel }: { score: number; label: string; s
           {sublabel}
         </span>
       )}
+    </div>
+  );
+}
+
+// ── Financial Impact Panel ────────────────────────────────────────
+//
+// Translates the abstract risk score into dollar exposure so the user can
+// see the business impact at a glance:
+//   • Current Risk %  — current_contract_risk × 100
+//   • Financial Exposure $ — contract_value × current_risk
+//   • After Mitigation %  — projected residual risk if all suggested
+//     mitigations are applied (deterministic 18% of current, capped at 5%)
+//   • Potential Savings $  — current_exposure − after_mitigation_exposure
+
+function formatMoney(amount: number, currency: string = "USD"): string {
+  if (!amount) return "—";
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? "−" : "";
+  if (abs >= 1_000_000_000) return `${sign}$${(abs / 1_000_000_000).toFixed(2)}B`;
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`;
+  return `${sign}$${abs.toFixed(0)}`;
+}
+
+function FinancialImpactPanel({ impact }: { impact: NonNullable<RiskBreakdown["financial_impact"]> }) {
+  const {
+    contract_value, currency, current_risk_pct, current_exposure,
+    after_mitigation_pct, after_mitigation_exposure, potential_savings,
+  } = impact;
+
+  return (
+    <div
+      className="mb-3 rounded-lg border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 dark:border-amber-800 dark:from-amber-900/10 dark:to-orange-900/10 p-3"
+      data-testid="financial-impact-panel"
+    >
+      <div className="flex items-center gap-1.5 mb-2">
+        <DollarSign className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-300">
+          Estimated Business Impact
+        </span>
+        <span className="ml-auto text-[9px] text-gray-500 dark:text-gray-400 tabular-nums">
+          on {formatMoney(contract_value, currency)} contract
+        </span>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-md border border-red-200 bg-white/70 dark:border-red-800 dark:bg-navy-800/50 p-2 text-center">
+          <p className="text-[9px] font-medium text-red-600 dark:text-red-400 uppercase tracking-wider">Current</p>
+          <p className="text-base font-bold text-red-700 dark:text-red-300 tabular-nums">{current_risk_pct}%</p>
+          <p className="text-[10px] font-semibold text-red-700 dark:text-red-300 tabular-nums">
+            {formatMoney(current_exposure, currency)}
+          </p>
+        </div>
+        <div className="rounded-md border border-emerald-200 bg-white/70 dark:border-emerald-800 dark:bg-navy-800/50 p-2 text-center">
+          <p className="text-[9px] font-medium text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">After Mitigation</p>
+          <p className="text-base font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">{after_mitigation_pct}%</p>
+          <p className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums">
+            {formatMoney(after_mitigation_exposure, currency)}
+          </p>
+        </div>
+        <div className="rounded-md border border-blue-200 bg-white/70 dark:border-blue-800 dark:bg-navy-800/50 p-2 text-center">
+          <p className="text-[9px] font-medium text-blue-600 dark:text-blue-400 uppercase tracking-wider">Potential Savings</p>
+          <p className="text-base font-bold text-blue-700 dark:text-blue-300 tabular-nums">
+            {potential_savings > 0 ? formatMoney(potential_savings, currency) : "—"}
+          </p>
+          <p className="text-[10px] text-gray-500 dark:text-gray-400">if all mitigations accepted</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1078,6 +1146,114 @@ function RiskScoreStack({
   );
 }
 
+// ── Governance Traceability Panel ─────────────────────────────────
+
+function GovernanceTraceabilityPanel({ traceability }: { traceability: GovernanceTraceability }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="mb-3 rounded-lg border border-indigo-200 bg-gradient-to-br from-indigo-50 to-blue-50 dark:border-indigo-800 dark:from-indigo-900/10 dark:to-blue-900/10 p-3">
+      <div className="flex items-center gap-1.5 mb-2">
+        <GitBranch className="w-3.5 h-3.5 text-indigo-700 dark:text-indigo-400" />
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-800 dark:text-indigo-300">
+          Governance Traceability
+        </span>
+      </div>
+
+      {/* Full chain counts */}
+      <div className="grid grid-cols-3 gap-1.5 mb-2">
+        <div className="rounded-md border border-indigo-200 bg-white/70 dark:border-indigo-800 dark:bg-navy-800/50 p-1.5 text-center">
+          <p className="text-[7px] font-medium text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Policies</p>
+          <p className="text-sm font-bold text-indigo-700 dark:text-indigo-300 tabular-nums">{traceability.linked_policy_count}</p>
+        </div>
+        <div className="rounded-md border border-blue-200 bg-white/70 dark:border-blue-800 dark:bg-navy-800/50 p-1.5 text-center">
+          <p className="text-[7px] font-medium text-blue-600 dark:text-blue-400 uppercase tracking-wider">Rules</p>
+          <p className="text-sm font-bold text-blue-700 dark:text-blue-300 tabular-nums">{traceability.linked_rule_count}</p>
+        </div>
+        <div className="rounded-md border border-amber-200 bg-white/70 dark:border-amber-800 dark:bg-navy-800/50 p-1.5 text-center">
+          <p className="text-[7px] font-medium text-amber-600 dark:text-amber-400 uppercase tracking-wider">Requirements</p>
+          <p className="text-sm font-bold text-amber-700 dark:text-amber-300 tabular-nums">{traceability.linked_requirement_count}</p>
+        </div>
+        <div className="rounded-md border border-red-200 bg-white/70 dark:border-red-800 dark:bg-navy-800/50 p-1.5 text-center">
+          <p className="text-[7px] font-medium text-red-600 dark:text-red-400 uppercase tracking-wider">Violations</p>
+          <p className="text-sm font-bold text-red-700 dark:text-red-300 tabular-nums">{traceability.linked_violation_count}</p>
+        </div>
+        <div className="rounded-md border border-orange-200 bg-white/70 dark:border-orange-800 dark:bg-navy-800/50 p-1.5 text-center">
+          <p className="text-[7px] font-medium text-orange-600 dark:text-orange-400 uppercase tracking-wider">Findings</p>
+          <p className="text-sm font-bold text-orange-700 dark:text-orange-300 tabular-nums">{traceability.linked_finding_count}</p>
+        </div>
+        <div className="rounded-md border border-rose-200 bg-white/70 dark:border-rose-800 dark:bg-navy-800/50 p-1.5 text-center">
+          <p className="text-[7px] font-medium text-rose-600 dark:text-rose-400 uppercase tracking-wider">Redlines</p>
+          <p className="text-sm font-bold text-rose-700 dark:text-rose-300 tabular-nums">{traceability.linked_redline_count}</p>
+        </div>
+      </div>
+
+      {traceability.linked_policies.length > 0 && (
+        <>
+          <button
+            type="button"
+            onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-1 text-[10px] font-medium text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
+          >
+            {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+            <span>{traceability.linked_policies.length} polic{traceability.linked_policies.length === 1 ? "y" : "ies"} applied</span>
+          </button>
+
+          {expanded && (
+            <div className="mt-2 space-y-1.5">
+              {traceability.linked_policies.map((policy) => (
+                <div
+                  key={policy.playbook_id}
+                  className="flex items-center gap-2 rounded-md bg-white/60 dark:bg-navy-800/30 px-2 py-1.5 text-[10px]"
+                >
+                  <BookOpen className="w-3 h-3 text-indigo-500 flex-shrink-0" />
+                  <span className="font-medium text-gray-700 dark:text-gray-300 truncate">
+                    {policy.name}
+                  </span>
+                  {policy.version_label && (
+                    <span className="ml-auto text-[8px] font-semibold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 flex-shrink-0">
+                      v{policy.version_label}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Traceability chain summary */}
+      <div className="mt-2 pt-2 border-t border-indigo-200/50 dark:border-indigo-800/50">
+        <div className="flex items-center justify-between text-[8px] text-gray-500 dark:text-gray-400">
+          <span className="inline-flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" /> Policy
+          </span>
+          <span className="text-indigo-300">→</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500" /> Rule
+          </span>
+          <span className="text-indigo-300">→</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Req.
+          </span>
+          <span className="text-indigo-300">→</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> Violation
+          </span>
+          <span className="text-indigo-300">→</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-orange-500" /> Finding
+          </span>
+          <span className="text-indigo-300">→</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-500" /> Redline
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Panel ────────────────────────────────────────────────────
 
 export function RiskBreakdownPanel({ reviewId }: RiskBreakdownPanelProps) {
@@ -1260,6 +1436,16 @@ function RenderRiskContent({ data, reviewId }: { data: RiskBreakdown; reviewId: 
               remainingExposure={currentRisk}
             />
           </div>
+
+          {/* Financial Exposure — Estimated Business Impact */}
+          {data.financial_impact && data.financial_impact.contract_value > 0 && (
+            <FinancialImpactPanel impact={data.financial_impact} />
+          )}
+
+          {/* Governance Traceability — linked policies and rules */}
+          {data.governance_traceability && data.governance_traceability.linked_policy_count > 0 && (
+            <GovernanceTraceabilityPanel traceability={data.governance_traceability} />
+          )}
 
           {data.top_recommended_actions && data.top_recommended_actions.top_actions?.length > 0 && (
             <TopActionsWidget

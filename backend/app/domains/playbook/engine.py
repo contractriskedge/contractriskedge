@@ -499,7 +499,7 @@ class DeviationDetector:
                 return DeviationResult(
                     clause_category=clause.category,
                     clause_text_snippet=clause.text_snippet[:200],
-                    expected=f"{standard.clause_type.value.title()} clause: {standard.title}",
+                    expected=f"{(standard.clause_type.value if hasattr(standard.clause_type, 'value') else standard.clause_type).title()} clause: {standard.title}",
                     actual=f"Contract clause deviates from standard (similarity: {jaccard:.2f})",
                     severity=severity,
                     score=1.0 - jaccard,

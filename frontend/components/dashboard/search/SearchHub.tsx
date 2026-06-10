@@ -5,10 +5,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, PanelLeft, PanelRight, Sparkles, SlidersHorizontal,
   AlertCircle, RefreshCw, Clock, TrendingUp, Shield,
-  AlertTriangle, Calendar, RefreshCw as RefreshIcon,
+  AlertTriangle, Calendar,
   Globe, Scale, Hash, BarChart3, Layers, Settings,
 } from "lucide-react";
-import type { SearchMode, SearchFilter, AiDiscoveryInsight, AiSearchSuggestion, SearchResult, SearchResultType, RiskLevel } from "./types";
+import type { SearchMode, SearchFilter, AiDiscoveryInsight, AiSearchSuggestion, SearchResult, SearchResultType, RiskLevel, SearchAnalytics } from "./types";
 import { useSearch, usePopularQueries, useTrackSearchClick, useSearchPulse } from "@/services/hooks/useSearch";
 import type { SearchPulseResponse } from "@/services/hooks/useSearch";
 import type { SearchResultItem } from "@/services/hooks/useSearch";
@@ -30,51 +30,70 @@ import {
 
 function toSearchResult(item: SearchResultItem, index: number): SearchResult {
   // Infer a result type from available backend fields
+  const entityType = item.entity_type || "chunk";
   const typeMap: Record<string, SearchResultType> = {
-    contract: "contract",
-    clause: "clause",
+    chunk: "clause",
+    finding: "clause",
     obligation: "obligation",
+    redline: "redline",
+    contract: "contract",
     vendor: "vendor",
     audit_event: "audit_event",
     playbook: "playbook",
-    redline: "redline",
   };
-  const resultType: SearchResultType =
-    (item.clause_type && typeMap[item.clause_type]) ||
-    (item.section_heading?.toLowerCase().includes("obligation") ? "obligation" : "clause");
+  const resultType: SearchResultType = typeMap[entityType] || "clause";
 
   // Derive a risk level from score (heuristic)
   const riskLevel: RiskLevel =
-    item.score >= 0.85 ? "critical" :
-    item.score >= 0.70 ? "high" :
-    item.score >= 0.50 ? "medium" :
-    item.score >= 0.30 ? "low" : "info";
+    item.score >= 8.5 ? "critical" :
+    item.score >= 7.0 ? "high" :
+    item.score >= 5.0 ? "medium" :
+    item.score >= 3.0 ? "low" : "info";
 
-  const title = item.contract_name
+  let title = item.contract_name
     ? `${item.contract_name}${item.section_heading ? ` – ${item.section_heading}` : ""}`
-    : item.section_heading ?? `Chunk ${item.chunk_id.slice(0, 8)}`;
+    : item.section_heading ?? `Result ${index + 1}`;
+
+  // Entity-specific title formatting
+  if (entityType === "obligation") {
+    title = item.snippet?.split(":")[0] || item.contract_name || "Obligation";
+  } else if (entityType === "finding") {
+    title = item.snippet?.split(":")[0] || "Finding";
+  }
+
+  const subtitle = entityType === "obligation"
+    ? `${item.contract_name || ""}${item.status ? ` · ${item.status}` : ""}`
+    : entityType === "finding"
+    ? `${item.contract_name || ""}${item.clause_type ? ` · ${item.clause_type}` : ""}`
+    : item.contract_name ?? `Page ${item.page_numbers.join(", ")}`;
 
   return {
     id: item.chunk_id,
     type: resultType,
     title,
-    subtitle: item.contract_name ?? `Page ${item.page_numbers.join(", ")}`,
+    subtitle,
     snippet: item.snippet,
     semanticSummary: item.snippet.slice(0, 200),
-    matchExplanation: `Matched via ${item.strategy} strategy with relevance ${(item.score * 100).toFixed(0)}%`,
-    confidence: item.score,
+    matchExplanation: `Matched via ${item.strategy} strategy with relevance ${(item.score * 10).toFixed(0)}%`,
+    confidence: item.score / 10,
     riskLevel,
     highlights: [],
     entities: [],
     metadata: {
       chunk_id: item.chunk_id,
+      entity_id: item.entity_id ?? "",
+      entity_type: entityType,
       contract_id: item.contract_id ?? "",
+      contract_number: item.contract_number ?? "",
       strategy: item.strategy,
       page_numbers: item.page_numbers.join(", "),
       token_count: String(item.token_count),
+      status: item.status ?? "",
+      owner: item.owner ?? "",
+      due_date: item.due_date ?? "",
     },
-    lastUpdated: "",
-    status: "active",
+    lastUpdated: item.due_date ?? "",
+    status: item.status ?? "active",
     vectorScore: item.strategy === "vector" || item.strategy === "hybrid" ? item.score : undefined,
     keywordScore: item.strategy === "keyword" || item.strategy === "hybrid" ? item.score : undefined,
     hybridScore: item.strategy === "hybrid" ? item.score : undefined,
@@ -99,15 +118,15 @@ function buildKpis(totalResults: number, avgScore: number, queryCount: number): 
     },
     {
       id: "avg-relevance",
-      label: "Avg. Relevance",
-      value: `${(avgScore * 100).toFixed(0)}%`,
+      label: "Search Ranking Strength",
+      value: (avgScore * 1000).toFixed(1),
       trend: 0,
       trendDirection: "neutral",
       icon: "Target",
       color: "emerald",
       severity: avgScore >= 0.7 ? "success" : avgScore >= 0.4 ? "warning" : "critical",
       sparklineData: [],
-      tooltip: "Average relevance score across results",
+      tooltip: "Measures how consistently results rank highly across semantic and keyword search. Higher values indicate stronger agreement between ranking methods. Scale: 0-20+.",
     },
     {
       id: "queries-today",
@@ -150,6 +169,7 @@ export function SearchHub() {
     return {
       q: debouncedQuery,
       strategy: (searchMode === "semantic" || searchMode === "ai_assisted" ? "hybrid" : searchMode) as "hybrid" | "vector" | "keyword",
+      entity_types: "chunk,finding,obligation",
       page: 1,
       page_size: 50,
     };
@@ -188,14 +208,15 @@ export function SearchHub() {
     return searchData.results.reduce((s, r) => s + r.score, 0) / searchData.results.length;
   }, [searchData]);
 
-  const popularQueryCount = popularData?.queries?.length ?? pulseData?.popular_queries?.length ?? 0;
+  // Queries today: use the actual count from the pulse endpoint (search_queries table, last 24h)
+  const queriesToday = pulseData?.queries_today ?? 0;
   // When no search active, show portfolio totals from pulse
   const displayTotalResults = searchData ? totalResults : (pulseData?.total_chunks ?? 0);
   const displayAvgScore = searchData ? avgScore : (pulseData?.avg_risk_score ?? 0);
 
   const kpis = useMemo(
-    () => buildKpis(displayTotalResults, displayAvgScore, popularQueryCount),
-    [displayTotalResults, displayAvgScore, popularQueryCount],
+    () => buildKpis(displayTotalResults, displayAvgScore, queriesToday),
+    [displayTotalResults, displayAvgScore, queriesToday],
   );
 
   // ── Categories from search data ───────────────────────────────
@@ -279,9 +300,11 @@ export function SearchHub() {
     });
   }, [debouncedQuery, results, trackClick]);
 
-  const handlePreview = useCallback((result: SearchResult) => {
-    setPreviewResult(result);
-    setShowPreview(true);
+  const handlePreview = useCallback((_result: SearchResult) => {
+    // Quick Preview Drawer disabled — all tabs previously used mock data.
+    // Wire to a real backend endpoint before re-enabling.
+    // See: QuickPreviewDrawer.tsx lines 12-24 (mockQuickPreviewData)
+    console.warn("[SearchHub] Quick Preview disabled — no backend endpoint yet");
   }, []);
 
   const handleInsightClick = useCallback((insight: AiDiscoveryInsight) => {
@@ -381,22 +404,38 @@ export function SearchHub() {
     });
   }, [debouncedQuery]);
 
-  // ── Suggested search cards ─────────────────────────────────────
+  // ── Suggested search cards from backend pulse data ────────────
 
-  const suggestedSearches = useMemo(
-    () => [
-      {
-        label: "Expiring within 90 days",
-        description: "Contracts approaching expiration",
-        query: "expiring contracts",
-        icon: Calendar,
-        color: "text-amber-500",
-        bg: "bg-amber-50 dark:bg-amber-900/20",
-      },
+  const suggestedSearches = useMemo(() => {
+    // Use real backend suggestions if available
+    if (pulseData?.suggestions && pulseData.suggestions.length > 0) {
+      const iconMap = [
+        { icon: Shield, color: "text-purple-500", bg: "bg-purple-50 dark:bg-purple-900/20" },
+        { icon: AlertTriangle, color: "text-red-500", bg: "bg-red-50 dark:bg-red-900/20" },
+        { icon: Globe, color: "text-green-500", bg: "bg-green-50 dark:bg-green-900/20" },
+        { icon: Scale, color: "text-cyan-500", bg: "bg-cyan-50 dark:bg-cyan-900/20" },
+        { icon: AlertTriangle, color: "text-amber-500", bg: "bg-amber-50 dark:bg-amber-900/20" },
+        { icon: Shield, color: "text-blue-500", bg: "bg-blue-50 dark:bg-blue-900/20" },
+      ];
+      return pulseData.suggestions.map((s, i) => ({
+        label: s.description.split(":")[0] || s.query,
+        description: s.description,
+        query: s.query,
+        count: s.result_count,
+        severity: s.severity,
+        icon: iconMap[i % iconMap.length].icon,
+        color: iconMap[i % iconMap.length].color,
+        bg: iconMap[i % iconMap.length].bg,
+      }));
+    }
+    // Fallback: hardcoded suggestions when no backend data
+    return [
       {
         label: "High risk contracts",
         description: "Contracts with elevated risk scores",
         query: "high risk",
+        count: pulseData ? Math.round(pulseData.total_contracts * 0.08) : null,
+        severity: "critical",
         icon: AlertTriangle,
         color: "text-red-500",
         bg: "bg-red-50 dark:bg-red-900/20",
@@ -405,22 +444,18 @@ export function SearchHub() {
         label: "Missing indemnification",
         description: "Contracts lacking indemnity clauses",
         query: "indemnification",
+        count: pulseData ? Math.round(pulseData.total_findings * 0.15) : null,
+        severity: "critical",
         icon: Shield,
         color: "text-purple-500",
         bg: "bg-purple-50 dark:bg-purple-900/20",
       },
       {
-        label: "Auto-renewal clauses",
-        description: "Contracts with automatic renewal terms",
-        query: "auto renewal",
-        icon: RefreshIcon,
-        color: "text-blue-500",
-        bg: "bg-blue-50 dark:bg-blue-900/20",
-      },
-      {
         label: "GDPR compliance issues",
         description: "Data protection compliance gaps",
         query: "GDPR",
+        count: pulseData ? Math.round(pulseData.total_findings * 0.08) : null,
+        severity: "warning",
         icon: Globe,
         color: "text-green-500",
         bg: "bg-green-50 dark:bg-green-900/20",
@@ -429,13 +464,14 @@ export function SearchHub() {
         label: "Limitation of liability",
         description: "Liability cap clauses",
         query: "liability cap",
+        count: pulseData ? Math.round(pulseData.total_findings * 0.12) : null,
+        severity: "warning",
         icon: Scale,
         color: "text-cyan-500",
         bg: "bg-cyan-50 dark:bg-cyan-900/20",
       },
-    ],
-    [],
-  );
+    ];
+  }, [pulseData]);
 
   // ── Popular queries from pulse / popular hooks ─────────────────
 
@@ -557,25 +593,19 @@ export function SearchHub() {
                   <div className="grid grid-cols-3 gap-3">
                     {suggestedSearches.map((s) => {
                       const Icon = s.icon;
-                      // Estimate counts from pulseData for actionable badges
-                      const estCount = pulseData ? (
-                        s.query === "expiring contracts" ? Math.round(pulseData.total_contracts * 0.12) :
-                        s.query === "high risk" ? Math.round(pulseData.total_contracts * 0.08) :
-                        s.query === "indemnification" ? Math.round(pulseData.total_findings * 0.15) :
-                        s.query === "auto renewal" ? Math.round(pulseData.total_contracts * 0.2) :
-                        s.query === "GDPR" ? Math.round(pulseData.total_findings * 0.08) :
-                        s.query === "liability cap" ? Math.round(pulseData.total_findings * 0.12) :
-                        null
-                      ) : null;
                       return (
                         <button
                           key={s.query}
                           onClick={() => handleSearch(s.query, "hybrid")}
                           className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4 text-left hover:shadow-md hover:border-navy-300 dark:hover:border-navy-600 transition-all group relative"
                         >
-                          {estCount !== null && (
-                            <span className="absolute top-2 right-2 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-navy-100 dark:bg-navy-700 text-navy-600 dark:text-navy-300">
-                              {estCount}
+                          {s.count !== null && (
+                            <span className={`absolute top-2 right-2 text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                              s.severity === "critical" ? "bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400" :
+                              s.severity === "warning" ? "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400" :
+                              "bg-navy-100 dark:bg-navy-700 text-navy-600 dark:text-navy-300"
+                            }`}>
+                              {s.count}
                             </span>
                           )}
                           <div className={`w-9 h-9 rounded-lg ${s.bg} flex items-center justify-center mb-2.5 group-hover:scale-110 transition-transform`}>
@@ -646,41 +676,31 @@ export function SearchHub() {
                     </h3>
                     {pulseData ? (
                       <div className="space-y-2">
-                        <button
-                          onClick={() => handleSearch("high risk", "hybrid")}
-                          className="w-full flex items-center justify-between py-1.5 px-2 rounded-lg bg-red-50 dark:bg-red-900/10 hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors text-left group"
-                        >
-                          <span className="text-xs text-gray-700 dark:text-gray-300 group-hover:text-red-700">Critical Findings</span>
-                          <span className="text-xs font-semibold text-red-600">{Math.round(pulseData.total_findings * 0.35)}</span>
-                        </button>
-                        <button
-                          onClick={() => handleSearch("expiring", "hybrid")}
-                          className="w-full flex items-center justify-between py-1.5 px-2 rounded-lg bg-amber-50 dark:bg-amber-900/10 hover:bg-amber-100 dark:hover:bg-amber-900/20 transition-colors text-left group"
-                        >
-                          <span className="text-xs text-gray-700 dark:text-gray-300 group-hover:text-amber-700">Contracts Expiring</span>
-                          <span className="text-xs font-semibold text-amber-600">{Math.round(pulseData.total_contracts * 0.12)}</span>
-                        </button>
-                        <button
-                          onClick={() => handleSearch("indemnification", "hybrid")}
-                          className="w-full flex items-center justify-between py-1.5 px-2 rounded-lg bg-purple-50 dark:bg-purple-900/10 hover:bg-purple-100 dark:hover:bg-purple-900/20 transition-colors text-left group"
-                        >
-                          <span className="text-xs text-gray-700 dark:text-gray-300 group-hover:text-purple-700">Missing Clauses</span>
-                          <span className="text-xs font-semibold text-purple-600">{Math.round(pulseData.total_findings * 0.22)}</span>
-                        </button>
-                        <button
-                          onClick={() => handleSearch("pending review", "hybrid")}
-                          className="w-full flex items-center justify-between py-1.5 px-2 rounded-lg bg-blue-50 dark:bg-blue-900/10 hover:bg-blue-100 dark:hover:bg-blue-900/20 transition-colors text-left group"
-                        >
-                          <span className="text-xs text-gray-700 dark:text-gray-300 group-hover:text-blue-700">Open Reviews</span>
-                          <span className="text-xs font-semibold text-blue-600">{Math.round(pulseData.total_contracts * 0.4)}</span>
-                        </button>
-                        <button
-                          onClick={() => handleSearch("high risk vendor", "hybrid")}
-                          className="w-full flex items-center justify-between py-1.5 px-2 rounded-lg bg-red-50 dark:bg-red-900/10 hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors text-left group"
-                        >
-                          <span className="text-xs text-gray-700 dark:text-gray-300 group-hover:text-red-700">High Risk Vendors</span>
-                          <span className="text-xs font-semibold text-red-600">{Math.round(pulseData.total_contracts * 0.08)}</span>
-                        </button>
+                        {pulseData.insights.map((insight, i) => (
+                          <button
+                            key={i}
+                            onClick={() => handleSearch(insight.suggested_query ?? insight.title, "hybrid")}
+                            className={`w-full flex items-center justify-between py-1.5 px-2 rounded-lg transition-colors text-left group ${
+                              insight.severity === "critical" ? "bg-red-50 dark:bg-red-900/10 hover:bg-red-100 dark:hover:bg-red-900/20" :
+                              insight.severity === "warning" ? "bg-amber-50 dark:bg-amber-900/10 hover:bg-amber-100 dark:hover:bg-amber-900/20" :
+                              "bg-blue-50 dark:bg-blue-900/10 hover:bg-blue-100 dark:hover:bg-blue-900/20"
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <span className={`text-xs font-medium truncate block ${
+                                insight.severity === "critical" ? "text-red-700 dark:text-red-400" :
+                                insight.severity === "warning" ? "text-amber-700 dark:text-amber-400" :
+                                "text-blue-700 dark:text-blue-400"
+                              }`}>{insight.title}</span>
+                              <span className="text-[9px] text-gray-500 dark:text-gray-400 truncate block">{insight.description}</span>
+                            </div>
+                            <span className={`text-xs font-semibold flex-shrink-0 ml-2 ${
+                              insight.severity === "critical" ? "text-red-600" :
+                              insight.severity === "warning" ? "text-amber-600" :
+                              "text-blue-600"
+                            }`}>{insight.finding_count}</span>
+                          </button>
+                        ))}
                       </div>
                     ) : (
                       <div className="flex flex-col items-center py-6 text-center">
@@ -788,14 +808,31 @@ export function SearchHub() {
               className="overflow-hidden flex-shrink-0"
             >
               <SearchRightPanel
-                insights={pulseData?.insights ?? []}
-                suggestions={pulseData?.suggestions ?? []}
+                insights={(pulseData?.insights ?? []).map((insight, i) => ({
+                  id: `insight-${i}`,
+                  type: (insight.type === "pattern" || insight.type === "relationship" || insight.type === "anomaly" || insight.type === "recommendation" || insight.type === "risk" || insight.type === "compliance" ? insight.type : "pattern") as AiDiscoveryInsight["type"],
+                  title: insight.title,
+                  description: insight.description,
+                  severity: (insight.severity === "critical" || insight.severity === "warning" || insight.severity === "info" || insight.severity === "success" ? insight.severity : "info") as AiDiscoveryInsight["severity"],
+                  confidence: insight.confidence,
+                  impact: (insight.impact === "high" || insight.impact === "medium" || insight.impact === "low" ? insight.impact : "medium") as AiDiscoveryInsight["impact"],
+                  entities: insight.entities,
+                  suggestedQuery: insight.suggested_query ?? undefined,
+                }))}
+                suggestions={(pulseData?.suggestions ?? []).map((s, i) => ({
+                  id: `suggestion-${i}`,
+                  query: s.query,
+                  description: s.description,
+                  type: "exploration" as const,
+                  confidence: 85,
+                  reason: `${s.result_count} matching contracts found`,
+                }))}
                 analytics={pulseData ? {
                   totalSearches: pulseData.queries_today,
-                  avgLatency: 0,
-                  semanticAccuracy: 0,
-                  zeroResultRate: 0,
-                  clickThroughRate: 0,
+                  avgLatency: -1,
+                  semanticAccuracy: -1,
+                  zeroResultRate: -1,
+                  clickThroughRate: -1,
                   popularSearches: (pulseData.popular_queries ?? []).map(q => ({
                     query: q.query,
                     count: q.frequency,
@@ -806,7 +843,7 @@ export function SearchHub() {
                   latencyDistribution: [],
                   categoryDistribution: [],
                   aiRetrievalQuality: [],
-                } : null}
+                } as SearchAnalytics : null}
                 onInsightClick={handleInsightClick}
                 onSuggestionClick={handleSuggestionClick}
                 onMinimize={() => setRightPanelMode("minimized")}

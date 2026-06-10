@@ -2,10 +2,13 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, ClipboardCheck, Clock, AlertTriangle, DollarSign, Activity, Shield, FileText, User, Calendar, Brain, Link, ExternalLink } from "lucide-react";
+import { X, ClipboardCheck, Clock, AlertTriangle, DollarSign, Activity, Shield, FileText, User, Calendar, Brain, Link, ExternalLink, Loader2 } from "lucide-react";
 import type { ObligationRecord } from "./types";
+import type { ObligationAuditLogResponse } from "@/services/api/obligations";
 import { RISK_BG, RISK_TEXT, RISK_BG_LIGHT, STATUS_CONFIG, OBLIGATION_TYPES } from "./types";
+import { obligationsService } from "@/services/api/obligations";
 
 type TabId = "overview" | "timeline" | "sla" | "financial" | "compliance" | "ai" | "activity" | "related";
 
@@ -53,12 +56,12 @@ export function ObligationDetailDrawer({ obligation, onClose, onToggleFavorite }
             </div>
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               {tab === "overview" && <OverviewTab o={obligation} />}
-              {tab === "timeline" && <TimelineTab />}
+              {tab === "timeline" && <TimelineTab obligationId={obligation.id} />}
               {tab === "sla" && <SlaTab o={obligation} />}
               {tab === "financial" && <FinancialTab o={obligation} />}
               {tab === "compliance" && <ComplianceTab />}
               {tab === "ai" && <AiTab o={obligation} />}
-              {tab === "activity" && <ActivityTab />}
+              {tab === "activity" && <ActivityTab obligationId={obligation.id} />}
             </div>
           </motion.div>
         </>
@@ -68,12 +71,39 @@ export function ObligationDetailDrawer({ obligation, onClose, onToggleFavorite }
 }
 
 function OverviewTab({ o }: { o: ObligationRecord }) {
+  const router = useRouter();
   const sc = STATUS_CONFIG[o.status];
   const MetaRow = ({ label, value, icon }: { label: string; value: string | React.ReactNode; icon?: React.ReactNode }) => (
     <div className="flex items-center justify-between py-1.5"><span className="text-[11px] text-gray-500 flex items-center gap-1.5">{icon}{label}</span><span className="text-[11px] font-medium text-gray-800">{value}</span></div>
   );
   return (
     <div className="space-y-4">
+      {/* Linked Contract Card */}
+      {o.contractId && (
+        <div className="p-3 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-800">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[9px] font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wider">Linked Contract</span>
+            <button
+              onClick={() => router.push(`/contracts/${o.contractId}`)}
+              className="text-[9px] font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 inline-flex items-center gap-0.5"
+            >
+              View <ExternalLink className="w-2.5 h-2.5" />
+            </button>
+          </div>
+          <p className="text-[11px] font-semibold text-navy-900 dark:text-white truncate">{o.contractName || o.contractId.slice(0, 8)}</p>
+          <div className="flex items-center gap-2 mt-1 text-[9px] text-gray-500">
+            {o.contractNumber && <span className="font-mono">{o.contractNumber}</span>}
+            {o.vendor && <span>Vendor: {o.vendor}</span>}
+            {o.contractOwner && (
+              <>
+                <span className="text-gray-300">·</span>
+                <span>Owner: {o.contractOwner}</span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="p-3 bg-navy-50 rounded-lg border border-navy-100">
         <p className="text-[10px] font-semibold text-navy-700 uppercase mb-1">Description</p>
         <p className="text-[11px] text-gray-700 leading-relaxed">{o.description}</p>
@@ -94,7 +124,7 @@ function OverviewTab({ o }: { o: ObligationRecord }) {
         <MetaRow label="Due Date" value={o.dueDate} icon={<Calendar className="w-3 h-3" />} />
         {o.completedDate && <MetaRow label="Completed" value={o.completedDate} icon={<Calendar className="w-3 h-3" />} />}
         <MetaRow label="Risk Score" value={<RiskBadge score={o.riskScore} />} />
-        <MetaRow label="Financial Impact" value={`$${o.financialImpact}M`} icon={<DollarSign className="w-3 h-3" />} />
+        <MetaRow label="Financial Impact" value={`$${o.financialImpact.toLocaleString()}`} icon={<DollarSign className="w-3 h-3" />} />
         <MetaRow label="Clause Reference" value={
           o.clauseReference ? (
             <button onClick={() => router.push(`/clause-library?search=${encodeURIComponent(o.clauseReference)}`)} className="text-[10px] text-blue-600 hover:text-blue-800 inline-flex items-center gap-0.5">
@@ -112,21 +142,57 @@ function OverviewTab({ o }: { o: ObligationRecord }) {
   );
 }
 
-function TimelineTab() {
-  const events = [
-    { event: "Obligation created", date: "2026-01-15", by: "System" },
-    { event: "Assigned to owner", date: "2026-01-16", by: "Alice Chen" },
-    { event: "Reminder sent", date: "2026-05-01", by: "System" },
-    { event: "Status updated to In Progress", date: "2026-05-10", by: "Bob Martinez" },
-    { event: "Escalated to Level 1", date: "2026-05-14", by: "System" },
-  ];
+function TimelineTab({ obligationId }: { obligationId: string }) {
+  const { data: auditEntries, isLoading } = useQuery({
+    queryKey: ["obligation-timeline", obligationId],
+    queryFn: () => obligationsService.getAuditHistory(obligationId),
+    enabled: !!obligationId,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
+      </div>
+    );
+  }
+
+  const entries = Array.isArray(auditEntries) ? auditEntries : [];
+
+  if (entries.length === 0) {
+    return (
+      <div className="flex flex-col items-center py-8 text-center">
+        <Clock className="w-8 h-8 text-gray-300 mb-2" />
+        <p className="text-xs text-gray-400">No timeline events yet</p>
+        <p className="text-[10px] text-gray-300 mt-1">Events will appear as the obligation progresses through its lifecycle</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-2">
       <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">Obligation Timeline</p>
-      {events.map((e, i) => (
+      {entries.map((a: ObligationAuditLogResponse, i: number) => (
         <div key={i} className="flex items-start gap-2.5">
-          <div className="flex flex-col items-center"><div className="w-2 h-2 rounded-full bg-navy-500" />{i < events.length - 1 && <div className="w-px h-5 bg-gray-200" />}</div>
-          <div className="pb-1"><p className="text-[11px] font-medium text-gray-800">{e.event}</p><p className="text-[9px] text-gray-400">{e.by} • {e.date}</p></div>
+          <div className="flex flex-col items-center">
+            <div className={`w-2 h-2 rounded-full ${
+              a.action.includes("created") ? "bg-green-500" :
+              a.action.includes("completed") ? "bg-blue-500" :
+              a.action.includes("overdue") ? "bg-red-500" :
+              a.action.includes("assigned") || a.action.includes("reassigned") ? "bg-purple-500" :
+              a.action.includes("reminder") ? "bg-amber-500" :
+              a.action.includes("cancelled") || a.action.includes("archived") ? "bg-gray-500" :
+              "bg-navy-500"
+            }`} />
+            {i < entries.length - 1 && <div className="w-px h-5 bg-gray-200" />}
+          </div>
+          <div className="pb-1">
+            <p className="text-[11px] font-medium text-gray-800">
+              {a.action.replace(/^obligation\./, "").replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
+            </p>
+            <p className="text-[9px] text-gray-400">{a.actor || "System"} • {(a.created_at || "").slice(0, 10)}</p>
+            {a.comment && <p className="text-[9px] text-gray-500 mt-0.5 italic">{a.comment}</p>}
+          </div>
         </div>
       ))}
     </div>
@@ -142,15 +208,10 @@ function SlaTab({ o }: { o: ObligationRecord }) {
           <span className="text-lg font-bold">{o.slaStatus === "breached" ? `${-o.slaRemaining}h breached` : `${o.slaRemaining}h remaining`}</span>
         </div>
       </div>
-      <div className="space-y-1.5">
-        {[
-          { label: "SLA Target", value: "99.9% uptime" },
-          { label: "Current Performance", value: "98.5%" },
-          { label: "Breach Count", value: "3" },
-          { label: "Escalation Level", value: `Level ${o.escalationLevel}` },
-        ].map((item) => (
-          <div key={item.label} className="flex justify-between text-xs py-1"><span className="text-gray-500">{item.label}</span><span className="font-medium text-gray-800">{item.value}</span></div>
-        ))}
+      <div className="p-4 bg-gray-50 rounded-lg text-center">
+        <Activity className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+        <p className="text-xs text-gray-500">SLA detail metrics not yet available</p>
+        <p className="text-[10px] text-gray-400 mt-1">Real SLA performance data will appear once the monitoring pipeline is connected</p>
       </div>
     </div>
   );
@@ -161,18 +222,12 @@ function FinancialTab({ o }: { o: ObligationRecord }) {
     <div className="space-y-3">
       <div className="p-4 bg-gray-50 rounded-lg text-center">
         <p className="text-[10px] text-gray-500 uppercase font-semibold">Financial Impact</p>
-        <p className="text-2xl font-bold text-navy-900 mt-1">${o.financialImpact}M</p>
-        <p className="text-[10px] text-gray-400 mt-0.5">{o.currency}</p>
+        <p className="text-2xl font-bold text-navy-900 mt-1">{o.currency} {o.financialImpact.toLocaleString()}</p>
       </div>
-      <div className="space-y-1.5">
-        {[
-          { label: "Overdue Amount", value: `$${(o.financialImpact * 0.4).toFixed(1)}M` },
-          { label: "At Risk Amount", value: `$${(o.financialImpact * 0.3).toFixed(1)}M` },
-          { label: "Recovered Amount", value: `$${(o.financialImpact * 0.2).toFixed(1)}M` },
-          { label: "Penalty Exposure", value: `$${(o.financialImpact * 0.1).toFixed(1)}M` },
-        ].map((item) => (
-          <div key={item.label} className="flex justify-between text-xs py-1"><span className="text-gray-500">{item.label}</span><span className="font-medium text-gray-800">{item.value}</span></div>
-        ))}
+      <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-center">
+        <AlertTriangle className="w-6 h-6 text-amber-400 mx-auto mb-2" />
+        <p className="text-xs text-amber-700 font-medium">Financial breakdown not configured</p>
+        <p className="text-[10px] text-amber-600 mt-1">Overdue, at-risk, and recovered amounts require a financial impact model to be configured for this obligation type.</p>
       </div>
     </div>
   );
@@ -180,20 +235,12 @@ function FinancialTab({ o }: { o: ObligationRecord }) {
 
 function ComplianceTab() {
   return (
-    <div className="space-y-2">
-      <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">Compliance Requirements</p>
-      {[
-        { req: "GDPR Data Processing", status: "Compliant" },
-        { req: "SOC2 Type II", status: "In Progress" },
-        { req: "Insurance Certificate", status: "Overdue" },
-        { req: "Security Assessment", status: "Compliant" },
-      ].map((item) => (
-        <div key={item.req} className="flex items-center gap-2.5 p-2.5 bg-white border border-gray-100 rounded-lg">
-          <Shield className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-          <div className="flex-1"><p className="text-[11px] font-medium text-gray-800">{item.req}</p></div>
-          <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${item.status === "Compliant" ? "bg-green-50 text-green-700" : item.status === "In Progress" ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-700"}`}>{item.status}</span>
-        </div>
-      ))}
+    <div className="flex flex-col items-center py-8 text-center">
+      <Shield className="w-10 h-10 text-gray-300 mb-3" />
+      <p className="text-sm font-medium text-gray-500">Compliance tracking not yet available</p>
+      <p className="text-xs text-gray-400 mt-1 max-w-xs">
+        Compliance requirements and statuses will appear once the compliance monitoring framework is connected to this obligation.
+      </p>
     </div>
   );
 }
@@ -208,7 +255,7 @@ function AiTab({ o }: { o: ObligationRecord }) {
             { title: "Risk Prediction", desc: `AI predicts ${o.aiRiskPrediction}% probability of this obligation becoming overdue or breached.` },
             { title: "Recommended Action", desc: o.status === "overdue" ? "Escalate immediately. Send formal notice to vendor." : "Set reminder 7 days before due date. Monitor progress weekly." },
             { title: "Confidence", desc: `AI confidence: ${o.aiConfidence}%. Based on ${o.riskScore}/10 risk score and historical patterns.` },
-            { title: "Impact Analysis", desc: `Financial impact of non-compliance: $${o.financialImpact}M. ${o.escalationLevel > 0 ? `Currently at escalation level ${o.escalationLevel}.` : "No escalation triggered yet."}` },
+            { title: "Impact Analysis", desc: `Financial impact of non-compliance: $${o.financialImpact.toLocaleString()}. ${o.escalationLevel > 0 ? `Currently at escalation level ${o.escalationLevel}.` : "No escalation triggered yet."}` },
           ].map((item) => (
             <div key={item.title} className="p-2 bg-white rounded border border-purple-100">
               <p className="text-[10px] font-semibold text-navy-700 uppercase mb-0.5">{item.title}</p>
@@ -221,21 +268,44 @@ function AiTab({ o }: { o: ObligationRecord }) {
   );
 }
 
-function ActivityTab() {
-  const activities = [
-    { action: "Obligation created", by: "System", time: "2026-01-15" },
-    { action: "Reminder sent", by: "System", time: "2026-05-01" },
-    { action: "Status updated", by: "Bob Martinez", time: "2026-05-10" },
-    { action: "Comment added", by: "Alice Chen", time: "2026-05-12" },
-    { action: "Escalated to Level 1", by: "System", time: "2026-05-14" },
-  ];
+function ActivityTab({ obligationId }: { obligationId: string }) {
+  const { data: auditEntries, isLoading } = useQuery({
+    queryKey: ["obligation-audit", obligationId],
+    queryFn: () => obligationsService.getAuditHistory(obligationId),
+    enabled: !!obligationId,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
+      </div>
+    );
+  }
+
+  const entries = Array.isArray(auditEntries) ? auditEntries : [];
+
+  if (entries.length === 0) {
+    return (
+      <div className="flex flex-col items-center py-8 text-center">
+        <Activity className="w-8 h-8 text-gray-300 mb-2" />
+        <p className="text-xs text-gray-400">No audit history available</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-1.5">
       <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">Activity History</p>
-      {activities.map((a, i) => (
+      {entries.map((a: ObligationAuditLogResponse, i: number) => (
         <div key={i} className="flex items-start gap-2 p-2 bg-white border border-gray-100 rounded-lg">
           <div className="w-2 h-2 rounded-full bg-navy-400 mt-1.5 flex-shrink-0" />
-          <div><p className="text-[11px] text-gray-800">{a.action}</p><p className="text-[9px] text-gray-400">{a.by} • {a.time}</p></div>
+          <div>
+            <p className="text-[11px] text-gray-800">{a.action}</p>
+            <p className="text-[9px] text-gray-400">
+              {a.actor || "System"} • {(a.created_at || "").slice(0, 10)}
+            </p>
+          </div>
         </div>
       ))}
     </div>

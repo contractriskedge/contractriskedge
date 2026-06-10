@@ -15,6 +15,7 @@ import type {
   ClauseDeviation,
   ComplianceIssue,
   ActivityEvent,
+  ActivityEventType,
   Comment,
   Obligation,
   DocumentVersion,
@@ -82,6 +83,7 @@ function normalizeContractDetail(raw: Record<string, unknown>): ContractDetail {
     vendor: String(raw.vendor ?? raw.counterparty ?? ""),
     counterparty: String(raw.counterparty ?? raw.vendor ?? ""),
     contract_type: String(raw.contract_type ?? raw.contractType ?? ""),
+    contract_number: String(raw.contract_number ?? raw.contractNumber ?? ""),
     business_unit: String(raw.business_unit ?? raw.businessUnit ?? ""),
     geography: String(raw.geography ?? ""),
     description: String(raw.description ?? raw.aiSummary ?? ""),
@@ -126,21 +128,32 @@ export const contractDetailKeys = {
   comments: (id: string) => [...contractDetailKeys.all, "comments", id] as const,
   obligations: (id: string) => [...contractDetailKeys.all, "obligations", id] as const,
   versions: (id: string) => [...contractDetailKeys.all, "versions", id] as const,
+  workflowHistory: (id: string) => [...contractDetailKeys.all, "workflowHistory", id] as const,
 };
 
 // ── Hooks ───────────────────────────────────────────────────────────────────
 
-/** Fetch full contract detail with camelCase→snake_case normalization. */
+/** Fetch full contract detail with camelCase→snake_case normalization.
+
+ * Propagates HTTP errors so the component can distinguish 404 from
+ * other failures and call notFound() instead of hitting the error boundary.
+ */
 export function useContractDetail(contractId: string) {
   return useQuery({
     queryKey: contractDetailKeys.detail(contractId),
     queryFn: async () => {
       const raw = await api.get<Record<string, unknown>>(`/contracts/${contractId}`);
+      if (!raw || (raw as Record<string, unknown>).detail === "Contract not found") {
+        const err = new Error("Contract not found") as Error & { status: number };
+        err.status = 404;
+        throw err;
+      }
       return normalizeContractDetail(raw);
     },
     enabled: !!contractId,
     staleTime: 60_000,
     gcTime: 5 * 60_000,
+    retry: false,
   });
 }
 
@@ -200,8 +213,13 @@ export function useContractClauses(contractId: string) {
 export function useContractCompliance(contractId: string) {
   return useQuery({
     queryKey: contractDetailKeys.compliance(contractId),
-    queryFn: () =>
-      api.get<{ issues: ComplianceIssue[] }>(`/contracts/${contractId}/compliance`),
+    queryFn: async () => {
+      try {
+        return await api.get<{ issues: ComplianceIssue[] }>(`/contracts/${contractId}/compliance`);
+      } catch {
+        return { issues: [] };
+      }
+    },
     enabled: !!contractId,
     staleTime: 60_000,
   });
@@ -360,32 +378,50 @@ function normalizeVersionRow(v: Record<string, unknown>): ActivityEvent {
 export function useContractComments(contractId: string) {
   return useQuery({
     queryKey: contractDetailKeys.comments(contractId),
-    queryFn: () =>
-      api.get<{ comments: Comment[] }>(`/contracts/${contractId}/comments`),
+    queryFn: async () => {
+      try {
+        return await api.get<{ comments: Comment[] }>(`/contracts/${contractId}/comments`);
+      } catch {
+        return { comments: [] };
+      }
+    },
     enabled: !!contractId,
     staleTime: 15_000,
   });
 }
 
-/** Fetch obligations.
- *  Backend: obligations live under /obligations/ domain (not under contracts).
- *  We query with contract_id filter if supported, otherwise return empty.
+/** Fetch obligations for a contract.
+ *  Uses the dedicated by-contract endpoint which returns counts + list.
  */
 export function useContractObligations(contractId: string) {
   return useQuery({
     queryKey: contractDetailKeys.obligations(contractId),
     queryFn: async () => {
       try {
-        const res = await api.get<{ obligations: Obligation[] }>(`/obligations/?contract_id=${contractId}`);
-        return res;
+        const res = await api.get<{
+          total: number;
+          open: number;
+          completed: number;
+          overdue: number;
+          obligations: Obligation[];
+        }>(`/obligations/by-contract/${contractId}`);
+        return {
+          total: res.total ?? 0,
+          open: res.open ?? 0,
+          completed: res.completed ?? 0,
+          overdue: res.overdue ?? 0,
+          obligations: (res.obligations ?? []).map((o: Record<string, unknown>) => ({
+            id: String(o.id ?? ""),
+            description: String(o.description ?? ""),
+            category: String(o.obligation_type ?? ""),
+            owner: String(o.owner ?? ""),
+            due_date: String(o.due_date ?? ""),
+            status: (o.status as Obligation["status"]) ?? "pending",
+            priority: (o.risk_level === "critical" || o.risk_level === "high" ? "high" : o.risk_level === "medium" ? "medium" : "low") as Obligation["priority"],
+          })),
+        };
       } catch {
-        try {
-          const res = await api.get<Obligation[]>(`/obligations/`);
-          const all = Array.isArray(res) ? res : [];
-          return { obligations: all };
-        } catch {
-          return { obligations: [] };
-        }
+        return { total: 0, open: 0, completed: 0, overdue: 0, obligations: [] };
       }
     },
     enabled: !!contractId,
@@ -411,6 +447,70 @@ export function useContractVersions(contractId: string) {
     enabled: !!contractId,
     staleTime: 60_000,
   });
+}
+
+
+/** Fetch obligation audit events for a contract and convert them to ActivityEvents.
+ *  Iterates over all obligations for the contract and collects their audit trails.
+ */
+export function useContractObligationActivity(contractId: string) {
+  return useQuery({
+    queryKey: [...contractDetailKeys.obligations(contractId), "audit"],
+    queryFn: async () => {
+      try {
+        // First get all obligations for this contract
+        const obRes = await api.get<{
+          total: number; open: number; completed: number; overdue: number;
+          obligations: Array<{ id: string; name?: string }>;
+        }>(`/obligations/by-contract/${contractId}`);
+        const obligations = obRes.obligations ?? [];
+
+        // Fetch audit history for each obligation
+        const events: ActivityEvent[] = [];
+        for (const ob of obligations) {
+          try {
+            const audit = await api.get<Array<{
+              action: string; actor: string | null; created_at: string;
+              comment: string | null;
+            }>>(`/obligations/${ob.id}/audit`);
+            if (Array.isArray(audit)) {
+              for (const entry of audit) {
+                const type = mapObligationActionToEventType(entry.action);
+                if (type) {
+                  events.push({
+                    id: `obl-${ob.id}-${entry.created_at ?? entry.action}`,
+                    type,
+                    actor: entry.actor || "System",
+                    action: entry.comment || entry.action,
+                    timestamp: entry.created_at || new Date().toISOString(),
+                    details: ob.name ? `Obligation: ${ob.name}` : undefined,
+                  });
+                }
+              }
+            }
+          } catch {
+            // Skip if audit endpoint fails for this obligation
+          }
+        }
+        // Sort newest first
+        events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        return { obligationEvents: events };
+      } catch {
+        return { obligationEvents: [] };
+      }
+    },
+    enabled: !!contractId,
+    staleTime: 60_000,
+  });
+}
+
+function mapObligationActionToEventType(action: string): ActivityEventType | null {
+  if (action.includes("created")) return "obligation_created";
+  if (action.includes("completed")) return "obligation_completed";
+  if (action.includes("assigned") || action.includes("reassigned")) return "obligation_assigned";
+  if (action.includes("overdue")) return "obligation_overdue";
+  if (action.includes("updated") || action.includes("status_changed")) return "obligation_updated";
+  return null;
 }
 
 // ── Mutations ───────────────────────────────────────────────────────────────
@@ -468,5 +568,25 @@ export function useResolveComment(contractId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: contractDetailKeys.comments(contractId) });
     },
+  });
+}
+
+/** Fetch the unified audit-grade workflow timeline for the contract. */
+export function useContractWorkflowHistory(contractId: string) {
+  return useQuery({
+    queryKey: contractDetailKeys.workflowHistory(contractId),
+    queryFn: async () => {
+      try {
+        const res = await api.get<{
+          events?: Array<Record<string, unknown>>;
+          total?: number;
+        }>(`/reviews/${contractId}/workflow-timeline`);
+        return { events: res.events ?? [], total: res.total ?? 0 };
+      } catch {
+        return { events: [], total: 0 };
+      }
+    },
+    enabled: !!contractId,
+    staleTime: 30_000,
   });
 }

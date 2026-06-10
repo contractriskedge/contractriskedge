@@ -10,7 +10,7 @@
 import React, { useState, useMemo } from "react";
 import {
   ChevronDown, ChevronRight, Shield, AlertTriangle, TrendingDown,
-  CheckCircle2, XCircle, Edit3, Lock, FileText, Info, Check, X,
+  CheckCircle2, XCircle, Edit3, Lock, FileText, Info, Check, X, RefreshCw,
 } from "lucide-react";
 import type { RedlineItem } from "@/services/api/client";
 import { InlineDiffViewer, CompactSummary } from "./InlineDiffViewer";
@@ -34,11 +34,12 @@ interface RedlineCardProps {
   onAccept?: (id: string) => void;
   onReject?: (id: string) => void;
   onEdit?: (redline: RedlineItem) => void;
+  onRegenerate?: (redline: RedlineItem) => void;
   immutable?: boolean;
   defaultExpanded?: boolean;
 }
 
-export function RedlineCard({ redline, onLocate, onAccept, onReject, onEdit, immutable = false, defaultExpanded = false }: RedlineCardProps) {
+export function RedlineCard({ redline, onLocate, onAccept, onReject, onEdit, onRegenerate, immutable = false, defaultExpanded = false }: RedlineCardProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const loc = redline.locator;
   const actionLabel = loc?.action_label || (redline.operation === "insert" ? "INSERT" : "MODIFY");
@@ -46,16 +47,42 @@ export function RedlineCard({ redline, onLocate, onAccept, onReject, onEdit, imm
   const bullets: string[] = loc?.rationale_bullets || [];
   const impactAccepted = loc?.impact_accepted;
   const impactRejected = loc?.impact_rejected;
+  const source = redline.source_location;
 
-  // ── Category mismatch detection ────────────────────────────────
-  // When the clause_type (from the redline DB record) doesn't align
-  // with the section_title (from the document locator), there may be
-  // a clause-to-redline mapping defect. Flag it for the reviewer.
+  // ── Finding-to-Redline category validation ────────────────────
+  // Compares the linked finding's clause_type (finding_category) against
+  // the redline's own clause_type. If they differ, the mapping is invalid.
+  // This prevents e.g. a "Data Privacy" finding from being paired with a
+  // "Liability Cap" redline.
+  // Handles combined categories (e.g. liability_indemnity matches either).
+  const findingCategoryMismatch = useMemo(() => {
+    if (!redline.finding_id) return false;
+    if (!redline.finding_category && !redline.clause_type) return false;
+    // Normalize both categories for comparison
+    const fc = (redline.finding_category || "").toLowerCase().replace(/[_-]/g, " ").trim();
+    const rc = (redline.clause_type || "").toLowerCase().replace(/[_-]/g, " ").trim();
+    if (!fc || !rc) return false;
+    // Check for exact match first
+    if (fc === rc) return false;
+    // Check if one contains the other
+    if (fc.includes(rc) || rc.includes(fc)) return false;
+    // Check word-level overlap (handles combined categories like liability_indemnity)
+    const fcWords = new Set(fc.split(/\s+/).filter(w => w.length > 2));
+    const rcWords = new Set(rc.split(/\s+/).filter(w => w.length > 2));
+    // If any word overlaps, categories are compatible
+    for (const fw of fcWords) {
+      for (const rw of rcWords) {
+        if (rw.includes(fw) || fw.includes(rw)) return false;
+      }
+    }
+    return true;
+  }, [redline.finding_id, redline.finding_category, redline.clause_type]);
+
+  // ── Legacy section-title mismatch detection ────────────────────
   const categoryMismatch = useMemo(() => {
     if (!redline.clause_type || !loc?.section_title) return false;
     const ct = redline.clause_type.toLowerCase().replace(/_/g, " ");
     const st = loc.section_title.toLowerCase();
-    // Check if the section title contains a keyword related to the clause type
     const clauseKeywords = ct.split(/[\s_]+/);
     const sectionWords = st.split(/[\s_]+/);
     const hasMatch = clauseKeywords.some(kw =>
@@ -63,6 +90,9 @@ export function RedlineCard({ redline, onLocate, onAccept, onReject, onEdit, imm
     );
     return !hasMatch;
   }, [redline.clause_type, loc?.section_title]);
+
+  // Combined: this redline has a mapping integrity issue
+  const hasMappingIssue = findingCategoryMismatch || categoryMismatch;
 
   const originalTextMissing = useMemo(() => {
     const orig = (redline.original_text || "").trim();
@@ -120,7 +150,44 @@ export function RedlineCard({ redline, onLocate, onAccept, onReject, onEdit, imm
       {expanded && (
         <div className="border-t border-gray-100 px-4 py-3 dark:border-gray-700">
           {/* ── Validation Warnings ──────────────────────────────── */}
-          {categoryMismatch && (
+          {/* Finding-to-Redline category mismatch — CRITICAL: redline doesn't match linked finding */}
+          {findingCategoryMismatch && (
+            <div className="mb-3 rounded-lg border-2 border-red-400 bg-red-50 px-4 py-4 text-xs text-red-800 dark:border-red-600 dark:bg-red-900/20 dark:text-red-200">
+              <div className="flex items-start gap-3">
+                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-800">
+                  <AlertTriangle className="h-5 w-5 text-red-500" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-bold text-red-700 dark:text-red-300">INVALID REDLINE MAPPING</p>
+                  <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">
+                    This redline does not correspond to its linked finding. The remediation category does not match the finding category.
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-4 rounded-lg border border-red-300 bg-red-50/80 p-3 dark:border-red-700 dark:bg-red-950/30">
+                    <div className="rounded-md border border-red-200 bg-white p-2 dark:border-red-700 dark:bg-red-900/20">
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400">Finding Category</p>
+                      <p className="mt-1 text-sm font-bold text-red-800 dark:text-red-200">{redline.finding_category?.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) || "Unknown"}</p>
+                      {redline.finding_title && (
+                        <p className="mt-0.5 text-[10px] text-red-600 dark:text-red-400">{redline.finding_title}</p>
+                      )}
+                    </div>
+                    <div className="rounded-md border border-red-200 bg-white p-2 dark:border-red-700 dark:bg-red-900/20">
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400">Redline Category</p>
+                      <p className="mt-1 text-sm font-bold text-red-800 dark:text-red-200">{redline.clause_type?.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) || "Unknown"}</p>
+                      <p className="mt-0.5 text-[10px] font-semibold text-red-500 dark:text-red-400">✗ Does not match finding</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-2 dark:border-amber-700 dark:bg-amber-900/20">
+                    <p className="text-[10px] font-semibold text-amber-700 dark:text-amber-300">Reason: Category mismatch</p>
+                    <p className="mt-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+                      Accept and Reject are disabled. Use <strong>Regenerate Redline</strong> below to create a correctly-categorized redline using the finding category as a mandatory filter.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Section-title mismatch — less severe, but still flagged */}
+          {!findingCategoryMismatch && categoryMismatch && (
             <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
               <p className="font-semibold">⚠ Possible mapping error detected</p>
               <p className="mt-0.5">
@@ -136,13 +203,62 @@ export function RedlineCard({ redline, onLocate, onAccept, onReject, onEdit, imm
             <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
               <p className="font-semibold">⚠ Original clause text is missing or only shows a section heading</p>
               <p className="mt-0.5">
-                Use <span className="font-medium">Locate Source Clause</span> to verify the baseline in the document viewer.
+                Use <span className="font-medium">View Source Location</span> to verify the baseline in the document viewer.
               </p>
               <p className="mt-0.5 text-amber-600 dark:text-amber-400">
                 Possible mapping error — verify before accepting.
               </p>
             </div>
           )}
+
+          <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50/40 p-3 dark:border-blue-800 dark:bg-blue-900/10">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-blue-700 dark:text-blue-300">
+              Source Location
+            </p>
+            {source ? (
+              <>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-600 dark:text-gray-300 sm:grid-cols-4">
+                  <span>Page: <span className="font-semibold">{source.page_number ?? "—"}</span></span>
+                  <span>Section: <span className="font-semibold">{source.section_heading || loc?.section_title || "—"}</span></span>
+                  <span>Paragraph: <span className="font-semibold">{source.paragraph_index ?? "—"}</span></span>
+                  <span>Confidence: <span className="font-semibold">{source.confidence_score == null ? "—" : `${Math.round(source.confidence_score * 100)}%`}</span></span>
+                </div>
+                {source.source_text && (
+                  <p className="mt-2 text-xs leading-relaxed text-gray-700 dark:text-gray-300">
+                    {source.source_text.slice(0, 240)}{source.source_text.length > 240 ? "..." : ""}
+                  </p>
+                )}
+                {onLocate && (
+                  <button
+                    title="Navigate to the contract text that generated this finding."
+                    onClick={() => onLocate(redline)}
+                    className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-800"
+                  >
+                    <FileText className="h-3.5 w-3.5" /> View Source Location
+                  </button>
+                )}
+              </>
+            ) : (
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Source location unavailable. Finding generated from document-level analysis.
+              </p>
+            )}
+          </div>
+
+          <div className="mb-3 rounded-lg border border-gray-200 bg-gray-50/50 p-3 dark:border-gray-700 dark:bg-gray-800/40">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+              Traceability Chain
+            </p>
+            <div className="mt-2 space-y-1.5 text-xs text-gray-700 dark:text-gray-300">
+              <p><span className="font-semibold">Source Clause:</span> {source?.source_text ? `${source.source_text.slice(0, 180)}${source.source_text.length > 180 ? "..." : ""}` : "Document-level analysis"}</p>
+              <p className="text-gray-400">↓</p>
+              <p><span className="font-semibold">AI Finding:</span> {redline.traceability?.detected_risk || redline.rationale || redline.clause_type?.replace(/_/g, " ") || "Linked finding"}</p>
+              <p className="text-gray-400">↓</p>
+              <p><span className="font-semibold">Policy Match:</span> {loc?.risk_type || loc?.legal_domain || redline.clause_type?.replace(/_/g, " ") || "Review policy"}</p>
+              <p className="text-gray-400">↓</p>
+              <p><span className="font-semibold">Generated Redline:</span> {extractChangeSummary(redline.original_text, redline.reviewer_modified_text || redline.proposed_text, redline.operation || undefined)}</p>
+            </div>
+          </div>
 
           {(redline.original_text || redline.proposed_text) && (
             <div className="mb-3">
@@ -221,24 +337,27 @@ export function RedlineCard({ redline, onLocate, onAccept, onReject, onEdit, imm
           )}
           {redline.status === "proposed" && !immutable && (
             <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3 dark:border-gray-700">
-              {onAccept && (
+              {/* Accept is hidden when finding-to-redline mapping is invalid */}
+              {!findingCategoryMismatch && onAccept && (
                 <button onClick={() => onAccept(redline.redline_id)} className="inline-flex items-center gap-1.5 rounded-md bg-green-100 px-3 py-1.5 text-xs font-medium text-green-700 transition-colors hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-800">
                   <CheckCircle2 className="h-3.5 w-3.5" /> Accept
                 </button>
               )}
-              {onReject && (
+              {/* Reject is hidden when mapping is invalid — use Regenerate instead */}
+              {!findingCategoryMismatch && onReject && (
                 <button onClick={() => onReject(redline.redline_id)} className="inline-flex items-center gap-1.5 rounded-md bg-red-100 px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-800">
                   <XCircle className="h-3.5 w-3.5" /> Reject
                 </button>
               )}
-              {onEdit && (
+              {!findingCategoryMismatch && onEdit && (
                 <button onClick={() => onEdit(redline)} className="inline-flex items-center gap-1.5 rounded-md bg-purple-100 px-3 py-1.5 text-xs font-medium text-purple-700 transition-colors hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:hover:bg-purple-800">
                   <Edit3 className="h-3.5 w-3.5" /> Edit
                 </button>
               )}
-              {onLocate && (
-                <button onClick={() => onLocate(redline)} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-700">
-                  <FileText className="h-3.5 w-3.5" /> Locate Original Clause
+              {/* Regenerate button for invalid mappings — uses finding.category as mandatory filter */}
+              {findingCategoryMismatch && onRegenerate && (
+                <button onClick={() => onRegenerate(redline)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-100 px-3 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:hover:bg-amber-800">
+                  <RefreshCw className="h-3.5 w-3.5" /> Regenerate Redline
                 </button>
               )}
             </div>
@@ -287,10 +406,39 @@ export function RedlineCard({ redline, onLocate, onAccept, onReject, onEdit, imm
             </div>
           )}
 
-          {redline.reviewed_by && (
-            <p className="mt-2 text-[11px] text-gray-400 dark:text-gray-500">
-              Reviewed by {redline.reviewed_by}{redline.reviewed_at && <> on {new Date(redline.reviewed_at).toLocaleDateString()}</>}
-            </p>
+          {/* ── Reviewer Metadata ──────────────────────────────── */}
+          {(redline.created_at || redline.reviewed_at || redline.reviewed_by) && (
+            <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50/50 p-3 dark:border-gray-700 dark:bg-gray-800/30">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
+                Review Metadata
+              </p>
+              <div className="grid grid-cols-2 gap-2 text-[11px] text-gray-600 dark:text-gray-300">
+                {redline.created_at && (
+                  <div>
+                    <span className="text-gray-400">Generated:</span>{' '}
+                    <span className="font-medium">{new Date(redline.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                )}
+                {redline.reviewed_at && (
+                  <div>
+                    <span className="text-gray-400">Last Updated:</span>{' '}
+                    <span className="font-medium">{new Date(redline.reviewed_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                )}
+                {redline.reviewed_by && (
+                  <div>
+                    <span className="text-gray-400">Reviewed By:</span>{' '}
+                    <span className="font-medium">{redline.reviewed_by}</span>
+                  </div>
+                )}
+                {redline.status === "proposed" && (
+                  <div>
+                    <span className="text-gray-400">Generated By:</span>{' '}
+                    <span className="font-medium">AI System</span>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
       )}

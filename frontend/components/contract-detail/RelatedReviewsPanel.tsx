@@ -13,7 +13,7 @@ import React from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { reviewService } from "@/services/api/reviews";
-import { FileText, ArrowRight, Loader2, History } from "lucide-react";
+import { FileText, ArrowRight, Loader2, History, AlertTriangle } from "lucide-react";
 import { formatDate } from "@/lib/date-utils";
 
 interface RelatedReviewsPanelProps {
@@ -22,7 +22,7 @@ interface RelatedReviewsPanelProps {
 
 export function RelatedReviewsPanel({ contractId }: RelatedReviewsPanelProps) {
   const router = useRouter();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["contract-related-reviews", contractId],
     queryFn: () => reviewService.list({ page_size: 50 }),
     enabled: !!contractId,
@@ -38,6 +38,15 @@ export function RelatedReviewsPanel({ contractId }: RelatedReviewsPanelProps) {
     return (
       <div className="flex items-center justify-center py-6 text-gray-400 text-xs gap-2">
         <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading related reviews…
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="text-center py-6 text-gray-400 text-xs">
+        <AlertTriangle className="w-5 h-5 mx-auto mb-2 text-amber-400" />
+        Unable to load related reviews.
       </div>
     );
   }

@@ -62,7 +62,11 @@ export type ActivityEventType =
   | "review_approved"
   | "review_rejected"
   | "status_changed"
+  | "obligation_created"
   | "obligation_updated"
+  | "obligation_completed"
+  | "obligation_assigned"
+  | "obligation_overdue"
   | "renewal_approaching"
   | "version_created"
   | "metadata_updated";
@@ -118,6 +122,7 @@ export interface ContractDetail {
   vendor: string;
   counterparty: string;
   contract_type: string;
+  contract_number: string;
   business_unit: string;
   geography: string;
   description: string;

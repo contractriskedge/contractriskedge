@@ -27,7 +27,11 @@ from app.domains.review.models import (
 class ReviewRepository(BaseRepository):
 
     async def _paginate_with_join(self, query, page: int = 1, page_size: int = 20):
-        """Paginate a joined query that returns (model, filename, content_type) tuples.
+        """Paginate a joined query that returns (model, filename, content_type, assignee_name) tuples.
+
+        The fourth tuple element is the resolved assignee display name from
+        ``admin_users`` (NULL if no user match). When the caller did not
+        request the assignee name, ``assignee_name`` will be ``None``.
 
         Returns (list[model_with_attrs], total_count).
         """
@@ -44,20 +48,46 @@ class ReviewRepository(BaseRepository):
         rows = result.all()
         items = []
         for row in rows:
-            review, filename, content_type = row
+            # Support both (review, filename, content_type) and the
+            # extended (review, filename, content_type, assignee_name) tuple.
+            if len(row) == 4:
+                review, filename, content_type, assignee_name = row
+            else:
+                review, filename, content_type = row
+                assignee_name = None
             review._document_filename = filename
             review._document_content_type = content_type
+            review._assignee_name = assignee_name
             items.append(review)
         return items, total or 0
 
     async def create_review(self, upload_id: str, tenant_id: str, created_by: str) -> ContractReview:
-        review = ContractReview(upload_id=upload_id, tenant_id=tenant_id, created_by=created_by)
+        # Generate a human-readable contract number: C{month}{year}{running}
+        # e.g., C06202601 for June 2026, first contract
+        now = datetime.utcnow()
+        month_year = now.strftime("%m%Y")
+        # Count existing contracts this month to derive running number
+        count_stmt = select(func.count()).select_from(ContractReview).where(
+            ContractReview.tenant_id == tenant_id,
+            ContractReview.created_at >= now.replace(day=1, hour=0, minute=0, second=0, microsecond=0),
+        )
+        running = (await self.session.scalar(count_stmt)) + 1
+        contract_number = f"C{month_year}{running:02d}"
+
+        metadata = {"contract_number": contract_number}
+        review = ContractReview(
+            upload_id=upload_id,
+            tenant_id=tenant_id,
+            created_by=created_by,
+            document_metadata=metadata,
+        )
         self.session.add(review)
         await self.session.flush()
         return review
 
     async def get_review(self, review_id: str, tenant_id: str) -> Optional[ContractReview]:
         from app.domains.ingestion.models import UploadSession
+        from app.domains.admin.models import AdminUser
 
         try:
             review_uuid = uuid_mod.UUID(str(review_id))
@@ -65,8 +95,18 @@ class ReviewRepository(BaseRepository):
             return None
 
         stmt = (
-            select(ContractReview, UploadSession.filename, UploadSession.content_type)
+            select(
+                ContractReview,
+                UploadSession.filename,
+                UploadSession.content_type,
+                AdminUser.name.label("assignee_name"),
+            )
             .outerjoin(UploadSession, ContractReview.upload_id == UploadSession.upload_id)
+            .outerjoin(
+                AdminUser,
+                (AdminUser.user_id == ContractReview.assigned_to)
+                & (AdminUser.tenant_id == ContractReview.tenant_id),
+            )
             .where(
                 ContractReview.review_id == review_uuid,
                 ContractReview.tenant_id == tenant_id,
@@ -75,18 +115,30 @@ class ReviewRepository(BaseRepository):
         row = (await self.session.execute(stmt)).one_or_none()
         if row is None:
             return None
-        review, filename, content_type = row
+        review, filename, content_type, assignee_name = row
         # Attach transient attributes for the service layer
         review._document_filename = filename
         review._document_content_type = content_type
+        review._assignee_name = assignee_name
         return review
 
     async def get_review_by_upload(self, upload_id: str, tenant_id: str) -> Optional[ContractReview]:
         from app.domains.ingestion.models import UploadSession
+        from app.domains.admin.models import AdminUser
 
         stmt = (
-            select(ContractReview, UploadSession.filename, UploadSession.content_type)
+            select(
+                ContractReview,
+                UploadSession.filename,
+                UploadSession.content_type,
+                AdminUser.name.label("assignee_name"),
+            )
             .outerjoin(UploadSession, ContractReview.upload_id == UploadSession.upload_id)
+            .outerjoin(
+                AdminUser,
+                (AdminUser.user_id == ContractReview.assigned_to)
+                & (AdminUser.tenant_id == ContractReview.tenant_id),
+            )
             .where(
                 ContractReview.upload_id == upload_id,
                 ContractReview.tenant_id == tenant_id,
@@ -95,17 +147,29 @@ class ReviewRepository(BaseRepository):
         row = (await self.session.execute(stmt)).one_or_none()
         if row is None:
             return None
-        review, filename, content_type = row
+        review, filename, content_type, assignee_name = row
         review._document_filename = filename
         review._document_content_type = content_type
+        review._assignee_name = assignee_name
         return review
 
     async def list_reviews(self, tenant_id: str, filters, pagination):
         from app.domains.ingestion.models import UploadSession
+        from app.domains.admin.models import AdminUser
 
         query = (
-            select(ContractReview, UploadSession.filename, UploadSession.content_type)
+            select(
+                ContractReview,
+                UploadSession.filename,
+                UploadSession.content_type,
+                AdminUser.name.label("assignee_name"),
+            )
             .outerjoin(UploadSession, ContractReview.upload_id == UploadSession.upload_id)
+            .outerjoin(
+                AdminUser,
+                (AdminUser.user_id == ContractReview.assigned_to)
+                & (AdminUser.tenant_id == ContractReview.tenant_id),
+            )
             .where(ContractReview.tenant_id == tenant_id)
             .where(ContractReview.is_deleted == False)
         )
@@ -123,10 +187,21 @@ class ReviewRepository(BaseRepository):
     async def get_my_work(self, tenant_id: str, user_id: str) -> list[ContractReview]:
         """Get reviews assigned to the current user that are not deleted."""
         from app.domains.ingestion.models import UploadSession
+        from app.domains.admin.models import AdminUser
 
         query = (
-            select(ContractReview, UploadSession.filename, UploadSession.content_type)
+            select(
+                ContractReview,
+                UploadSession.filename,
+                UploadSession.content_type,
+                AdminUser.name.label("assignee_name"),
+            )
             .outerjoin(UploadSession, ContractReview.upload_id == UploadSession.upload_id)
+            .outerjoin(
+                AdminUser,
+                (AdminUser.user_id == ContractReview.assigned_to)
+                & (AdminUser.tenant_id == ContractReview.tenant_id),
+            )
             .where(ContractReview.tenant_id == tenant_id)
             .where(ContractReview.is_deleted == False)
             .where(ContractReview.assigned_to == user_id)
@@ -136,9 +211,10 @@ class ReviewRepository(BaseRepository):
         rows = result.all()
         items = []
         for row in rows:
-            review, filename, content_type = row
+            review, filename, content_type, assignee_name = row
             review._document_filename = filename
             review._document_content_type = content_type
+            review._assignee_name = assignee_name
             items.append(review)
         return items
 
@@ -159,10 +235,21 @@ class ReviewRepository(BaseRepository):
     ) -> tuple[list[ContractReview], int]:
         """Get the operational review queue with filters. Excludes deleted reviews."""
         from app.domains.ingestion.models import UploadSession
+        from app.domains.admin.models import AdminUser
 
         query = (
-            select(ContractReview, UploadSession.filename, UploadSession.content_type)
+            select(
+                ContractReview,
+                UploadSession.filename,
+                UploadSession.content_type,
+                AdminUser.name.label("assignee_name"),
+            )
             .outerjoin(UploadSession, ContractReview.upload_id == UploadSession.upload_id)
+            .outerjoin(
+                AdminUser,
+                (AdminUser.user_id == ContractReview.assigned_to)
+                & (AdminUser.tenant_id == ContractReview.tenant_id),
+            )
             .where(ContractReview.tenant_id == tenant_id)
             .where(ContractReview.is_deleted == False)
         )
@@ -205,6 +292,11 @@ class ReviewRepository(BaseRepository):
         current_status = review.status
         if isinstance(current_status, str):
             current_status = ReviewStatus(current_status)
+
+        # No-op: skip transition if already in the target status
+        if current_status == new_status:
+            return review
+
         if not current_status.can_transition_to(new_status):
             raise ValueError(f"Cannot transition from {current_status} to {new_status}")
 
@@ -550,6 +642,13 @@ class ReviewRepository(BaseRepository):
         stmt = select(ReviewApproval).where(
             ReviewApproval.review_id == review_id, ReviewApproval.tenant_id == tenant_id,
         ).order_by(ReviewApproval.created_at)
+        result = await self.session.execute(stmt)
+        return result.scalars().all()
+
+    async def get_escalations(self, review_id: str, tenant_id: str):
+        stmt = select(ReviewEscalation).where(
+            ReviewEscalation.review_id == review_id, ReviewEscalation.tenant_id == tenant_id,
+        ).order_by(ReviewEscalation.created_at)
         result = await self.session.execute(stmt)
         return result.scalars().all()
 

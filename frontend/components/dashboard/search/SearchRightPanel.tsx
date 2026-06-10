@@ -10,10 +10,6 @@ import {
 } from "lucide-react";
 import type { AiDiscoveryInsight, AiSearchSuggestion, SearchAnalytics } from "./types";
 
-const mockDiscoveryInsights: AiDiscoveryInsight[] = [];
-const mockAiSuggestions: AiSearchSuggestion[] = [];
-const mockSearchAnalytics: SearchAnalytics = { totalSearches: 0, avgResponseTime: 0, topQueries: [], zeroResultRate: 0 };
-
 // ── Discovery Insight Card ───────────────────────────────────────────────
 
 function DiscoveryInsightCard({ insight, onApply }: { insight: AiDiscoveryInsight; onApply?: (insight: AiDiscoveryInsight) => void }) {
@@ -301,9 +297,9 @@ export function SearchRightPanel({
             <div className="grid grid-cols-2 gap-1.5">
               {[
                 { label: "Total Searches", value: analytics.totalSearches.toLocaleString(), color: "text-blue-600" },
-                { label: "Avg Latency", value: `${analytics.avgLatency}ms`, color: "text-green-600" },
-                { label: "Semantic Accuracy", value: `${analytics.semanticAccuracy}%`, color: "text-purple-600" },
-                { label: "Click-Through Rate", value: `${analytics.clickThroughRate}%`, color: "text-gold-600" },
+                { label: "Avg Latency", value: analytics.avgLatency < 0 ? "N/A" : `${analytics.avgLatency}ms`, color: "text-green-600" },
+                { label: "Semantic Accuracy", value: analytics.semanticAccuracy < 0 ? "N/A" : `${analytics.semanticAccuracy}%`, color: "text-purple-600" },
+                { label: "Click-Through Rate", value: analytics.clickThroughRate < 0 ? "N/A" : `${analytics.clickThroughRate}%`, color: "text-gold-600" },
               ].map(stat => (
                 <div key={stat.label} className="bg-gray-50 dark:bg-navy-900 rounded-lg p-2 text-center">
                   <p className={`text-sm font-bold ${stat.color} tabular-nums`}>{stat.value}</p>

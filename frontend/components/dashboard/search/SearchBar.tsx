@@ -7,16 +7,13 @@ import {
   Filter, SlidersHorizontal, ArrowRight, History, Bookmark,
   Brain, Layers, GitMerge, Loader2, Bell,
 } from "lucide-react";
-import type { SearchMode, AiSearchSuggestion, RecentSearch, SavedSearch } from "./types";
+import type { SearchMode } from "./types";
 
-const mockAiSuggestions: AiSearchSuggestion[] = [];
-const mockRecentSearches: RecentSearch[] = [];
-const mockSavedSearches: SavedSearch[] = [];
-const searchModeLabels: Record<string, string> = {
-  semantic: "AI Semantic",
-  keyword: "Keyword",
-  hybrid: "Hybrid",
-  clause: "Clause Match",
+const searchModeLabels: Record<string, { label: string; description: string }> = {
+  semantic: { label: "AI Semantic", description: "AI-powered semantic search across all content" },
+  keyword: { label: "Keyword", description: "Exact keyword and phrase matching" },
+  hybrid: { label: "Hybrid", description: "Combined semantic + keyword search" },
+  clause: { label: "Clause Match", description: "Search within clause text only" },
 };
 
 interface SearchBarProps {
@@ -99,21 +96,24 @@ export function SearchBar({ onSearch, onFilterToggle }: SearchBarProps) {
                 exit={{ opacity: 0, y: -4 }}
                 className="absolute top-full left-0 mt-1 bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-600 rounded-lg shadow-xl z-20 py-1 w-48"
               >
-                {(Object.entries(searchModeLabels) as [SearchMode, typeof searchModeLabels.semantic][]).map(([key, val]) => (
-                  <button
-                    key={key}
-                    onClick={() => { setSearchMode(key); setShowModePicker(false); }}
-                    className={`w-full text-left px-3 py-2 flex items-center gap-2 text-[11px] hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors ${
-                      searchMode === key ? "text-gold-600 bg-gold-50/50 dark:bg-gold-900/10" : "text-gray-600 dark:text-gray-300"
-                    }`}
-                  >
-                    {modeIcon[key]}
-                    <div>
-                      <span className="font-medium">{val.label}</span>
-                      <p className="text-[9px] text-gray-400">{val.description}</p>
-                    </div>
-                  </button>
-                ))}
+                {(Object.keys(searchModeLabels) as SearchMode[]).map((key) => {
+                  const val = searchModeLabels[key];
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => { setSearchMode(key); setShowModePicker(false); }}
+                      className={`w-full text-left px-3 py-2 flex items-center gap-2 text-[11px] hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors ${
+                        searchMode === key ? "text-gold-600 bg-gold-50/50 dark:bg-gold-900/10" : "text-gray-600 dark:text-gray-300"
+                      }`}
+                    >
+                      {modeIcon[key]}
+                      <div>
+                        <span className="font-medium">{val.label}</span>
+                        <p className="text-[9px] text-gray-400">{val.description}</p>
+                      </div>
+                    </button>
+                  );
+                })}
               </motion.div>
             )}
           </AnimatePresence>
@@ -174,74 +174,14 @@ export function SearchBar({ onSearch, onFilterToggle }: SearchBarProps) {
             exit={{ opacity: 0, y: -4 }}
             className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-600 rounded-xl shadow-2xl z-30 overflow-hidden"
           >
-            {/* AI Suggestions */}
-            {query.length > 0 && (
-              <div className="p-2">
-                <div className="flex items-center gap-1.5 px-2 py-1">
-                  <Sparkles className="w-3 h-3 text-purple-500" />
-                  <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">AI Suggestions</span>
-                </div>
-                <div className="space-y-0.5">
-                  {mockAiSuggestions.filter(s => s.query.toLowerCase().includes(query.toLowerCase()) || query.length === 0).slice(0, 3).map(s => (
-                    <button
-                      key={s.id}
-                      onClick={() => { setQuery(s.query); handleSearch(s.query); }}
-                      className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-purple-50 dark:hover:bg-purple-900/10 rounded-lg transition-colors group"
-                    >
-                      <Sparkles className="w-3 h-3 text-purple-400 flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <span className="text-xs text-navy-900 dark:text-white truncate block">{s.query}</span>
-                        <span className="text-[9px] text-gray-400">{s.description}</span>
-                      </div>
-                      <span className="text-[9px] text-purple-500 font-medium opacity-0 group-hover:opacity-100 transition-opacity">{s.confidence}%</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Recent Searches */}
+            {/* Recent Searches — sourced from localStorage in SearchHub */}
             <div className="p-2 border-t border-gray-100 dark:border-navy-700">
               <div className="flex items-center gap-1.5 px-2 py-1">
                 <History className="w-3 h-3 text-gray-400" />
                 <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Recent Searches</span>
               </div>
-              <div className="space-y-0.5">
-                {mockRecentSearches.slice(0, 4).map(rs => (
-                  <button
-                    key={rs.id}
-                    onClick={() => { setQuery(rs.query); handleSearch(rs.query); }}
-                    className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-navy-700 rounded-lg transition-colors"
-                  >
-                    <Clock className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                    <span className="text-xs text-gray-600 dark:text-gray-300 flex-1 truncate">{rs.query}</span>
-                    <span className="text-[9px] text-gray-400">{rs.resultCount} results</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Saved Searches */}
-            <div className="p-2 border-t border-gray-100 dark:border-navy-700">
-              <div className="flex items-center gap-1.5 px-2 py-1">
-                <Bookmark className="w-3 h-3 text-gold-500" />
-                <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Saved Searches</span>
-              </div>
-              <div className="space-y-0.5">
-                {mockSavedSearches.slice(0, 3).map(ss => (
-                  <button
-                    key={ss.id}
-                    onClick={() => { setQuery(ss.query); handleSearch(ss.query); }}
-                    className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-navy-700 rounded-lg transition-colors"
-                  >
-                    <Bookmark className="w-3 h-3 text-gold-400 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <span className="text-xs text-navy-900 dark:text-white truncate block">{ss.name}</span>
-                      <span className="text-[9px] text-gray-400">{ss.query}</span>
-                    </div>
-                    {ss.alertEnabled && <Bell className="w-3 h-3 text-rose-400 flex-shrink-0" />}
-                  </button>
-                ))}
+              <div className="px-2 py-3 text-center">
+                <p className="text-[10px] text-gray-400">Type a search to begin</p>
               </div>
             </div>
 

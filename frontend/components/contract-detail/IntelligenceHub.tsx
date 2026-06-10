@@ -33,7 +33,10 @@ interface IntelligenceHubProps {
 
 interface PolicyViolation {
   id: string;
-  rule: string;
+  rule?: string;
+  policy_rule_name?: string;
+  policy_name?: string;
+  finding_title?: string;
   severity: string;
   status: string;
 }
@@ -220,7 +223,11 @@ export function IntelligenceHub({
               {policyViolations.slice(0, 4).map((v) => (
                 <li key={v.id} className="flex items-center gap-1.5 text-[10px]">
                   <XCircle className="w-3 h-3 text-red-500 flex-shrink-0" />
-                  <span className="text-gray-700 dark:text-gray-200 truncate">{v.rule}</span>
+                  <span className="text-gray-700 dark:text-gray-200 truncate">{v.policy_rule_name || v.finding_title || v.policy_name}</span>
+                  <span className={`ml-auto text-[8px] font-medium px-1 py-0.5 rounded-full ${
+                    v.severity === "critical" ? "bg-red-100 text-red-700" :
+                    v.severity === "high" ? "bg-orange-100 text-orange-700" : "bg-amber-100 text-amber-700"
+                  }`}>{v.severity}</span>
                 </li>
               ))}
             </ul>
@@ -237,13 +244,13 @@ export function IntelligenceHub({
             <p className="text-[10px] text-gray-400 italic">No related reviews</p>
           ) : (
             <ul className="space-y-1">
-              {relatedReviews.map((r) => (
-                <li key={r.id} className="flex items-center gap-1.5 text-[10px]">
+              {relatedReviews.map((r, idx) => (
+                <li key={r?.id || `related-${idx}`} className="flex items-center gap-1.5 text-[10px]">
                   <FileText className="w-3 h-3 text-gray-400 flex-shrink-0" />
                   <span className="text-gray-700 dark:text-gray-200 truncate flex-1">
-                    {r.document_name || r.id.slice(0, 8) + "…"}
+                    {r?.document_name || (r?.id ? r.id.slice(0, 8) + "…" : "Unknown")}
                   </span>
-                  {r.finding_count !== undefined && (
+                  {r?.finding_count !== undefined && (
                     <span className="text-[8px] text-gray-400">{r.finding_count}f</span>
                   )}
                 </li>

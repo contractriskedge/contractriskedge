@@ -13,6 +13,11 @@ class ReviewSummary(BaseModel):
     upload_id: str
     status: str
     assigned_to: Optional[str] = None
+    # Friendly display name of the assignee, resolved server-side from
+    # admin_users via the repository's LEFT JOIN. FastAPI would otherwise
+    # strip this field from the JSON response because it is not declared
+    # on the response_model.
+    assigned_to_name: Optional[str] = None
     priority: str = "normal"
     finding_count: int = 0
     redline_count: int = 0
@@ -62,6 +67,17 @@ class ReviewFilterParams(BaseModel):
     sort_order: str = Field(default="desc", pattern="^(asc|desc)$")
 
 
+class SourceLocation(BaseModel):
+    page_number: Optional[int] = None
+    section_heading: Optional[str] = None
+    paragraph_index: Optional[int] = None
+    source_text: Optional[str] = None
+    source_start_offset: Optional[int] = None
+    source_end_offset: Optional[int] = None
+    confidence_score: Optional[float] = None
+    chunk_id: Optional[str] = None
+
+
 class FindingItem(BaseModel):
     finding_id: str
     clause_type: Optional[str] = None
@@ -72,6 +88,14 @@ class FindingItem(BaseModel):
     confidence: Optional[float] = None
     risk_score: Optional[float] = None
     page_numbers: list[int] = Field(default_factory=list)
+    page_number: Optional[int] = None
+    section_heading: Optional[str] = None
+    paragraph_index: Optional[int] = None
+    source_text: Optional[str] = None
+    source_start_offset: Optional[int] = None
+    source_end_offset: Optional[int] = None
+    confidence_score: Optional[float] = None
+    source_location: Optional[SourceLocation] = None
     resolution: Optional[str] = None
     resolution_note: Optional[str] = None
     resolved_by: Optional[str] = None
@@ -80,6 +104,14 @@ class FindingItem(BaseModel):
     feedback_type: Optional[str] = None
     feedback_note: Optional[str] = None
     feedback_at: Optional[datetime] = None
+    playbook_id: Optional[str] = None
+    rule_id: Optional[str] = None
+    evaluation_id: Optional[str] = None
+    clause_standard_id: Optional[str] = None
+    policy_owner: Optional[str] = None
+    policy_name: Optional[str] = None
+    policy_rule_name: Optional[str] = None
+    policy_version: Optional[str] = None
 
 
 class FindingResolveRequest(BaseModel):
@@ -144,6 +176,15 @@ class ConfidenceLabel(BaseModel):
     numeric: float      # underlying float, 0.0–1.0 (for sorting / filtering)
 
 
+class RedlineMappingDetails(BaseModel):
+    """Redline ↔ finding mapping integrity for reviewer validation."""
+    finding_title: Optional[str] = None
+    redline_title: Optional[str] = None
+    category: Optional[str] = None
+    finding_category: Optional[str] = None
+    redline_category: Optional[str] = None
+
+
 class RedlineItem(BaseModel):
     redline_id: str
     clause_type: Optional[str] = None
@@ -151,6 +192,15 @@ class RedlineItem(BaseModel):
     proposed_text: str
     ai_proposed_text: Optional[str] = None
     finding_id: Optional[str] = None
+    finding_category: Optional[str] = None
+    finding_title: Optional[str] = None
+    finding_recommendation: Optional[str] = None
+    redline_title: Optional[str] = None
+    redline_category: Optional[str] = None
+    mapping_valid: bool = True
+    mapping_status: str = "valid"
+    mapping_warning: Optional[str] = None
+    mapping_details: Optional[RedlineMappingDetails] = None
     operation: Optional[str] = None
     anchor_text: Optional[str] = None
     context_excerpt: Optional[str] = None
@@ -167,6 +217,7 @@ class RedlineItem(BaseModel):
     created_at: datetime
     # New structured locator — replaces old chunk-based locate
     locator: Optional[LocatorResponse] = None
+    source_location: Optional[SourceLocation] = None
     # Risk traceability chain (from v3 prompt)
     traceability: Optional[RiskTraceabilityItem] = None
 
@@ -198,6 +249,13 @@ class GenerateMitigationRedlineResponse(BaseModel):
     mitigation_label: str
     estimated_reduction_pct: float = 0.0
     confidence: float = 0.0
+
+
+class RegenerateRedlineRequest(BaseModel):
+    """Request to regenerate a redline using the finding's category as mandatory filter."""
+    finding_id: str = Field(..., description="The finding ID to regenerate the redline for")
+    finding_category: str = Field(..., description="The finding's clause_type — used as mandatory category filter")
+    redline_id: str = Field(..., description="The existing invalid redline ID to replace")
 
 
 class CommentCreate(BaseModel):

@@ -15,6 +15,7 @@ class SearchRequest(BaseModel):
     filters: Optional[dict] = Field(default=None, description="Metadata filters")
     clause_type: Optional[str] = Field(default=None, description="Filter by clause type")
     contract_id: Optional[str] = Field(default=None, description="Scope search to a contract")
+    entity_types: Optional[list[str]] = Field(default=None, description="Filter by entity type: chunk, finding, obligation, redline")
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
 
@@ -22,16 +23,22 @@ class SearchRequest(BaseModel):
 class SearchResultItem(BaseModel):
     """A single search result item with citation metadata."""
     chunk_id: str
+    entity_type: str = Field(default="chunk", description="Entity type: chunk, finding, obligation, redline")
     contract_id: Optional[str] = None
     contract_name: Optional[str] = None
+    contract_number: Optional[str] = None
     upload_id: Optional[str] = None
     page_numbers: list[int] = Field(default_factory=list)
     section_heading: Optional[str] = None
     clause_type: Optional[str] = None
     snippet: str
     score: float
-    strategy: str  # 'vector', 'bm25', 'hybrid'
+    strategy: str = Field(default="hybrid")  # 'vector', 'bm25', 'hybrid', 'keyword'
     token_count: int = 0
+    entity_id: Optional[str] = None  # For non-chunk entities (finding_id, obligation_id, etc.)
+    status: Optional[str] = None
+    owner: Optional[str] = None
+    due_date: Optional[str] = None
 
 
 class SearchResponse(BaseModel):

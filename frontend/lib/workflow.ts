@@ -27,6 +27,7 @@ export const WORKFLOW_STATES = {
   ESCALATED: "escalated",
   APPROVED: "approved",
   REJECTED: "rejected",
+  COMPLETED: "completed",
   CLOSED: "closed",
   FINALIZED: "finalized",
   EXECUTED: "executed",
@@ -36,8 +37,28 @@ export const WORKFLOW_STATES = {
 export type WorkflowState = (typeof WORKFLOW_STATES)[keyof typeof WORKFLOW_STATES];
 
 // ── Immutable States (read-only) ─────────────────────────────────
-
+// Enterprise contract review policy: once a review has reached a terminal
+// or locked stage, its content and workflow must not be modified.
+//
+// States that block ALL mutations (edits, assignments, escalations,
+// approvals, etc.):
+//   • completed  — review has finished its lifecycle
+//   • closed     — closed by reviewer/admin, fully read-only
+//   • approved   — approved and committed
+//   • rejected   — rejected and locked
+//   • finalized  — finalized after approval
+//   • executed   — contract executed, immutable for audit
+//   • archived   — preserved for audit, no edits
+//
+// `escalated` is intentionally NOT immutable — it can still be approved or
+// routed to another stage — but it cannot be re-escalated (handled in
+// getAllowedActions below).
 const IMMUTABLE_STATES: Set<string> = new Set([
+  WORKFLOW_STATES.COMPLETED,
+  WORKFLOW_STATES.CLOSED,
+  WORKFLOW_STATES.APPROVED,
+  WORKFLOW_STATES.REJECTED,
+  WORKFLOW_STATES.FINALIZED,
   WORKFLOW_STATES.EXECUTED,
   WORKFLOW_STATES.ARCHIVED,
 ]);
@@ -70,13 +91,18 @@ interface AllowedActions {
 export function getAllowedActions(status: string): AllowedActions {
   const immutable = isImmutable(status);
   const s = status;
+  // Escalation is blocked both for terminal/locked states (immutable) and
+  // for the ESCALATED state itself — a review that is already escalated
+  // must be approved, rejected, or routed to another stage rather than
+  // re-escalated.
+  const canEscalate = !immutable && s !== WORKFLOW_STATES.ESCALATED;
 
   return {
     canEditRedlines: !immutable,
     canResolveFindings: !immutable,
     canApprove: s === WORKFLOW_STATES.LEGAL_APPROVAL || s === WORKFLOW_STATES.EXEC_APPROVAL || s === WORKFLOW_STATES.LEGAL_REVIEW || s === WORKFLOW_STATES.ESCALATED || s === WORKFLOW_STATES.SECURITY_REVIEW,
     canReject: s === WORKFLOW_STATES.LEGAL_APPROVAL || s === WORKFLOW_STATES.EXEC_APPROVAL || s === WORKFLOW_STATES.LEGAL_REVIEW || s === WORKFLOW_STATES.ESCALATED || s === WORKFLOW_STATES.SECURITY_REVIEW,
-    canEscalate: !immutable && s !== WORKFLOW_STATES.ARCHIVED,
+    canEscalate,
     canAssign: !immutable,
     canReAnalyze: !immutable,
     canFinalize: s === WORKFLOW_STATES.APPROVED,
@@ -85,6 +111,34 @@ export function getAllowedActions(status: string): AllowedActions {
     canComment: true,
     canBulkAction: !immutable,
   };
+}
+
+/**
+ * Returns a human-readable reason why a review cannot be escalated in its
+ * current state. Returns `null` when escalation is allowed.
+ *
+ * Used for tooltips and toast errors so the user knows what to do next
+ * (e.g. "Completed reviews must be reopened before escalation.").
+ */
+export function getEscalationBlockReason(status: string): string | null {
+  switch (status) {
+    case WORKFLOW_STATES.COMPLETED:
+      return "Completed reviews must be reopened before escalation.";
+    case WORKFLOW_STATES.CLOSED:
+      return "Closed reviews are read-only and cannot be escalated.";
+    case WORKFLOW_STATES.APPROVED:
+    case WORKFLOW_STATES.FINALIZED:
+    case WORKFLOW_STATES.EXECUTED:
+      return `Reviews in '${status}' state are locked.`;
+    case WORKFLOW_STATES.REJECTED:
+      return "Rejected reviews are read-only and cannot be escalated.";
+    case WORKFLOW_STATES.ARCHIVED:
+      return "Archived reviews cannot be escalated.";
+    case WORKFLOW_STATES.ESCALATED:
+      return "Review is already escalated. Approve, reject, or route to a different stage instead.";
+    default:
+      return null;
+  }
 }
 
 // ── Status Display ───────────────────────────────────────────────
@@ -103,6 +157,7 @@ export function getStatusLabel(status: string): string {
     escalated: "Escalated",
     approved: "Approved",
     rejected: "Rejected",
+    completed: "Completed",
     closed: "Closed",
     finalized: "Finalized",
     executed: "Executed",
@@ -129,6 +184,7 @@ export function getStatusColor(status: string): string {
     finalized: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
     executed: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
     archived: "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400",
+    completed: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
   };
   return colors[status] || "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300";
 }
@@ -139,6 +195,11 @@ export function getImmutableBannerInfo(status: string): { title: string; descrip
   if (!isImmutable(status)) return null;
 
   const banners: Record<string, { title: string; description: string; color: string }> = {
+    completed: {
+      title: "Review Completed — Read Only",
+      description: "This review has completed its lifecycle. Content is locked and cannot be escalated.",
+      color: "border-slate-400 bg-slate-50 text-slate-800 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-600",
+    },
     executed: {
       title: "Contract Executed — Immutable",
       description: "This contract has been executed. All content is locked permanently for audit purposes.",

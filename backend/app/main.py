@@ -402,6 +402,9 @@ def create_app() -> FastAPI:
     # ── Obligation Management router ──
     from app.domains.obligations.router import router as obligation_router
     app.include_router(obligation_router, prefix="/api/v1")
+    # ── Obligation Helpers router (search endpoints for modal dropdowns) ──
+    from app.domains.obligations.helpers import router as obligation_helpers_router
+    app.include_router(obligation_helpers_router, prefix="/api/v1")
     # ── Contracts router (wraps review service) ──
     from app.domains.contracts.router import router as contracts_router
     app.include_router(contracts_router, prefix="/api/v1")

@@ -24,7 +24,7 @@ import React, { useState, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  FileText, AlertTriangle, Clock, User, ArrowUpDown, Lock,
+  FileText, AlertTriangle, Clock, ArrowUpDown, Lock,
   Search, Check, X, Loader2, UserPlus, ArrowUpRight,
   CheckSquare, Square, ChevronDown, Eye, ThumbsUp, ThumbsDown, Download,
   ListChecks, Brain, Filter, Star,
@@ -36,8 +36,10 @@ import { ApprovalModal } from "./ApprovalModal";
 import { EscalationModal } from "./EscalationModal";
 import { getAllowedActions, isImmutable, getStatusLabel } from "@/lib/workflow";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { UserPicker } from "@/components/shared/UserPicker";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useFavorites } from "@/hooks/useFavorites";
+import { useReviewerWorkloads } from "@/components/ai-review/hooks";
 
 // ── Hooks ───────────────────────────────────────────────────────
 
@@ -106,6 +108,7 @@ const slaColor = (status: string): string => {
     overdue: "bg-red-100 text-red-700",
     warning: "bg-amber-100 text-amber-700",
     on_track: "bg-green-100 text-green-700",
+    done: "bg-gray-100 text-gray-500",
   };
   return colors[status] || "bg-gray-100 text-gray-500";
 };
@@ -249,22 +252,7 @@ interface ReviewerOption {
   name: string;
 }
 
-function useReviewers() {
-  return useQuery({
-    queryKey: ["admin", "users", "reviewers"],
-    queryFn: async () => {
-      const users = await api.get<Array<{ user_id: string; name: string | null; role: string; is_active: boolean }>>(
-        "/admin/users",
-      );
-      return users
-        .filter((u) => u.is_active && (u.role === "reviewer" || u.role === "legal_ops"))
-        .map((u) => ({ user_id: u.user_id, name: u.name || u.user_id }));
-    },
-    staleTime: 60_000,
-  });
-}
-
-// ── Assign Modal ────────────────────────────────────────────────
+// ── Assign Modal (DB-backed via UserPicker) ─────────────────────
 
 function AssignModal({
   reviewId,
@@ -275,15 +263,13 @@ function AssignModal({
   onClose: () => void;
   onAssign: (assigneeId: string, assigneeName: string) => void;
 }) {
-  const { data: reviewers = [], isLoading } = useReviewers();
-  const [selected, setSelected] = useState("");
-  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<{ id: string; name: string } | null>(null);
 
-  const filtered = reviewers.filter((r) =>
-    r.name.toLowerCase().includes(search.toLowerCase()),
-  );
-
-  const selectedReviewer = reviewers.find((r) => r.user_id === selected);
+  // Pull per-reviewer workload from the shared hook so the picker can
+  // surface each user's active-review count + workload %.
+  // The hook hits the real /reviews/reviewers/workload endpoint and falls
+  // back to a cached query for any other consumers.
+  const { data: reviewerWorkloads = [] } = useReviewerWorkloads();
 
   return (
     <motion.div
@@ -297,7 +283,7 @@ function AssignModal({
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
-        className="bg-white rounded-xl shadow-xl border border-gray-200 w-80 overflow-hidden"
+        className="bg-white rounded-xl shadow-xl border border-gray-200 w-96 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
@@ -306,43 +292,40 @@ function AssignModal({
             <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="p-3">
-          <div className="relative mb-2">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search reviewers..."
-              className="w-full pl-7 pr-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
-              autoFocus
-            />
-          </div>
-          <div className="max-h-48 overflow-y-auto space-y-0.5">
-            {isLoading && (
-              <p className="text-xs text-gray-400 text-center py-4">Loading reviewers...</p>
-            )}
-            {!isLoading && filtered.map((reviewer) => (
-              <button
-                key={reviewer.user_id}
-                onClick={() => setSelected(reviewer.user_id)}
-                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-colors ${
-                  selected === reviewer.user_id
-                    ? "bg-blue-50 text-blue-700"
-                    : "hover:bg-gray-50 text-gray-700"
-                }`}
-              >
-                <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center">
-                  <User className="w-3 h-3 text-gray-500" />
-                </div>
-                <span>{reviewer.name}</span>
-                {selected === reviewer.user_id && <Check className="w-3 h-3 ml-auto text-blue-600" />}
-              </button>
-            ))}
-            {!isLoading && filtered.length === 0 && (
-              <p className="text-xs text-gray-400 text-center py-4">No reviewers found</p>
-            )}
-          </div>
+        <div className="p-3 space-y-2">
+          <label className="block text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+            Reviewer
+          </label>
+          <UserPicker
+            value={selected?.id || ""}
+            onChange={(id) => {
+              // Synchronised with onSelectUser below — keep id-only state
+              // in sync here so the picker stays controlled even when
+              // onSelectUser has not fired yet.
+              if (!id) {
+                setSelected(null);
+                return;
+              }
+              setSelected({ id, name: "" });
+            }}
+            onSelectUser={(user) => {
+              if (!user) {
+                setSelected(null);
+              } else {
+                setSelected({ id: user.user_id, name: user.name });
+              }
+            }}
+            allowedRoles={["tenant_admin", "reviewer", "legal_ops", "compliance", "executive", "admin"]}
+            placeholder="Search by name, email, or role…"
+            reviewerWorkloads={reviewerWorkloads}
+            allowNone
+            noneLabel="— Unassigned —"
+            size="sm"
+          />
+          <p className="text-[10px] text-gray-500 leading-relaxed pt-1">
+            Pick a user from your tenant directory. The list shows each user's
+            active-review workload to help balance assignments.
+          </p>
         </div>
         <div className="px-3 py-2 border-t border-gray-100 flex justify-end gap-2">
           <button
@@ -352,8 +335,8 @@ function AssignModal({
             Cancel
           </button>
           <button
-            onClick={() => selectedReviewer && onAssign(selectedReviewer.user_id, selectedReviewer.name)}
-            disabled={!selectedReviewer}
+            onClick={() => selected && onAssign(selected.id, selected.name)}
+            disabled={!selected}
             className="px-3 py-1.5 text-[10px] font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Assign
@@ -385,10 +368,20 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [stageFilter, setStageFilter] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortField, setSortField] = useState<"risk_score" | "created_at" | "updated_at" | "status" | "priority">("created_at");
+  const [sortField, setSortField] = useState<
+    | "risk_score"
+    | "created_at"
+    | "updated_at"
+    | "status"
+    | "priority"
+    | "assigned_to"
+    | "sla"
+  >("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [assignTarget, setAssignTarget] = useState<string | null>(null);
+  const [assigningRowId, setAssigningRowId] = useState<string | null>(null);
+  const [assigningRowIds, setAssigningRowIds] = useState<Set<string>>(new Set());
   const [approvalTarget, setApprovalTarget] = useState<ReviewDetail | null>(null);
   const [escalationTarget, setEscalationTarget] = useState<ReviewDetail | null>(null);
   const [bulkAction, setBulkAction] = useState<string>("");
@@ -401,38 +394,79 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
     mutationFn: ({ reviewId, assigneeId }: { reviewId: string; assigneeId: string; assigneeName: string }) =>
       reviewService.assign(reviewId, { assignee_id: assigneeId }),
     onMutate: async ({ reviewId, assigneeId, assigneeName }) => {
+      setAssigningRowId(reviewId);
       await queryClient.cancelQueries({ queryKey: ["reviews", "queue"] });
-      const previous = queryClient.getQueryData<{ data: ReviewDetail[] }>(["reviews", "queue"]);
-      if (previous) {
-        queryClient.setQueryData(["reviews", "queue"], {
-          ...previous,
-          data: previous.data.map((review) => {
-            if (review.review_id !== reviewId) return review;
-            // Only optimistically transition if currently ai_analyzed/draft —
-            // otherwise the server may reject the auto-transition.
-            const optimisticallyAssigned =
-              review.status === "ai_analyzed" || review.status === "draft";
-            return {
-              ...review,
-              assigned_to: assigneeName,
-              ...(optimisticallyAssigned
-                ? { status: "in_review", workflow_stage: "reviewer" }
-                : {}),
-            };
-          }),
-        });
+      // Get all matching queue queries (e.g. ["reviews", "queue", "all"], ["reviews", "queue", "user@x"])
+      const queueQueries = queryClient.getQueriesData<{ data: ReviewDetail[] }>({
+        queryKey: ["reviews", "queue"],
+        exact: false,
+      });
+      for (const [queryKey, previous] of queueQueries) {
+        if (previous) {
+          queryClient.setQueryData(queryKey, {
+            ...previous,
+            data: previous.data.map((review) => {
+              if (review.review_id !== reviewId) return review;
+              const optimisticallyAssigned =
+                review.status === "ai_analyzed" || review.status === "draft";
+              return {
+                ...review,
+                assigned_to: assigneeId,
+                assigned_to_name: assigneeName || review.assigned_to_name,
+                ...(optimisticallyAssigned
+                  ? { status: "in_review", workflow_stage: "reviewer" }
+                  : {}),
+              };
+            }),
+          });
+        }
       }
-      return { previous };
+      return { previous: queueQueries };
+    },
+    onSuccess: (response, { reviewId }) => {
+      // The server response includes the canonical review object with
+      // assigned_to_name resolved from admin_users. Replace the cached row
+      // so the optimistic guess is overwritten with the authoritative data.
+      const updatedReview = (response as { review?: ReviewDetail } | undefined)?.review;
+      if (updatedReview) {
+        const queueQueries = queryClient.getQueriesData<{ data: ReviewDetail[] }>({
+          queryKey: ["reviews", "queue"],
+          exact: false,
+        });
+        for (const [queryKey] of queueQueries) {
+          queryClient.setQueryData<{ data: ReviewDetail[] }>(
+            queryKey,
+            (prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                data: prev.data.map((r) =>
+                  r.review_id === reviewId ? { ...r, ...updatedReview } : r
+                ),
+              };
+            }
+          );
+        }
+      }
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) {
-        queryClient.setQueryData(["reviews", "queue"], context.previous);
+        for (const [queryKey, previous] of context.previous) {
+          if (previous) {
+            queryClient.setQueryData(queryKey, previous);
+          }
+        }
       }
     },
     onSettled: () => {
+      // Invalidate all queue queries so any filtered views also refresh
       queryClient.invalidateQueries({ queryKey: ["reviews", "queue"] });
       queryClient.invalidateQueries({ queryKey: ["reviews", "workload"] });
+      queryClient.invalidateQueries({ queryKey: ["reviews", "metrics"] });
+      queryClient.invalidateQueries({ queryKey: ["reviews", "my-work"] });
+      queryClient.invalidateQueries({ queryKey: ["reviews", "detail"] });
       setAssignTarget(null);
+      setAssigningRowId(null);
     },
   });
 
@@ -472,7 +506,7 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
     }) =>
       reviewService.escalate(reviewId, { reason, escalated_to: escalatedTo, raise_priority: raisePriority, target_workflow_stage: targetStage }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["reviews", "queue"] });
       queryClient.invalidateQueries({ queryKey: ["reviews", "workload"] });
       setEscalationTarget(null);
     },
@@ -481,11 +515,53 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
   const bulkAssignMut = useMutation({
     mutationFn: ({ ids, assigneeId }: { ids: string[]; assigneeId: string; assigneeName: string }) =>
       reviewService.bulkAssign({ review_ids: ids, assignee_id: assigneeId }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+    onMutate: async ({ ids, assigneeId, assigneeName }) => {
+      // Track the in-flight rows so the Assigned cells show a spinner
+      // and the row dims, giving the user immediate feedback that the
+      // assignment is being persisted.
+      setAssigningRowIds(new Set(ids));
+      await queryClient.cancelQueries({ queryKey: ["reviews", "queue"] });
+      const queueQueries = queryClient.getQueriesData<{ data: ReviewDetail[] }>({
+        queryKey: ["reviews", "queue"],
+        exact: false,
+      });
+      const idSet = new Set(ids);
+      for (const [queryKey, previous] of queueQueries) {
+        if (previous) {
+          queryClient.setQueryData(queryKey, {
+            ...previous,
+            data: previous.data.map((review) =>
+              idSet.has(review.review_id)
+                ? {
+                    ...review,
+                    assigned_to: assigneeId,
+                    assigned_to_name: assigneeName || review.assigned_to_name,
+                  }
+                : review
+            ),
+          });
+        }
+      }
+      return { previous: queueQueries };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        for (const [queryKey, previous] of context.previous) {
+          if (previous) {
+            queryClient.setQueryData(queryKey, previous);
+          }
+        }
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["reviews", "queue"] });
       queryClient.invalidateQueries({ queryKey: ["reviews", "workload"] });
+      queryClient.invalidateQueries({ queryKey: ["reviews", "metrics"] });
+      queryClient.invalidateQueries({ queryKey: ["reviews", "my-work"] });
+      queryClient.invalidateQueries({ queryKey: ["reviews", "detail"] });
       setSelectedIds(new Set());
       setBulkAction("");
+      setAssigningRowIds(new Set());
     },
   });
 
@@ -509,32 +585,73 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
     },
   });
 
+  const [exportError, setExportError] = useState<string | null>(null);
+  const exportMut = useMutation({
+    mutationFn: (ids: string[]) => reviewService.bulkExport(ids),
+    onMutate: () => setExportError(null),
+    onError: (err) => {
+      setExportError(err instanceof Error ? err.message : "Export failed");
+    },
+    onSettled: () => {
+      // Auto-clear the error after a few seconds so it doesn't linger.
+      setTimeout(() => setExportError(null), 4000);
+    },
+  });
+
+  const handleExport = () => {
+    // Export either the selected rows or, if nothing is selected, every
+    // currently visible (filtered) row. This matches the "Export all
+    // visible" pattern of ServiceNow / Salesforce list views.
+    const ids =
+      selectedIds.size > 0
+        ? Array.from(selectedIds)
+        : filtered.map((r) => r.review_id);
+    if (ids.length === 0) {
+      setExportError("No reviews to export");
+      setTimeout(() => setExportError(null), 4000);
+      return;
+    }
+    exportMut.mutate(ids);
+  };
+
   // ── Filtering & Sorting ──
 
   const filtered = useMemo(() => {
     let list = [...reviews];
 
     // Queue filter (role-based)
-    if (queueFilter === "my") {
+    // Terminal states excluded from default views
+    const TERMINAL = ["approved", "closed", "finalized", "archived", "rejected"];
+
+    if (queueFilter === "all") {
+      // All active reviews — exclude terminal states
+      list = list.filter((r) => !TERMINAL.includes(r.status));
+    } else if (queueFilter === "my") {
       // Match by user identifier (sub / email) — the backend stores the
       // assignee as a user id (e.g. "dev-user"), not an email address, so we
       // also compare against the user.sub to support dev mode where the JWT
-      // sub is the same string used by the seeder.
+      // sub is the same string used by the seeder. Additionally match against
+      // assigned_to_name so users assigned by display name ("Dev Admin") appear.
       const identifiers = [
         user?.sub,
         user?.email,
+        user?.name,
       ]
         .filter(Boolean)
         .map((s) => (s as string).toLowerCase());
       if (identifiers.length > 0) {
         list = list.filter((r) => {
+          if (TERMINAL.includes(r.status)) return false;
           const a = (r.assigned_to || "").toLowerCase();
-          if (!a || a === "unassigned") return false;
-          return identifiers.some((id) => a === id || a.includes(id));
+          const an = (r.assigned_to_name || "").toLowerCase();
+          if ((!a || a === "unassigned") && !an) return false;
+          return identifiers.some((id) => a === id || a.includes(id) || an === id || an.includes(id));
         });
       } else {
-        list = list.filter((r) => r.assigned_to && r.assigned_to !== "Unassigned");
+        list = list.filter((r) => r.assigned_to && r.assigned_to !== "Unassigned" && !TERMINAL.includes(r.status));
       }
+    } else if (queueFilter === "completed") {
+      list = list.filter((r) => TERMINAL.includes(r.status));
     } else if (queueFilter === "legal") {
       // Match by workflow_stage "legal_ops" (set by both LEGAL_REVIEW and
       // LEGAL_APPROVAL statuses per derive_workflow_stage) OR by any
@@ -599,10 +716,32 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
     list.sort((a, b) => {
       let cmp = 0;
       if (sortField === "risk_score") cmp = (a.risk_score ?? 0) - (b.risk_score ?? 0);
-      else if (sortField === "priority") cmp = (a.priority || "normal").localeCompare(b.priority || "normal");
+      else if (sortField === "priority") {
+        // Priority order: critical > high > medium > low
+        const order: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+        cmp = (order[a.priority] ?? 9) - (order[b.priority] ?? 9);
+      }
       else if (sortField === "created_at") cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
       else if (sortField === "updated_at") cmp = new Date(a.updated_at || a.created_at).getTime() - new Date(b.updated_at || b.created_at).getTime();
       else if (sortField === "status") cmp = a.status.localeCompare(b.status);
+      else if (sortField === "assigned_to") {
+        // Sort by display name, with unassigned always at the bottom
+        const aName = (a.assigned_to_name || a.assigned_to || "").toLowerCase();
+        const bName = (b.assigned_to_name || b.assigned_to || "").toLowerCase();
+        if (!aName && bName) return sortDir === "asc" ? 1 : -1;
+        if (aName && !bName) return sortDir === "asc" ? -1 : 1;
+        cmp = aName.localeCompare(bName);
+      }
+      else if (sortField === "sla") {
+        // Sort by SLA deadline; unassigned-deadline (null) at the bottom
+        const aTs = a.sla_due_at || a.sla_deadline
+          ? new Date(a.sla_due_at || a.sla_deadline!).getTime()
+          : Number.POSITIVE_INFINITY;
+        const bTs = b.sla_due_at || b.sla_deadline
+          ? new Date(b.sla_due_at || b.sla_deadline!).getTime()
+          : Number.POSITIVE_INFINITY;
+        cmp = aTs - bTs;
+      }
       return sortDir === "desc" ? -cmp : cmp;
     });
     if (maxItems) list = list.slice(0, maxItems);
@@ -682,26 +821,44 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
               Bulk
             </button>
             <button
-              onClick={() => {}}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+              onClick={handleExport}
+              disabled={exportMut.isPending}
+              title={
+                selectedIds.size > 0
+                  ? `Export ${selectedIds.size} selected review${selectedIds.size === 1 ? "" : "s"}`
+                  : `Export ${filtered.length} visible review${filtered.length === 1 ? "" : "s"}`
+              }
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Download className="w-3 h-3" />
+              {exportMut.isPending ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Download className="w-3 h-3" />
+              )}
               Export
             </button>
           </div>
         </div>
+        {/* Export error toast — appears below the toolbar for 4s after failure */}
+        {exportError && (
+          <div className="px-4 py-1.5 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 text-[11px] text-red-700 dark:text-red-300 flex items-center gap-2">
+            <AlertTriangle className="w-3 h-3" />
+            <span>{exportError}</span>
+          </div>
+        )}
         {metrics && (
           <>
             {/* Stage Breakdown */}
-            <div className="grid grid-cols-7 border-t border-gray-100 dark:border-navy-700">
+            <div className="grid grid-cols-8 border-t border-gray-100 dark:border-navy-700">
               {[
                 { label: "Total", value: metrics.total, color: "text-gray-900 dark:text-white" },
                 { label: "AI Analyzed", value: metrics.ai_analyzed, color: "text-blue-600" },
-                { label: "Ready For Review", value: metrics.ready_for_review, color: "text-amber-600" },
+                { label: "Ready", value: metrics.ready_for_review, color: "text-amber-600" },
                 { label: "Assigned", value: metrics.assigned, color: "text-purple-600" },
                 { label: "In Review", value: metrics.in_review, color: "text-indigo-600" },
-                { label: "Overdue", value: metrics.overdue, color: "text-red-600" },
-                { label: "Closed", value: metrics.closed, color: "text-green-600" },
+                { label: "Legal", value: metrics.legal_review, color: "text-sky-600" },
+                { label: "Approved", value: metrics.approved, color: "text-green-600" },
+                { label: "Closed", value: metrics.closed, color: "text-gray-600" },
               ].map((item) => (
                 <div key={item.label} className="px-2 py-1.5 text-center border-r border-gray-100 dark:border-navy-700 last:border-0">
                   <p className={`text-sm font-bold ${item.color}`}>{item.value}</p>
@@ -709,47 +866,211 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                 </div>
               ))}
             </div>
-            {/* Risk Distribution */}
-            <div className="flex items-center gap-3 px-3 py-1.5 border-t border-gray-100 dark:border-navy-700 bg-gray-50/50 dark:bg-navy-900/30">
-              <span className="text-[8px] font-semibold text-gray-500 uppercase tracking-wider">Risk</span>
-              <div className="flex items-center gap-2 flex-1">
-                {[
-                  { label: "Critical", value: metrics.critical_risk, color: "bg-red-500" },
-                  { label: "High", value: metrics.high_risk, color: "bg-orange-500" },
-                  { label: "Medium", value: metrics.medium_risk, color: "bg-amber-500" },
-                  { label: "Low", value: metrics.low_risk, color: "bg-green-500" },
-                ].map((r) => {
-                  const pct = metrics.total > 0 ? (r.value / metrics.total) * 100 : 0;
+            {/* Risk Distribution & Queue Aging — Enterprise KPI strip */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 px-3 py-3 border-t border-gray-100 dark:border-navy-700 bg-gradient-to-r from-gray-50/80 to-white dark:from-navy-900/30 dark:to-navy-800/30">
+              {/* ── Risk Distribution ────────────────────────────────── */}
+              <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-3 shadow-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+                    <h3 className="text-[10px] font-bold text-navy-900 dark:text-white uppercase tracking-wider">
+                      Risk Distribution
+                    </h3>
+                  </div>
+                  <span className="text-[9px] font-medium text-gray-500 dark:text-gray-400">
+                    {(metrics.critical_risk || 0) + (metrics.high_risk || 0)} of {metrics.total} need attention
+                  </span>
+                </div>
+                {(() => {
+                  const riskSegments = [
+                    {
+                      key: "critical",
+                      label: "Critical",
+                      value: metrics.critical_risk || 0,
+                      barColor: "bg-red-500",
+                      trackColor: "bg-red-100 dark:bg-red-900/30",
+                      textColor: "text-red-700 dark:text-red-400",
+                      dotColor: "bg-red-500",
+                    },
+                    {
+                      key: "high",
+                      label: "High",
+                      value: metrics.high_risk || 0,
+                      barColor: "bg-orange-500",
+                      trackColor: "bg-orange-100 dark:bg-orange-900/30",
+                      textColor: "text-orange-700 dark:text-orange-400",
+                      dotColor: "bg-orange-500",
+                    },
+                    {
+                      key: "medium",
+                      label: "Medium",
+                      value: metrics.medium_risk || 0,
+                      barColor: "bg-amber-500",
+                      trackColor: "bg-amber-100 dark:bg-amber-900/30",
+                      textColor: "text-amber-700 dark:text-amber-400",
+                      dotColor: "bg-amber-500",
+                    },
+                    {
+                      key: "low",
+                      label: "Low",
+                      value: metrics.low_risk || 0,
+                      barColor: "bg-emerald-500",
+                      trackColor: "bg-emerald-100 dark:bg-emerald-900/30",
+                      textColor: "text-emerald-700 dark:text-emerald-400",
+                      dotColor: "bg-emerald-500",
+                    },
+                  ];
+                  const total = metrics.total > 0 ? metrics.total : 1;
                   return (
-                    <div key={r.label} className="flex items-center gap-1.5 text-[9px]">
-                      <div className={`w-1.5 h-1.5 rounded-full ${r.color}`} />
-                      <span className="text-gray-600 dark:text-gray-400">{r.label}</span>
-                      <span className="font-medium text-navy-900 dark:text-white">{r.value}</span>
-                      <span className="text-gray-400">({Math.round(pct)}%)</span>
-                    </div>
+                    <>
+                      {/* Stacked horizontal bar */}
+                      <div className="flex h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-navy-700 mb-2.5" role="img" aria-label="Risk distribution stacked bar">
+                        {riskSegments.map((seg) => {
+                          const pct = (seg.value / total) * 100;
+                          if (pct <= 0) return null;
+                          return (
+                            <div
+                              key={seg.key}
+                              className={`${seg.barColor} transition-all`}
+                              style={{ width: `${pct}%` }}
+                              title={`${seg.label}: ${seg.value} (${Math.round(pct)}%)`}
+                            />
+                          );
+                        })}
+                      </div>
+                      {/* Legend grid */}
+                      <div className="grid grid-cols-4 gap-2">
+                        {riskSegments.map((seg) => {
+                          const pct = Math.round((seg.value / total) * 100);
+                          return (
+                            <div key={seg.key} className="flex flex-col">
+                              <div className="flex items-center gap-1">
+                                <span className={`w-1.5 h-1.5 rounded-full ${seg.dotColor}`} />
+                                <span className={`text-[9px] font-semibold uppercase tracking-wider ${seg.textColor}`}>
+                                  {seg.label}
+                                </span>
+                              </div>
+                              <div className="flex items-baseline gap-1 mt-0.5">
+                                <span className="text-base font-bold text-navy-900 dark:text-white leading-none">
+                                  {seg.value}
+                                </span>
+                                <span className="text-[9px] text-gray-500 dark:text-gray-400">
+                                  {pct}%
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
                   );
-                })}
+                })()}
               </div>
-            </div>
-            {/* Queue Aging */}
-            <div className="flex items-center gap-3 px-3 py-1.5 border-t border-gray-100 dark:border-navy-700 bg-gray-50/50 dark:bg-navy-900/30">
-              <span className="text-[8px] font-semibold text-gray-500 uppercase tracking-wider">Aging</span>
-              <div className="flex items-center gap-2 flex-1">
-                {[
-                  { label: "0-2d", value: metrics.age_0_2_days, color: "bg-green-400" },
-                  { label: "3-5d", value: metrics.age_3_5_days, color: "bg-amber-400" },
-                  { label: "6-10d", value: metrics.age_6_10_days, color: "bg-orange-400" },
-                  { label: "10d+", value: metrics.age_10_plus_days, color: "bg-red-400" },
-                ].map((a) => {
-                  const pct = metrics.total > 0 ? (a.value / metrics.total) * 100 : 0;
+
+              {/* ── Queue Aging ──────────────────────────────────────── */}
+              <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-3 shadow-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-amber-500" />
+                    <h3 className="text-[10px] font-bold text-navy-900 dark:text-white uppercase tracking-wider">
+                      Queue Aging
+                    </h3>
+                  </div>
+                  <span className="text-[9px] font-medium text-gray-500 dark:text-gray-400">
+                    {metrics.age_10_plus_days || 0} aged 10d+
+                  </span>
+                </div>
+                {(() => {
+                  const ageSegments = [
+                    {
+                      key: "fresh",
+                      label: "0-2d",
+                      sublabel: "Fresh",
+                      value: metrics.age_0_2_days || 0,
+                      barColor: "bg-emerald-500",
+                      textColor: "text-emerald-700 dark:text-emerald-400",
+                    },
+                    {
+                      key: "warm",
+                      label: "3-5d",
+                      sublabel: "On track",
+                      value: metrics.age_3_5_days || 0,
+                      barColor: "bg-amber-500",
+                      textColor: "text-amber-700 dark:text-amber-400",
+                    },
+                    {
+                      key: "aging",
+                      label: "6-10d",
+                      sublabel: "Aging",
+                      value: metrics.age_6_10_days || 0,
+                      barColor: "bg-orange-500",
+                      textColor: "text-orange-700 dark:text-orange-400",
+                    },
+                    {
+                      key: "stale",
+                      label: "10d+",
+                      sublabel: "Stale",
+                      value: metrics.age_10_plus_days || 0,
+                      barColor: "bg-red-500",
+                      textColor: "text-red-700 dark:text-red-400",
+                    },
+                  ];
+                  const total = metrics.total > 0 ? metrics.total : 1;
+                  const maxValue = Math.max(...ageSegments.map((s) => s.value), 1);
                   return (
-                    <div key={a.label} className="flex items-center gap-1.5 text-[9px]">
-                      <div className={`w-8 h-1.5 rounded-full ${a.color}`} style={{ width: `${Math.max(pct, 2)}%` }} />
-                      <span className="text-gray-600 dark:text-gray-400">{a.label}</span>
-                      <span className="font-medium text-navy-900 dark:text-white">{a.value}</span>
-                    </div>
+                    <>
+                      {/* Stacked horizontal bar */}
+                      <div className="flex h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-navy-700 mb-2.5" role="img" aria-label="Queue aging stacked bar">
+                        {ageSegments.map((seg) => {
+                          const pct = (seg.value / total) * 100;
+                          if (pct <= 0) return null;
+                          return (
+                            <div
+                              key={seg.key}
+                              className={`${seg.barColor} transition-all`}
+                              style={{ width: `${pct}%` }}
+                              title={`${seg.label}: ${seg.value} (${Math.round(pct)}%)`}
+                            />
+                          );
+                        })}
+                      </div>
+                      {/* Legend grid with proportional bars */}
+                      <div className="grid grid-cols-4 gap-2">
+                        {ageSegments.map((seg) => {
+                          const pct = Math.round((seg.value / total) * 100);
+                          const fillPct = (seg.value / maxValue) * 100;
+                          return (
+                            <div key={seg.key} className="flex flex-col">
+                              <div className="flex items-center justify-between">
+                                <span className={`text-[9px] font-semibold uppercase tracking-wider ${seg.textColor}`}>
+                                  {seg.label}
+                                </span>
+                                <span className="text-[8px] text-gray-400 dark:text-gray-500">
+                                  {seg.sublabel}
+                                </span>
+                              </div>
+                              <div className="flex items-baseline gap-1 mt-0.5">
+                                <span className="text-base font-bold text-navy-900 dark:text-white leading-none">
+                                  {seg.value}
+                                </span>
+                                <span className="text-[9px] text-gray-500 dark:text-gray-400">
+                                  {pct}%
+                                </span>
+                              </div>
+                              {/* Per-segment mini bar */}
+                              <div className="mt-1 h-0.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-navy-700">
+                                <div
+                                  className={`h-full ${seg.barColor} opacity-70`}
+                                  style={{ width: `${Math.max(fillPct, 2)}%` }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
                   );
-                })}
+                })()}
               </div>
             </div>
           </>
@@ -788,9 +1109,9 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
           { id: "my", label: "My Reviews" },
           { id: "legal", label: "Legal Queue", stage: "legal_ops" },
           { id: "executive", label: "Executive Queue", stage: "executive" },
-          { id: "compliance", label: "Compliance Queue", stage: "compliance" },
           { id: "escalated", label: "Escalated" },
           { id: "overdue", label: "Overdue" },
+          { id: "completed", label: "Completed" },
           { id: "favorites", label: "Favorites", icon: Star, count: favorites.count },
         ].map((q) => (
           <button
@@ -919,15 +1240,65 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                 </th>
                 <th className="text-left px-3 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[28%]">Contract</th>
                 <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-navy-700 dark:hover:text-gray-200 w-[7%]" onClick={() => toggleSort("risk_score")}>
-                  <span className="inline-flex items-center gap-1">Risk <ArrowUpDown className="w-3 h-3" /></span>
+                  <span className="inline-flex items-center gap-1">
+                    Risk <ArrowUpDown className="w-3 h-3" />
+                    {sortField === "risk_score" && (
+                      <span className="text-navy-600 dark:text-navy-300">{sortDir === "asc" ? "▲" : "▼"}</span>
+                    )}
+                  </span>
                 </th>
                 <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-navy-700 dark:hover:text-gray-200 w-[9%]" onClick={() => toggleSort("status")}>
-                  <span className="inline-flex items-center gap-1">Status <ArrowUpDown className="w-3 h-3" /></span>
+                  <span className="inline-flex items-center gap-1">
+                    Status <ArrowUpDown className="w-3 h-3" />
+                    {sortField === "status" && (
+                      <span className="text-navy-600 dark:text-navy-300">{sortDir === "asc" ? "▲" : "▼"}</span>
+                    )}
+                  </span>
                 </th>
-                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[9%]">Assigned</th>
-                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[9%]">Created</th>
-                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[9%]">Updated</th>
-                <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[7%]">SLA</th>
+                <th
+                  className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-navy-700 dark:hover:text-gray-200 w-[9%]"
+                  onClick={() => toggleSort("assigned_to")}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    Assigned <ArrowUpDown className="w-3 h-3" />
+                    {sortField === "assigned_to" && (
+                      <span className="text-navy-600 dark:text-navy-300">{sortDir === "asc" ? "▲" : "▼"}</span>
+                    )}
+                  </span>
+                </th>
+                <th
+                  className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-navy-700 dark:hover:text-gray-200 w-[9%]"
+                  onClick={() => toggleSort("created_at")}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    Created <ArrowUpDown className="w-3 h-3" />
+                    {sortField === "created_at" && (
+                      <span className="text-navy-600 dark:text-navy-300">{sortDir === "asc" ? "▲" : "▼"}</span>
+                    )}
+                  </span>
+                </th>
+                <th
+                  className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-navy-700 dark:hover:text-gray-200 w-[9%]"
+                  onClick={() => toggleSort("updated_at")}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    Updated <ArrowUpDown className="w-3 h-3" />
+                    {sortField === "updated_at" && (
+                      <span className="text-navy-600 dark:text-navy-300">{sortDir === "asc" ? "▲" : "▼"}</span>
+                    )}
+                  </span>
+                </th>
+                <th
+                  className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-navy-700 dark:hover:text-gray-200 w-[7%]"
+                  onClick={() => toggleSort("sla")}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    SLA <ArrowUpDown className="w-3 h-3" />
+                    {sortField === "sla" && (
+                      <span className="text-navy-600 dark:text-navy-300">{sortDir === "asc" ? "▲" : "▼"}</span>
+                    )}
+                  </span>
+                </th>
                 <th className="text-right px-3 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[18%]">Actions</th>
               </tr>
             </thead>
@@ -943,7 +1314,12 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                     key={review.review_id}
                     className={`hover:bg-gray-50 dark:hover:bg-navy-750 transition-colors cursor-pointer ${
                       isSelected ? "bg-blue-50/50 dark:bg-blue-900/10" : "bg-white dark:bg-navy-800"
-                    } ${isOverdue ? "border-l-2 border-l-red-400" : ""}`}
+                    } ${isOverdue ? "border-l-2 border-l-red-400" : ""} ${
+                      assigningRowId === review.review_id ||
+                      assigningRowIds.has(review.review_id)
+                        ? "opacity-70"
+                        : ""
+                    }`}
                     onClick={() => onReviewSelect?.(review.review_id)}
                   >
                     <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
@@ -976,6 +1352,9 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                         <div className="min-w-0 flex-1">
                           {/* Primary: Contract name */}
                           <div className="flex items-center gap-2">
+                            {review.contract_number && (
+                              <span className="text-[10px] font-mono text-gray-400 dark:text-gray-500 flex-shrink-0">{review.contract_number}</span>
+                            )}
                             <p className="text-[12px] font-semibold text-navy-900 dark:text-white truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                               {contractName}
                             </p>
@@ -1032,27 +1411,36 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                           </div>
                         </div>
                         {/* ── Hover Tooltip Preview ── */}
-                        <div className="absolute left-0 top-full mt-1 z-20 hidden group-hover:block w-80 bg-white dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded-lg shadow-xl p-3 pointer-events-none">
-                          <div className="flex items-center gap-2 mb-2">
-                            <FileText className="w-4 h-4 text-navy-500" />
-                            <span className="text-xs font-bold text-navy-900 dark:text-white truncate">{contractName}</span>
-                          </div>
-                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
-                            <span className="text-gray-400">Review ID</span><span className="font-mono text-gray-700 dark:text-gray-300">{review.review_id.slice(0, 12)}...</span>
-                            <span className="text-gray-400">Status</span><span className="font-medium capitalize">{review.status.replace(/_/g, " ")}</span>
-                            <span className="text-gray-400">Risk Score</span><span className="font-medium">{review.risk_score != null ? `${(review.risk_score * 100).toFixed(0)}%` : "—"}</span>
-                            <span className="text-gray-400">Findings</span><span className="font-medium">{review.finding_count} ({review.redline_count} redlines)</span>
-                            <span className="text-gray-400">Assignee</span><span className="font-medium">{review.assigned_to || "Unassigned"}</span>
-                            <span className="text-gray-400">Created</span><span className="font-medium">{new Date(review.created_at).toLocaleDateString()}</span>
-                            {rawFilename && (
-                              <><span className="text-gray-400">File</span><span className="font-mono text-gray-500 text-[9px] truncate">{rawFilename}</span></>
-                            )}
-                          </div>
-                          {isOverdue && (
-                            <div className="mt-2 flex items-center gap-1 text-[9px] text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/10 rounded px-2 py-1">
-                              <AlertTriangle className="w-3 h-3" /> SLA Overdue by {Math.round(review.overdue_hours)}h
+                        <div className="absolute left-0 top-full mt-1 z-20 hidden group-hover:block w-[380px] max-w-[380px] md:max-w-[90vw] bg-white dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded-lg shadow-xl pointer-events-none">
+                          <div className="p-3 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <FileText className="w-4 h-4 text-navy-500 flex-shrink-0" />
+                              <span className="text-base font-semibold text-navy-900 dark:text-white break-words leading-tight">
+                                {review.contract_number ? `${review.contract_number} ` : ""}{contractName}
+                              </span>
                             </div>
-                          )}
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                              {review.status.replace(/_/g, " ")} • {review.risk_score != null ? `${(review.risk_score * 100).toFixed(0)}% Risk` : "—"} • {review.finding_count} Findings • {review.redline_count} Redlines
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                              <span>Assignee: <span className="font-medium text-gray-700 dark:text-gray-200">{review.assigned_to_name || review.assigned_to || "Unassigned"}</span></span>
+                              <span>Created: <span className="font-medium text-gray-700 dark:text-gray-200">{new Date(review.created_at).toLocaleDateString()}</span></span>
+                            </div>
+                            {rawFilename && (
+                              <div className="pt-1.5 border-t border-gray-100 dark:border-navy-600">
+                                <span className="text-[10px] text-gray-400 block mb-0.5">File</span>
+                                <span className="text-xs text-gray-700 dark:text-gray-300 break-all break-words whitespace-normal leading-relaxed max-h-12 overflow-hidden block hover:overflow-visible hover:max-h-none" title={rawFilename}>{rawFilename}</span>
+                              </div>
+                            )}
+                            {isOverdue && (
+                              <div className="flex items-center gap-1 text-[10px] text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/10 rounded px-2 py-1">
+                                <AlertTriangle className="w-3 h-3" /> SLA Overdue by {Math.round(review.overdue_hours)}h
+                              </div>
+                            )}
+                            <div className="text-[9px] text-gray-400 pt-0.5">
+                              Review ID: <span className="font-mono text-gray-500">{review.review_id}</span>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -1070,25 +1458,49 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                     </td>
                     {/* ── Assigned ── */}
                     <td className="px-2 py-3 align-top pt-3.5">
-                      <div className="flex items-center gap-1.5">
-                        <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold flex-shrink-0 ${
-                          review.assigned_to
-                            ? "bg-navy-100 text-navy-600 dark:bg-navy-700 dark:text-navy-300"
-                            : "bg-gray-100 text-gray-400 dark:bg-navy-700 dark:text-gray-500"
-                        }`}>
-                          {review.assigned_to
-                            ? review.assigned_to.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()
-                            : "—"
-                          }
-                        </div>
-                        <span className={`text-[10px] truncate max-w-[80px] ${
-                          review.assigned_to
-                            ? "text-gray-700 dark:text-gray-300 font-medium"
-                            : "italic text-gray-400 dark:text-gray-500"
-                        }`}>
-                          {review.assigned_to || "Unassigned"}
-                        </span>
-                      </div>
+                      {(() => {
+                        const displayName = review.assigned_to_name || review.assigned_to;
+                        const hasAssignee = Boolean(displayName);
+                        const isRowAssigning =
+                          assigningRowId === review.review_id ||
+                          assigningRowIds.has(review.review_id);
+                        return (
+                          <div className="flex items-center gap-1.5">
+                            <div
+                              data-testid={`assigned-avatar-${review.review_id}`}
+                              className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold flex-shrink-0 ${
+                                hasAssignee
+                                  ? "bg-navy-100 text-navy-600 dark:bg-navy-700 dark:text-navy-300"
+                                  : "bg-gray-100 text-gray-400 dark:bg-navy-700 dark:text-gray-500"
+                              }`}
+                            >
+                              {isRowAssigning ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : hasAssignee ? (
+                                displayName
+                                  .split(/\s+/)
+                                  .map((n) => n[0] || "")
+                                  .join("")
+                                  .slice(0, 2)
+                                  .toUpperCase()
+                              ) : (
+                                "—"
+                              )}
+                            </div>
+                            <span
+                              data-testid={`assigned-name-${review.review_id}`}
+                              className={`text-[10px] truncate max-w-[90px] ${
+                                hasAssignee
+                                  ? "text-gray-700 dark:text-gray-300 font-medium"
+                                  : "italic text-gray-400 dark:text-gray-500"
+                              }`}
+                              title={displayName || "Unassigned"}
+                            >
+                              {isRowAssigning ? "Assigning…" : displayName || "Unassigned"}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </td>
                     {/* ── Created Date ── */}
                     <td className="px-2 py-3 align-top pt-3.5">

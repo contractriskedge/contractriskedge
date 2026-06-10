@@ -66,6 +66,7 @@ celery_app.conf.update(
         "process_workflow_timers": {"queue": "notifications"},
         "send_email": {"queue": "email"},
         "check_sla_overdue": {"queue": "default"},
+        "check_obligations_overdue": {"queue": "default"},
     },
     beat_schedule={
         # Workflow recovery — every 5 minutes
@@ -78,6 +79,13 @@ celery_app.conf.update(
         # SLA overdue check — every 5 minutes
         "check-sla-overdue": {
             "task": "check_sla_overdue",
+            "schedule": crontab(minute="*/5"),
+            "args": (),
+            "options": {"queue": "default"},
+        },
+        # Obligation overdue check — every 5 minutes
+        "check-obligations-overdue": {
+            "task": "check_obligations_overdue",
             "schedule": crontab(minute="*/5"),
             "args": (),
             "options": {"queue": "default"},
@@ -154,4 +162,5 @@ celery_app.conf.imports = (
     "app.workers.recovery",
     "app.workers.benchmark",
     "app.workers.email_worker",
+    "app.workers.tasks",
 )

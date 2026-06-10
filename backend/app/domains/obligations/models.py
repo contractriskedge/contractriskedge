@@ -40,6 +40,7 @@ class Obligation(Base):
     obligation_type = Column(String(50), nullable=False)
     status = Column(String(50), nullable=False, default="pending")
     contract_id = Column(String(255), nullable=True)
+    contract_uuid_id = Column(UUID, ForeignKey("contract_reviews.review_id", ondelete="SET NULL"), nullable=True, index=True)
     contract_name = Column(String(255), nullable=True)
     vendor = Column(String(255), nullable=True)
     owner = Column(String(255), nullable=True)
@@ -240,12 +241,13 @@ class FinancialExposure(Base):
 
 
 class ObligationAuditLog(Base):
-    """Audit trail for obligation lifecycle events."""
+    """Audit trail for obligation lifecycle events with direct contract traceability."""
     __tablename__ = "obligation_audit_log"
 
     id = Column(UUID, primary_key=True, default=lambda: str(uuid.uuid4()))
     tenant_id = Column(UUID, ForeignKey("tenants.tenant_id", ondelete="CASCADE"), nullable=True, index=True)
     obligation_id = Column(UUID, ForeignKey("obligations.id", ondelete="CASCADE"), nullable=False, index=True)
+    contract_uuid_id = Column(UUID, ForeignKey("contract_reviews.review_id", ondelete="SET NULL"), nullable=True, index=True)
     action = Column(String(100), nullable=False)
     actor = Column(String(255), nullable=True)
     changes = Column(JSONB, nullable=True)

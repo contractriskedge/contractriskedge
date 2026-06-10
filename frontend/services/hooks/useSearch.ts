@@ -28,8 +28,11 @@ export const searchKeys = {
 
 export interface SearchResultItem {
   chunk_id: string;
+  entity_type?: string;
+  entity_id?: string | null;
   contract_id?: string | null;
   contract_name?: string | null;
+  contract_number?: string | null;
   upload_id?: string | null;
   page_numbers: number[];
   section_heading?: string | null;
@@ -38,6 +41,9 @@ export interface SearchResultItem {
   score: number;
   strategy: string;
   token_count: number;
+  status?: string | null;
+  owner?: string | null;
+  due_date?: string | null;
 }
 
 export interface SearchResponse {
@@ -55,6 +61,7 @@ export interface SearchParams {
   strategy?: "hybrid" | "vector" | "keyword";
   clause_type?: string;
   contract_id?: string;
+  entity_types?: string;
   page?: number;
   page_size?: number;
 }
@@ -73,6 +80,7 @@ export function useSearch(params: SearchParams | null) {
       if (params.strategy) queryParams.set("strategy", params.strategy);
       if (params.clause_type) queryParams.set("clause_type", params.clause_type);
       if (params.contract_id) queryParams.set("contract_id", params.contract_id);
+      if (params.entity_types) queryParams.set("entity_types", params.entity_types);
       if (params.page) queryParams.set("page", String(params.page));
       if (params.page_size) queryParams.set("page_size", String(params.page_size));
       return api.get<SearchResponse>(`/search?${queryParams.toString()}`);

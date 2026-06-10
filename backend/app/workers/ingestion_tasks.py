@@ -24,13 +24,14 @@ s3_client = boto3.client(
 
 
 @shared_task(name="ingest_document")
-def ingest_document(upload_id: str, tenant_id: str):
+def ingest_document(upload_id: str, tenant_id: str, user_id: str = "system"):
     print("=" * 80)
     print("INGEST DOCUMENT TASK STARTED")
     print("=" * 80)
 
     print(f"UPLOAD ID: {upload_id}")
     print(f"TENANT ID: {tenant_id}")
+    print(f"USER ID: {user_id}")
 
     print("STEP 1 — loading upload session")
 

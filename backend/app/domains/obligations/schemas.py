@@ -8,7 +8,15 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+# ── Validated Obligation Types ──────────────────────────────────────
+
+VALID_OBLIGATION_TYPES = [
+    "payment", "renewal", "notice", "insurance",
+    "audit_rights", "data_retention", "data_deletion",
+]
 
 
 # ── Request Schemas ─────────────────────────────────────────────────
@@ -20,6 +28,7 @@ class ObligationCreate(BaseModel):
     obligation_type: str
     status: Optional[str] = None
     contract_id: Optional[str] = None
+    contract_uuid_id: Optional[str] = None
     contract_name: Optional[str] = None
     vendor: Optional[str] = None
     owner: Optional[str] = None
@@ -38,17 +47,43 @@ class ObligationCreate(BaseModel):
     notes: Optional[str] = None
     tags: Optional[list[str]] = None
 
+    @field_validator("obligation_type")
+    @classmethod
+    def validate_obligation_type(cls, v):
+        if v and v.lower() not in VALID_OBLIGATION_TYPES:
+            raise ValueError(
+                f"Invalid obligation_type '{v}'. Must be one of: {', '.join(VALID_OBLIGATION_TYPES)}"
+            )
+        return v.lower() if v else v
+
+    @field_validator("due_date")
+    @classmethod
+    def validate_due_date_not_past(cls, v):
+        if v is not None:
+            from datetime import timezone
+            if v.replace(tzinfo=v.tzinfo or timezone.utc) < datetime.now(timezone.utc).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ):
+                raise ValueError("Due date cannot be in the past.")
+        return v
+
 
 class ObligationUpdate(BaseModel):
+    model_config = {"populate_by_name": True}
+
     name: Optional[str] = None
     description: Optional[str] = None
     obligation_type: Optional[str] = None
     status: Optional[str] = None
     contract_id: Optional[str] = None
+    contract_uuid_id: Optional[str] = None
     contract_name: Optional[str] = None
     vendor: Optional[str] = None
     owner: Optional[str] = None
     assignee: Optional[str] = None
+    # Admin override MUST be declared before due_date so the validator
+    # can access it via info.data (Pydantic v2 processes fields in order).
+    admin_override_due_date: Optional[bool] = Field(False, alias="_admin_override_due_date")
     due_date: Optional[datetime] = None
     completed_date: Optional[datetime] = None
     risk_score: Optional[float] = None
@@ -68,6 +103,32 @@ class ObligationUpdate(BaseModel):
     notes: Optional[str] = None
     is_favorite: Optional[bool] = None
     tags: Optional[list[str]] = None
+
+    @field_validator("obligation_type")
+    @classmethod
+    def validate_obligation_type(cls, v):
+        if v and v.lower() not in VALID_OBLIGATION_TYPES:
+            raise ValueError(
+                f"Invalid obligation_type '{v}'. Must be one of: {', '.join(VALID_OBLIGATION_TYPES)}"
+            )
+        return v.lower() if v else v
+
+    # ── Due date validation (update, with admin override) ─────────
+    @field_validator("due_date")
+    @classmethod
+    def validate_due_date_not_past(cls, v, info):
+        if v is not None:
+            # Check admin override — Pydantic v2 validators see field names
+            # before alias resolution, so check both possibilities
+            override = info.data.get("admin_override_due_date") or info.data.get("_admin_override_due_date")
+            if override:
+                return v
+            from datetime import timezone
+            if v.replace(tzinfo=v.tzinfo or timezone.utc) < datetime.now(timezone.utc).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ):
+                raise ValueError("Due date cannot be in the past.")
+        return v
 
 
 class SlaMetricCreate(BaseModel):
@@ -122,7 +183,9 @@ class ObligationResponse(BaseModel):
     obligation_type: str
     status: str
     contract_id: Optional[str] = None
+    contract_uuid_id: Optional[str] = None
     contract_name: Optional[str] = None
+    contract_number: Optional[str] = None
     vendor: Optional[str] = None
     owner: Optional[str] = None
     assignee: Optional[str] = None
@@ -272,6 +335,7 @@ class ObligationAuditLogResponse(BaseModel):
     id: str
     tenant_id: Optional[str] = None
     obligation_id: str
+    contract_uuid_id: Optional[str] = None
     action: str
     actor: Optional[str] = None
     changes: Optional[dict] = None

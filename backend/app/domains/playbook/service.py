@@ -607,6 +607,87 @@ class PlaybookService:
         items, total = await self.repo.list_evaluations(self.tenant_id, filters)
         return [self._evaluation_to_dict(e) for e in items], total
 
+    async def list_all_rules(self, filters: RuleFilterParams) -> tuple[list, int]:
+        """List all tenant policy rules with playbook metadata."""
+        rows, total = await self.repo.list_all_rules(self.tenant_id, filters)
+        items = []
+        for row in rows:
+            rule, playbook = row[0], row[1]
+            d = self._rule_to_dict(rule)
+            d["playbook_name"] = playbook.name
+            d["playbook_status"] = playbook.status.value if hasattr(playbook.status, "value") else str(playbook.status)
+            d["playbook_jurisdiction"] = playbook.jurisdiction
+            items.append(d)
+        return items, total
+
+    async def get_traceability(self) -> dict:
+        """Aggregate policy→finding→redline traceability chains per playbook."""
+        from sqlalchemy import text as sa_text
+
+        session = self.repo.session
+        playbook_sql = sa_text("""
+            SELECT lp.playbook_id, lp.name, lp.status,
+                   pv.version_label,
+                   (SELECT COUNT(*) FROM policy_rules pr
+                    WHERE pr.playbook_id = lp.playbook_id AND pr.tenant_id = :tenant_id) AS rule_count,
+                   (SELECT COUNT(*) FROM clause_standards cs
+                    WHERE cs.playbook_id = lp.playbook_id AND cs.tenant_id = :tenant_id) AS clause_count,
+                   (SELECT COUNT(*) FROM review_findings rf
+                    WHERE rf.playbook_id = lp.playbook_id AND rf.tenant_id = :tenant_id) AS finding_count,
+                   (SELECT COUNT(*) FROM review_findings rf
+                    WHERE rf.playbook_id = lp.playbook_id AND rf.tenant_id = :tenant_id
+                      AND rf.resolution IS NOT NULL) AS resolved_count,
+                   (SELECT COUNT(*) FROM policy_evaluations pe
+                    WHERE pe.playbook_id = lp.playbook_id AND pe.tenant_id = :tenant_id) AS eval_count,
+                   (SELECT COALESCE(SUM(pe.deviations_found), 0) FROM policy_evaluations pe
+                    WHERE pe.playbook_id = lp.playbook_id AND pe.tenant_id = :tenant_id) AS deviations_found
+            FROM legal_playbooks lp
+            LEFT JOIN playbook_versions pv ON pv.version_id = lp.active_version_id
+            WHERE lp.tenant_id = :tenant_id
+            ORDER BY lp.name
+        """)
+        result = await session.execute(playbook_sql, {"tenant_id": self.tenant_id})
+        chains = []
+        total_findings = 0
+        for row in result.fetchall():
+            m = dict(row._mapping)
+            finding_count = int(m.get("finding_count") or 0)
+            total_findings += finding_count
+            chains.append({
+                "playbook_id": str(m["playbook_id"]),
+                "playbook_name": m["name"],
+                "policy_version": m.get("version_label") or "1.0",
+                "playbook_status": m.get("status"),
+                "rule_count": int(m.get("rule_count") or 0),
+                "clause_requirement_count": int(m.get("clause_count") or 0),
+                "finding_count": finding_count,
+                "redline_count": 0,
+                "resolved_count": int(m.get("resolved_count") or 0),
+                "evaluation_count": int(m.get("eval_count") or 0),
+                "deviations_found": int(m.get("deviations_found") or 0),
+            })
+
+        redline_sql = sa_text("""
+            SELECT rf.playbook_id, COUNT(rr.redline_id) AS cnt
+            FROM review_redlines rr
+            JOIN review_findings rf ON rf.finding_id = rr.finding_id
+            WHERE rr.tenant_id = :tenant_id AND rf.playbook_id IS NOT NULL
+            GROUP BY rf.playbook_id
+        """)
+        result = await session.execute(redline_sql, {"tenant_id": self.tenant_id})
+        redline_by_playbook = {str(row.playbook_id): row.cnt for row in result.fetchall()}
+        total_redlines = 0
+        for chain in chains:
+            cnt = int(redline_by_playbook.get(chain["playbook_id"], 0))
+            chain["redline_count"] = cnt
+            total_redlines += cnt
+
+        return {
+            "chains": chains,
+            "total_findings_linked": total_findings,
+            "total_redlines": total_redlines,
+        }
+
     # ── Policy Overrides ───────────────────────────────────────────
 
     async def request_override(self, data: OverrideRequest) -> Optional[dict]:

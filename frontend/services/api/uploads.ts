@@ -55,6 +55,7 @@ export interface UploadSummary {
   content_type: string;
   ingestion_state: string;
   created_at: string;
+  contract_number?: string;
 }
 
 export interface RetryResponse {

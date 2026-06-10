@@ -211,6 +211,8 @@ class IngestionService:
         Allowed in any ingestion state so operators can remove stuck or unwanted
         jobs from the ingestion queue. Related rows cascade; in-flight workers
         no-op when the upload record is gone.
+
+        Deletes associated data in order: obligations → review → chunks → upload.
         """
         upload = await self.repository.get_upload(upload_id, self.tenant_id)
         if not upload:
@@ -223,7 +225,56 @@ class IngestionService:
             except Exception as exc:
                 logger.warning("Failed to clean up storage for deleted upload %s: %s", upload_id, exc)
 
-        # Delete from database
+        # Delete associated data in dependency order
+        from sqlalchemy import delete as sa_delete, text as sa_text
+        from app.domains.obligations.models import Obligation, ObligationAuditLog, ObligationReminder, ObligationEscalation
+
+        # Find the review_id for this upload first
+        review_id = None
+        review_result = await self.repository.session.execute(
+            sa_text("SELECT review_id FROM contract_reviews WHERE upload_id = :uid AND tenant_id = :tid"),
+            {"uid": upload_id, "tid": self.tenant_id},
+        )
+        row = review_result.fetchone()
+        if row:
+            review_id = str(row[0])
+
+        if review_id:
+            # Delete obligation audit logs
+            await self.repository.session.execute(
+                sa_text("""
+                    DELETE FROM obligation_audit_log
+                    WHERE obligation_id IN (
+                        SELECT id FROM obligations WHERE contract_uuid_id = :rid
+                    )
+                """),
+                {"rid": review_id},
+            )
+            # Delete obligation reminders and escalations
+            await self.repository.session.execute(
+                sa_text("""
+                    DELETE FROM obligation_reminders
+                    WHERE obligation_id IN (
+                        SELECT id FROM obligations WHERE contract_uuid_id = :rid
+                    )
+                """),
+                {"rid": review_id},
+            )
+            await self.repository.session.execute(
+                sa_text("""
+                    DELETE FROM obligation_escalations
+                    WHERE obligation_id IN (
+                        SELECT id FROM obligations WHERE contract_uuid_id = :rid
+                    )
+                """),
+                {"rid": review_id},
+            )
+            # Delete obligations linked to this contract
+            await self.repository.session.execute(
+                sa_delete(Obligation).where(Obligation.contract_uuid_id == review_id)
+            )
+
+        # Delete the upload (cascades to chunks, review, etc.)
         await self.repository.delete_upload(upload_id, self.tenant_id)
 
         await self.event_bus.emit(UploadCancelled(
@@ -246,6 +297,7 @@ class IngestionService:
             )
 
         stuck_states = {
+            IngestionState.UPLOADED,
             IngestionState.OCR_PENDING,
             IngestionState.OCR_PROCESSING,
             IngestionState.STORAGE_CONFIRMED,
@@ -260,9 +312,15 @@ class IngestionService:
             from workers.ingestion_dispatch import redispatch_ingestion
 
             await self.repository.increment_retry(upload_id, self.tenant_id)
-            await self.repository.update_state(
-                upload_id, self.tenant_id, upload.ingestion_state, error=None,
-            )
+            # Only transition to self if the state machine allows it
+            try:
+                await self.repository.update_state(
+                    upload_id, self.tenant_id, upload.ingestion_state, error=None,
+                )
+            except ValueError:
+                # Self-transition not allowed (e.g. VALIDATED → VALIDATED) —
+                # that's fine, we just need to clear the error and redis patch
+                pass
             await self.repository.session.commit()
 
             action = redispatch_ingestion(

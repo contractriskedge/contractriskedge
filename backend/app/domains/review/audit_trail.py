@@ -238,6 +238,39 @@ class AuditTrailService:
             metadata={"review_id": review_id},
         )
 
+    async def record_mapping_validation_failed(
+        self,
+        *,
+        redline_id: str,
+        review_id: str,
+        actor_id: str,
+        mapping_warning: str,
+        finding_id: Optional[str] = None,
+        finding_title: Optional[str] = None,
+        redline_title: Optional[str] = None,
+        finding_category: Optional[str] = None,
+        redline_category: Optional[str] = None,
+    ) -> None:
+        """Record a redline.mapping_validation_failed audit event."""
+        await self.record(
+            event_type="redline.mapping_validation_failed",
+            entity_type="redline",
+            entity_id=redline_id,
+            actor_id=actor_id,
+            action="validate",
+            before_state={"status": "proposed"},
+            after_state={"status": "invalid_mapping"},
+            description=mapping_warning,
+            metadata={
+                "review_id": review_id,
+                "finding_id": finding_id,
+                "finding_title": finding_title,
+                "redline_title": redline_title,
+                "finding_category": finding_category,
+                "redline_category": redline_category,
+            },
+        )
+
     async def record_finding_action(
         self,
         finding_id: str,

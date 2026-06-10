@@ -160,8 +160,10 @@ function ContextMenu({ job, onDetail, onRetry, onReprioritize, onAssignQueue, on
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-full mt-0.5 bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-700 rounded shadow-lg z-20 py-0.5 w-36">
             <button onClick={() => { onDetail(); setOpen(false); }} className="w-full text-left px-2 py-1 text-[10px] text-navy-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-700">View Details</button>
-            {job.status === "failed" && onRetry && (
-              <button onClick={() => { onRetry(); setOpen(false); }} className="w-full text-left px-2 py-1 text-[10px] text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20">Retry</button>
+            {(job.status === "failed" || job.status === "running") && onRetry && (
+              <button onClick={() => { onRetry(); setOpen(false); }} className="w-full text-left px-2 py-1 text-[10px] text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20">
+                {job.status === "failed" ? "Retry" : "Resume"}
+              </button>
             )}
             {/* Re-prioritize with sub-menu */}
             <div className="relative">
@@ -421,7 +423,11 @@ export function IngestionCenterPanel({ jobs, onPreview, onRetry, onUpload, onRep
                       <FileText className="w-3 h-3" />
                     </div>
                     <div className="min-w-0">
-                      <div className="flex items-center gap-1"><span className="text-[11px] font-medium text-navy-900 dark:text-white truncate">{job.fileName}</span>{job.isDuplicate && <span className="text-[7px] bg-amber-100 text-amber-700 px-0.5 py-0.5 rounded font-medium flex-shrink-0">D</span>}</div>
+                      <div className="flex items-center gap-1">
+                        {job.contractNumber && <span className="text-[9px] font-mono text-gray-400 dark:text-gray-500 flex-shrink-0">{job.contractNumber}</span>}
+                        <span className="text-[11px] font-medium text-navy-900 dark:text-white truncate">{job.fileName}</span>
+                        {job.isDuplicate && <span className="text-[7px] bg-amber-100 text-amber-700 px-0.5 py-0.5 rounded font-medium flex-shrink-0">D</span>}
+                      </div>
                       <div className="text-[8px] text-gray-400">{formatFileSize(job.fileSize)} · <span className="capitalize">{job.documentType}</span></div>
                     </div>
                   </div>
@@ -444,8 +450,12 @@ export function IngestionCenterPanel({ jobs, onPreview, onRetry, onUpload, onRep
 
                 <div className="w-12 flex items-center gap-0.5">
                   <button onClick={() => setDetailJob(job)} className="p-0.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors" title="View details"><Eye className="w-2.5 h-2.5" /></button>
-                  {job.status === "failed" && <button onClick={() => onRetry(job.id)} className="p-0.5 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-colors" title="Retry"><RefreshCw className="w-2.5 h-2.5" /></button>}
-                  <ContextMenu job={job} onDetail={() => setDetailJob(job)} onRetry={job.status === "failed" ? () => onRetry(job.id) : undefined} onReprioritize={onReprioritize} onAssignQueue={onAssignQueue} onRemove={onRemove} />
+                  {(job.status === "failed" || job.status === "running") && (
+                    <button onClick={() => onRetry(job.id)} className="p-0.5 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-colors" title={job.status === "failed" ? "Retry" : "Resume"}>
+                      <RefreshCw className="w-2.5 h-2.5" />
+                    </button>
+                  )}
+                  <ContextMenu job={job} onDetail={() => setDetailJob(job)} onRetry={(job.status === "failed" || job.status === "running") ? () => onRetry(job.id) : undefined} onReprioritize={onReprioritize} onAssignQueue={onAssignQueue} onRemove={onRemove} />
                 </div>
               </div>
 

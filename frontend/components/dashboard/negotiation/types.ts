@@ -92,8 +92,8 @@ export interface NegotiationIssue {
   sectionNumber: string;
   severity: IssueSeverity;
   status: IssueStatus;
-  assignee: string;
-  assigneeAvatar: string;
+  assignee: string | null;
+  assigneeAvatar: string | null;
   dueDate: string;
   createdBy: string;
   createdAt: string;

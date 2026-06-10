@@ -289,7 +289,8 @@ class PolicyEvaluation(Base):
 
     # Entity being evaluated
     upload_id = Column(UUID, ForeignKey("upload_sessions.upload_id", ondelete="CASCADE"), nullable=False, index=True)
-    review_id = Column(UUID, ForeignKey("contract_reviews.review_id", ondelete="SET NULL"), nullable=True)
+    review_id = Column(UUID, ForeignKey("contract_reviews.review_id", ondelete="SET NULL"), nullable=False, index=True)
+    contract_uuid_id = Column(UUID, ForeignKey("contract_reviews.review_id", ondelete="SET NULL"), nullable=True, index=True)
     playbook_id = Column(UUID, ForeignKey("legal_playbooks.playbook_id", ondelete="SET NULL"), nullable=True)
     playbook_version_id = Column(UUID, ForeignKey("playbook_versions.version_id", ondelete="SET NULL"), nullable=True)
 
@@ -378,6 +379,7 @@ class ClauseRecommendation(Base):
     evaluation_id = Column(UUID, ForeignKey("policy_evaluations.evaluation_id", ondelete="CASCADE"), nullable=False, index=True)
     upload_id = Column(UUID, ForeignKey("upload_sessions.upload_id", ondelete="CASCADE"), nullable=False)
     review_id = Column(UUID, ForeignKey("contract_reviews.review_id", ondelete="SET NULL"), nullable=True)
+    contract_uuid_id = Column(UUID, ForeignKey("contract_reviews.review_id", ondelete="SET NULL"), nullable=True, index=True)
 
     # Source clause standard (if recommending from playbook)
     clause_id = Column(UUID, ForeignKey("clause_standards.clause_id", ondelete="SET NULL"), nullable=True)
@@ -420,7 +422,8 @@ class PolicyOverride(Base):
     evaluation_id = Column(UUID, ForeignKey("policy_evaluations.evaluation_id", ondelete="CASCADE"), nullable=False, index=True)
     rule_id = Column(UUID, ForeignKey("policy_rules.rule_id", ondelete="SET NULL"), nullable=True)
     upload_id = Column(UUID, ForeignKey("upload_sessions.upload_id", ondelete="CASCADE"), nullable=False)
-    review_id = Column(UUID, ForeignKey("contract_reviews.review_id", ondelete="SET NULL"), nullable=True)
+    review_id = Column(UUID, ForeignKey("contract_reviews.review_id", ondelete="SET NULL"), nullable=False, index=True)
+    contract_uuid_id = Column(UUID, ForeignKey("contract_reviews.review_id", ondelete="SET NULL"), nullable=True, index=True)
 
     # Override details
     override_type = Column(Text, nullable=False)  # 'rule_exception', 'deviation_waiver', 'clause_substitution', 'threshold_override'

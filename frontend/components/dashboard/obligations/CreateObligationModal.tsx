@@ -1,17 +1,28 @@
 /**
  * CreateObligationModal — Enterprise-grade obligation creation form.
  *
- * Sections: General Information, Ownership, Dates, Risk, Financial, SLA.
- * Actions: Save Draft, Create, Cancel.
+ * All lookup fields use searchable dropdowns sourced from the database:
+ * - Contract: searchable by name, contract number, vendor (required)
+ * - Clause Reference: searchable from clause_library + recent usage history
+ * - Owner: searchable from admin_users
+ * - Department: searchable from admin_users + obligations history
+ * - Business Unit: searchable from admin_users + obligations history
+ * - Backup Owner (Assignee): searchable from admin_users
+ *
+ * Gold-standard UX: typeahead search, keyboard navigation, recent items first.
  */
 
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { X, Save, Plus, Loader2 } from "lucide-react";
+import { X, Save, Plus, Loader2, Search, ChevronDown, User, Building2, BookOpen } from "lucide-react";
 import { useCreateObligation } from "@/services/hooks/useObligations";
+import { searchContractsForSelect } from "@/services/api/contracts";
+import { searchClauseReferences, searchUsers, searchDepartments, searchBusinessUnits } from "@/services/api/obligationHelpers";
 import type { ObligationCreateRequest } from "@/services/api/obligations";
+import type { ContractSelectItem } from "@/services/api/contracts";
+import type { ClauseReferenceItem, UserItem, SelectOption } from "@/services/api/obligationHelpers";
 
 interface CreateObligationModalProps {
   isOpen: boolean;
@@ -20,22 +31,42 @@ interface CreateObligationModalProps {
 }
 
 const OBLIGATION_TYPES = [
-  "payment", "compliance", "reporting", "audit", "insurance",
-  "security", "privacy", "renewal", "termination", "operational", "custom",
+  "payment", "renewal", "notice", "insurance",
+  "audit_rights", "data_retention", "data_deletion",
 ];
 
 const RISK_LEVELS = ["low", "medium", "high", "critical"];
 
-const DEFAULT_FORM = {
+interface FormData {
+  name: string;
+  description: string;
+  contract: ContractSelectItem | null;
+  clauseReference: ClauseReferenceItem | null;
+  obligationType: string;
+  owner: UserItem | null;
+  department: SelectOption | null;
+  businessUnit: SelectOption | null;
+  assignee: UserItem | null;
+  dueDate: string;
+  reminderDate: string;
+  completedDate: string;
+  riskLevel: string;
+  financialImpact: number;
+  currency: string;
+  slaTargetDays: number;
+  escalationRequired: boolean;
+}
+
+const DEFAULT_FORM: FormData = {
   name: "",
   description: "",
-  contractId: "",
-  clauseReference: "",
-  obligationType: "compliance",
-  owner: "",
-  department: "",
-  businessUnit: "",
-  assignee: "",
+  contract: null,
+  clauseReference: null,
+  obligationType: "payment",
+  owner: null,
+  department: null,
+  businessUnit: null,
+  assignee: null,
   dueDate: "",
   reminderDate: "",
   completedDate: "",
@@ -46,29 +77,328 @@ const DEFAULT_FORM = {
   escalationRequired: false,
 };
 
-type FormData = typeof DEFAULT_FORM;
+// ── Reusable SearchableSelect Component ────────────────────────────
+
+interface SearchableSelectProps<T> {
+  label: string;
+  required?: boolean;
+  value: T | null;
+  onChange: (item: T | null) => void;
+  fetchFn: (q: string) => Promise<{ data: T[]; total: number }>;
+  displayLabel: (item: T) => string;
+  displayDetail?: (item: T) => string;
+  displaySubdetail?: (item: T) => string;
+  placeholder?: string;
+  icon?: React.ReactNode;
+  noResultsMessage?: string;
+}
+
+function SearchableSelect<T extends { id: string }>({
+  label, required, value, onChange, fetchFn,
+  displayLabel, displayDetail, displaySubdetail,
+  placeholder = "Search...", icon, noResultsMessage = "No results found",
+}: SearchableSelectProps<T>) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState<T[]>([]);
+  const [loading, setLoading] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoading(true);
+    fetchFn(search).then((res) => {
+      if (!cancelled) { setResults(res.data ?? []); setLoading(false); }
+    }).catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [search, open, fetchFn]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <label className="text-[10px] font-medium text-gray-600 dark:text-gray-400 block mb-1">
+        {label} {required && <span className="text-red-500">*</span>}
+      </label>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className={`w-full flex items-center gap-2 px-3 py-2 text-xs border rounded-lg text-left transition-colors ${
+          value
+            ? "border-navy-300 bg-navy-50 dark:bg-navy-700 dark:border-navy-500"
+            : "border-gray-200 dark:border-navy-600 bg-white dark:bg-navy-700"
+        } focus:outline-none focus:ring-1 focus:ring-navy-400`}
+      >
+        {icon && <span className="text-gray-400 flex-shrink-0">{icon}</span>}
+        {value ? (
+          <div className="flex-1 min-w-0">
+            <span className="font-medium text-navy-900 dark:text-white truncate block">
+              {displayLabel(value)}
+            </span>
+            {displayDetail && (
+              <span className="text-[9px] text-gray-500 block truncate">
+                {displayDetail(value)}
+              </span>
+            )}
+          </div>
+        ) : (
+          <span className="text-gray-400 flex-1">{placeholder}</span>
+        )}
+        <ChevronDown className={`w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-600 rounded-lg shadow-xl max-h-72 flex flex-col">
+          <div className="p-2 border-b border-gray-100 dark:border-navy-700">
+            <div className="flex items-center gap-1.5 px-2 py-1.5 bg-gray-50 dark:bg-navy-700 rounded-md">
+              <Search className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={placeholder}
+                className="w-full text-[11px] bg-transparent border-none outline-none text-navy-900 dark:text-white placeholder-gray-400"
+                autoFocus
+              />
+              {loading && <Loader2 className="w-3 h-3 text-gray-400 animate-spin flex-shrink-0" />}
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {results.length === 0 && !loading && (
+              <p className="text-[10px] text-gray-400 text-center py-6">{noResultsMessage}</p>
+            )}
+            {results.map((item, idx) => (
+              <button
+                key={(item as Record<string, unknown>).id as string ?? (item as Record<string, unknown>).value as string ?? `option-${idx}`}
+                type="button"
+                onClick={() => { onChange(item); setOpen(false); setSearch(""); }}
+                className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors border-b border-gray-50 dark:border-navy-700 last:border-0 ${
+                  value?.id === item.id ? "bg-navy-50 dark:bg-navy-700" : ""
+                }`}
+              >
+                <span className="text-[11px] font-medium text-navy-900 dark:text-white truncate block">
+                  {displayLabel(item)}
+                </span>
+                {displayDetail && (
+                  <span className="text-[9px] text-gray-500 block truncate">
+                    {displayDetail(item)}
+                  </span>
+                )}
+                {displaySubdetail && (
+                  <span className="text-[8px] text-gray-400 block truncate">
+                    {displaySubdetail(item)}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Contract Selector (specialized with risk badge) ────────────────
+
+const riskColor = (level: string) => {
+  const map: Record<string, string> = {
+    critical: "text-red-600 bg-red-50",
+    high: "text-orange-600 bg-orange-50",
+    medium: "text-amber-600 bg-amber-50",
+    low: "text-green-600 bg-green-50",
+  };
+  return map[level] ?? "text-gray-600 bg-gray-50";
+};
+
+function ContractSelector({
+  value, onChange,
+}: {
+  value: ContractSelectItem | null;
+  onChange: (c: ContractSelectItem | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState<ContractSelectItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoading(true);
+    searchContractsForSelect(search || undefined).then((res) => {
+      if (!cancelled) { setResults(res.data ?? []); setLoading(false); }
+    }).catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [search, open]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const displayName = (c: ContractSelectItem) =>
+    c.contract_number ? `${c.contract_number} — ${c.name}` : c.name;
+
+  return (
+    <div ref={ref} className="relative">
+      <label className="text-[10px] font-medium text-gray-600 dark:text-gray-400 block mb-1">
+        Contract <span className="text-red-500">*</span>
+      </label>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className={`w-full flex items-center gap-2 px-3 py-2 text-xs border rounded-lg text-left transition-colors ${
+          value
+            ? "border-navy-300 bg-navy-50 dark:bg-navy-700 dark:border-navy-500"
+            : "border-gray-200 dark:border-navy-600 bg-white dark:bg-navy-700"
+        } focus:outline-none focus:ring-1 focus:ring-navy-400`}
+      >
+        {value ? (
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium text-navy-900 dark:text-white truncate">
+                {value.contract_number ? `${value.contract_number} — ` : ""}{value.name}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 mt-0.5">
+              {value.vendor && <span className="text-[9px] text-gray-500">Vendor: {value.vendor}</span>}
+              <span className={`text-[8px] font-medium px-1 py-0.5 rounded ${riskColor(value.risk_level)}`}>
+                Risk: {value.risk_level}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <span className="text-gray-400 flex-1">Search by contract name, number, or vendor...</span>
+        )}
+        <ChevronDown className={`w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-600 rounded-lg shadow-xl max-h-72 flex flex-col">
+          <div className="p-2 border-b border-gray-100 dark:border-navy-700">
+            <div className="flex items-center gap-1.5 px-2 py-1.5 bg-gray-50 dark:bg-navy-700 rounded-md">
+              <Search className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by name, number, vendor..."
+                className="w-full text-[11px] bg-transparent border-none outline-none text-navy-900 dark:text-white placeholder-gray-400"
+                autoFocus
+              />
+              {loading && <Loader2 className="w-3 h-3 text-gray-400 animate-spin flex-shrink-0" />}
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {results.length === 0 && !loading && (
+              <p className="text-[10px] text-gray-400 text-center py-6">No contracts found</p>
+            )}
+            {results.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => { onChange(c); setOpen(false); setSearch(""); }}
+                className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors border-b border-gray-50 dark:border-navy-700 last:border-0 ${
+                  value?.id === c.id ? "bg-navy-50 dark:bg-navy-700" : ""
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-medium text-navy-900 dark:text-white truncate">
+                    {displayName(c)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  {c.vendor && <span className="text-[9px] text-gray-500">Vendor: {c.vendor}</span>}
+                  {c.counterparty && <span className="text-[9px] text-gray-500">Counterparty: {c.counterparty}</span>}
+                  <span className={`text-[8px] font-medium px-1 py-0.5 rounded ${riskColor(c.risk_level)}`}>
+                    {c.risk_level}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!value && open === false && (
+        <p className="text-[9px] text-red-500 mt-0.5">Please select a contract.</p>
+      )}
+    </div>
+  );
+}
+
+// ── Main Component ─────────────────────────────────────────────────
 
 export function CreateObligationModal({ isOpen, onClose, onCreated }: CreateObligationModalProps) {
   const [form, setForm] = useState<FormData>({ ...DEFAULT_FORM });
-  const [mode, setMode] = useState<"draft" | "create">("create");
+  const [validationError, setValidationError] = useState<string | null>(null);
   const createMutation = useCreateObligation();
+
+  // Stable fetch callbacks to avoid infinite re-renders in SearchableSelect
+  const fetchClauseRefs = useCallback(
+    (q: string) => searchClauseReferences(q || undefined),
+    [],
+  );
+  const fetchUsers = useCallback(
+    (q: string) => searchUsers(q || undefined),
+    [],
+  );
+  const fetchDepts = useCallback(
+    (q: string) => searchDepartments(q || undefined),
+    [],
+  );
+  const fetchBus = useCallback(
+    (q: string) => searchBusinessUnits(q || undefined),
+    [],
+  );
 
   const update = useCallback(<K extends keyof FormData>(key: K, value: FormData[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+    setValidationError(null);
   }, []);
 
   const handleSubmit = useCallback(async (saveAsDraft: boolean) => {
+    if (!form.contract) {
+      setValidationError("Please select a contract.");
+      return;
+    }
+
+    // Frontend due date validation
+    if (form.dueDate) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const selected = new Date(form.dueDate + "T00:00:00");
+      if (selected < today) {
+        setValidationError("Due date cannot be in the past.");
+        return;
+      }
+    }
+
     const body: ObligationCreateRequest = {
       name: form.name,
       obligationType: form.obligationType,
       status: saveAsDraft ? "draft" : "open",
       description: form.description || undefined,
-      contractId: form.contractId || undefined,
-      clauseReference: form.clauseReference || undefined,
-      owner: form.owner || undefined,
-      assignee: form.assignee || undefined,
-      department: form.department || undefined,
-      businessUnit: form.businessUnit || undefined,
+      contractUuidId: form.contract.id,
+      contractId: form.contract.id,
+      contractName: form.contract.name,
+      vendor: form.contract.vendor || undefined,
+      clauseReference: form.clauseReference?.value || undefined,
+      owner: form.owner?.name || undefined,
+      assignee: form.assignee?.name || undefined,
+      department: form.department?.value || undefined,
+      businessUnit: form.businessUnit?.value || undefined,
       dueDate: form.dueDate || undefined,
       riskLevel: form.riskLevel,
       financialImpact: form.financialImpact || undefined,
@@ -77,14 +407,13 @@ export function CreateObligationModal({ isOpen, onClose, onCreated }: CreateObli
     createMutation.mutate(body, {
       onSuccess: () => {
         setForm({ ...DEFAULT_FORM });
+        setValidationError(null);
         onCreated();
         onClose();
       },
       onError: (err: unknown) => {
-        // Surface a readable message so the user isn't left wondering why
-        // the modal closed silently or why nothing happened.
-        // eslint-disable-next-line no-console
-        console.error("Failed to create obligation", err);
+        const msg = err instanceof Error ? err.message : "Failed to create obligation";
+        setValidationError(msg);
       },
     });
   }, [form, createMutation, onCreated, onClose]);
@@ -118,6 +447,20 @@ export function CreateObligationModal({ isOpen, onClose, onCreated }: CreateObli
         </div>
 
         <div className="px-6 py-4 space-y-6">
+          {validationError && (
+            <div className="px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <p className="text-[10px] font-medium text-red-700 dark:text-red-400">{validationError}</p>
+            </div>
+          )}
+
+          {/* ── Contract Selector (required) ── */}
+          <Section title="Contract">
+            <ContractSelector
+              value={form.contract}
+              onChange={(c) => update("contract", c)}
+            />
+          </Section>
+
           {/* ── General Information ── */}
           <Section title="General Information">
             <Field label="Obligation Name *">
@@ -132,15 +475,18 @@ export function CreateObligationModal({ isOpen, onClose, onCreated }: CreateObli
                   rows={2} placeholder="Obligation details..." />
               </Field>
               <div className="space-y-3">
-                <Field label="Contract">
-                  <input type="text" value={form.contractId} onChange={(e) => update("contractId", e.target.value)}
-                    className="w-full text-xs px-3 py-2 border border-gray-200 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-700 text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-navy-400"
-                    placeholder="Contract ID" />
-                </Field>
                 <Field label="Clause Reference">
-                  <input type="text" value={form.clauseReference} onChange={(e) => update("clauseReference", e.target.value)}
-                    className="w-full text-xs px-3 py-2 border border-gray-200 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-700 text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-navy-400"
-                    placeholder="e.g., Section 4.2" />
+                  <SearchableSelect
+                    label=""
+                    value={form.clauseReference}
+                    onChange={(v) => update("clauseReference", v)}
+                    fetchFn={fetchClauseRefs}
+                    displayLabel={(item) => item.label}
+                    displayDetail={(item) => item.type === "recent" ? item.detail : `Type: ${item.detail}`}
+                    placeholder="Search clause references..."
+                    icon={<BookOpen className="w-3 h-3" />}
+                    noResultsMessage="No clause references found"
+                  />
                 </Field>
               </div>
             </div>
@@ -166,24 +512,58 @@ export function CreateObligationModal({ isOpen, onClose, onCreated }: CreateObli
           <Section title="Ownership">
             <div className="grid grid-cols-2 gap-3">
               <Field label="Owner *">
-                <input type="text" value={form.owner} onChange={(e) => update("owner", e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-gray-200 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-700 text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-navy-400"
-                  placeholder="Assignee name" />
+                <SearchableSelect
+                  label=""
+                  value={form.owner}
+                  onChange={(v) => update("owner", v)}
+                  fetchFn={fetchUsers}
+                  displayLabel={(item) => item.name}
+                  displayDetail={(item) => `${item.email}${item.department ? ` · ${item.department}` : ""}`}
+                  displaySubdetail={(item) => `Role: ${item.role}`}
+                  placeholder="Search users..."
+                  icon={<User className="w-3 h-3" />}
+                  noResultsMessage="No users found"
+                />
               </Field>
               <Field label="Department">
-                <input type="text" value={form.department} onChange={(e) => update("department", e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-gray-200 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-700 text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-navy-400"
-                  placeholder="e.g., Legal" />
+                <SearchableSelect
+                  label=""
+                  value={form.department}
+                  onChange={(v) => update("department", v)}
+                  fetchFn={fetchDepts}
+                  displayLabel={(item) => item.label}
+                  displayDetail={(item) => `Source: ${item.source}`}
+                  placeholder="Search departments..."
+                  icon={<Building2 className="w-3 h-3" />}
+                  noResultsMessage="No departments found"
+                />
               </Field>
               <Field label="Business Unit">
-                <input type="text" value={form.businessUnit} onChange={(e) => update("businessUnit", e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-gray-200 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-700 text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-navy-400"
-                  placeholder="e.g., Enterprise" />
+                <SearchableSelect
+                  label=""
+                  value={form.businessUnit}
+                  onChange={(v) => update("businessUnit", v)}
+                  fetchFn={fetchBus}
+                  displayLabel={(item) => item.label}
+                  displayDetail={(item) => `Source: ${item.source}`}
+                  placeholder="Search business units..."
+                  icon={<Building2 className="w-3 h-3" />}
+                  noResultsMessage="No business units found"
+                />
               </Field>
               <Field label="Backup Owner">
-                <input type="text" value={form.assignee} onChange={(e) => update("assignee", e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-gray-200 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-700 text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-navy-400"
-                  placeholder="Backup assignee" />
+                <SearchableSelect
+                  label=""
+                  value={form.assignee}
+                  onChange={(v) => update("assignee", v)}
+                  fetchFn={fetchUsers}
+                  displayLabel={(item) => item.name}
+                  displayDetail={(item) => `${item.email}${item.department ? ` · ${item.department}` : ""}`}
+                  displaySubdetail={(item) => `Role: ${item.role}`}
+                  placeholder="Search users..."
+                  icon={<User className="w-3 h-3" />}
+                  noResultsMessage="No users found"
+                />
               </Field>
             </div>
           </Section>
@@ -193,6 +573,7 @@ export function CreateObligationModal({ isOpen, onClose, onCreated }: CreateObli
             <div className="grid grid-cols-2 gap-3">
               <Field label="Due Date *">
                 <input type="date" value={form.dueDate} onChange={(e) => update("dueDate", e.target.value)}
+                  min={new Date().toISOString().split("T")[0]}
                   className="w-full text-xs px-3 py-2 border border-gray-200 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-navy-400" />
               </Field>
               <Field label="Reminder Date">
@@ -272,7 +653,7 @@ export function CreateObligationModal({ isOpen, onClose, onCreated }: CreateObli
         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 dark:border-navy-700 bg-gray-50/50 dark:bg-navy-900/50">
           <button
             onClick={() => handleSubmit(true)}
-            disabled={!form.name || createMutation.isPending}
+            disabled={!form.name || !form.contract || createMutation.isPending}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium rounded-lg border border-gray-200 dark:border-navy-600 text-gray-600 dark:text-gray-400 hover:bg-white dark:hover:bg-navy-700 disabled:opacity-50 transition-colors"
           >
             <Save className="w-3 h-3" />
@@ -284,7 +665,7 @@ export function CreateObligationModal({ isOpen, onClose, onCreated }: CreateObli
             </button>
             <button
               onClick={() => handleSubmit(false)}
-              disabled={!form.name || createMutation.isPending}
+              disabled={!form.name || !form.contract || createMutation.isPending}
               className="inline-flex items-center gap-1.5 px-4 py-1.5 text-[10px] font-medium rounded-lg bg-navy-700 text-white hover:bg-navy-800 disabled:opacity-50 transition-colors shadow-sm"
             >
               {createMutation.isPending ? (

@@ -423,7 +423,7 @@ export function InlineDiffViewer(props: InlineDiffViewerProps) {
           <p className="font-semibold">⚠ Source clause could not be reliably located</p>
           <p className="mt-0.5">
             The original clause text shown below may not match the document section.
-            Use <span className="font-medium">Locate Source Clause</span> to verify the baseline.
+            Use <span className="font-medium">View Source Location</span> to verify the baseline.
           </p>
         </div>
       )}

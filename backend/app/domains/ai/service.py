@@ -549,7 +549,8 @@ class AIService:
         from app.kernel.database.orm_registry import register_orm_models
 
         register_orm_models()
-        from sqlalchemy import select, delete as sa_delete
+        from sqlalchemy import select, delete as sa_delete, func
+        from app.domains.review.models import ContractReview
         from app.domains.ai.models import AIFinding, AIRedline
         from app.domains.review.repository import ReviewRepository
 
@@ -573,20 +574,35 @@ class AIService:
                     ReviewRedline.tenant_id == self.tenant_id,
                 )
             )
+            # Backfill contract_number if missing (e.g., review was created before
+            # create_review() was introduced, or by recovery daemon)
+            if not review.document_metadata.get("contract_number"):
+                now = datetime.utcnow()
+                month_year = now.strftime("%m%Y")
+                count_stmt = select(func.count()).select_from(ContractReview).where(
+                    ContractReview.tenant_id == self.tenant_id,
+                )
+                running = (await self.ai_repo.session.scalar(count_stmt)) + 1
+                review.document_metadata["contract_number"] = f"C{month_year}{running:02d}"
+                logger.info(
+                    "Backfilled contract_number=%s for review %s",
+                    review.document_metadata["contract_number"], review.review_id,
+                )
             logger.info(
                 "Re-analysis: reset findings/redlines for review %s (version %d)",
                 review.review_id, review.version,
             )
         else:
-            # First analysis: create new review
-            review = ContractReview(
+            # First analysis: create new review via repository to ensure
+            # contract_number is generated and stored in document_metadata.
+            review = await review_repo.create_review(
                 upload_id=upload_id,
                 tenant_id=self.tenant_id,
                 created_by=getattr(self.user, 'id', None) or "system",
             )
-            self.ai_repo.session.add(review)
-            await self.ai_repo.session.flush()
-            logger.info("Created new review %s for upload %s", review.review_id, upload_id)
+            logger.info("Created new review %s for upload %s (contract_number=%s)",
+                         review.review_id, upload_id,
+                         review.document_metadata.get("contract_number", "N/A"))
 
         # Import AI findings → review_findings
         stmt_findings = select(AIFinding).where(AIFinding.run_id == run_id)

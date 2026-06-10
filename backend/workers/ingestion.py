@@ -167,11 +167,10 @@ def confirm_storage_task(self, upload_id: str, tenant_id: str, user_id: str):
 
 async def _confirm_storage(helper: WorkerAsyncHelper, task, upload_id: str, tenant_id: str, user_id: str):
     session = await task.create_session(tenant_id, user_id, "api")
+    from app.domains.ingestion.repository import IngestionRepository
+    repo = IngestionRepository(session, tenant_id=tenant_id)
     async with helper.session_scope(session):
         try:
-            from app.domains.ingestion.repository import IngestionRepository
-            repo = IngestionRepository(session, tenant_id=tenant_id)
-
             upload = await repo.get_upload(upload_id, tenant_id)
             if not upload:
                 return
@@ -202,4 +201,12 @@ async def _confirm_storage(helper: WorkerAsyncHelper, task, upload_id: str, tena
         except Exception as exc:
             await session.rollback()
             logger.error("Storage confirmation failed for upload %s: %s", upload_id, exc)
+            # Transition to FAILED so the upload doesn't stay stuck at VALIDATED
+            # after Celery exhausts its retries.
+            try:
+                await repo.update_state(upload_id, tenant_id, IngestionState.FAILED,
+                                        error=f"Storage confirmation failed: {exc}")
+                await session.commit()
+            except Exception:
+                pass
             raise

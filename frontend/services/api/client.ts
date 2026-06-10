@@ -105,6 +105,8 @@ export interface ReviewDetail {
   contract_id: string | null;
   status: string;
   assigned_to: string | null;
+  /** Friendly display name of the assignee, resolved server-side from admin_users. */
+  assigned_to_name: string | null;
   assigned_by: string | null;
   assigned_at: string | null;
   started_at: string | null;
@@ -133,6 +135,7 @@ export interface ReviewDetail {
   document_name: string | null;
   original_filename: string | null;
   document_type: string | null;
+  contract_number: string | null;
   risk_score: number | null;
   version: number;
 }
@@ -144,6 +147,9 @@ export interface WorkloadMetrics {
   ready_for_review: number;
   assigned: number;
   in_review: number;
+  legal_review: number;
+  legal_approval: number;
+  approved: number;
   overdue: number;
   escalated: number;
   critical: number;
@@ -306,6 +312,32 @@ export interface TopRecommendedActions {
   action_count: number;
 }
 
+export interface FinancialImpact {
+  contract_value: number;
+  currency: string;
+  current_risk_pct: number;
+  current_exposure: number;
+  after_mitigation_pct: number;
+  after_mitigation_exposure: number;
+  potential_savings: number;
+}
+
+export interface LinkedPolicy {
+  playbook_id: string;
+  name: string;
+  version_label: string | null;
+}
+
+export interface GovernanceTraceability {
+  linked_policy_count: number;
+  linked_rule_count: number;
+  linked_requirement_count: number;
+  linked_violation_count: number;
+  linked_finding_count: number;
+  linked_redline_count: number;
+  linked_policies: LinkedPolicy[];
+}
+
 export interface RiskBreakdown {
   overall_risk_score: number;
   overall_label: string;
@@ -326,6 +358,10 @@ export interface RiskBreakdown {
   top_recommended_actions?: TopRecommendedActions;
   /** no_analysis | score_only | analyzed — when breakdown may be empty */
   status?: string;
+  /** Estimated business impact in dollars driven by contract value × risk */
+  financial_impact?: FinancialImpact;
+  /** Governance traceability — linked policies, rules, and contracts */
+  governance_traceability?: GovernanceTraceability;
   breakdown: RiskBreakdownItem[];
   risk_reduction: number;
   dismissed_reduction: number;
@@ -362,11 +398,37 @@ export interface FindingItem {
   confidence: number | null;
   risk_score: number | null;
   page_numbers: number[];
+  page_number?: number | null;
+  section_heading?: string | null;
+  paragraph_index?: number | null;
+  source_text?: string | null;
+  source_start_offset?: number | null;
+  source_end_offset?: number | null;
+  confidence_score?: number | null;
+  source_location?: SourceLocation | null;
   resolution: string | null;
   resolution_note: string | null;
   resolved_by: string | null;
   resolved_at: string | null;
   created_at: string;
+  playbook_id?: string | null;
+  rule_id?: string | null;
+  evaluation_id?: string | null;
+  policy_owner?: string | null;
+  policy_name?: string | null;
+  policy_rule_name?: string | null;
+  policy_version?: string | null;
+}
+
+export interface SourceLocation {
+  page_number: number | null;
+  section_heading: string | null;
+  paragraph_index: number | null;
+  source_text: string | null;
+  source_start_offset: number | null;
+  source_end_offset: number | null;
+  confidence_score: number | null;
+  chunk_id: string | null;
 }
 
 export interface WordDiffSegment {
@@ -426,6 +488,24 @@ export interface RedlineItem {
   /** Original AI suggestion before lawyer customization (when modified). */
   ai_proposed_text?: string | null;
   finding_id?: string | null;
+  /** The linked finding's clause_type — used for category validation. */
+  finding_category?: string | null;
+  /** The linked finding's title — used for mapping integrity checks. */
+  finding_title?: string | null;
+  /** The linked finding's recommendation — used for consistency validation. */
+  finding_recommendation?: string | null;
+  redline_title?: string | null;
+  redline_category?: string | null;
+  mapping_valid?: boolean;
+  mapping_status?: "valid" | "invalid_mapping";
+  mapping_warning?: string | null;
+  mapping_details?: {
+    finding_title?: string | null;
+    redline_title?: string | null;
+    category?: string | null;
+    finding_category?: string | null;
+    redline_category?: string | null;
+  } | null;
   operation?: string | null;
   anchor_text?: string | null;
   context_excerpt?: string | null;
@@ -442,6 +522,7 @@ export interface RedlineItem {
   reviewed_at: string | null;
   created_at: string;
   locator?: LocatorResponse | null;
+  source_location?: SourceLocation | null;
   traceability?: RiskTraceability | null;
 }
 
@@ -550,10 +631,12 @@ export interface DashboardResponse {
 export interface MyWorkItem {
   review_id: string;
   contract_name: string | null;
+  contract_number: string | null;
   status: string;
   risk_score: number | null;
   sla_deadline: string | null;
   assigned_to: string | null;
+  assigned_to_name: string | null;
   created_at: string;
 }
 

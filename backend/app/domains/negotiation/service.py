@@ -87,7 +87,7 @@ class NegotiationService:
     # ── Session Lifecycle ────────────────────────────────────────
 
     async def create_session(self, body: NegotiationCreateRequest) -> NegotiationSessionResponse:
-        """Create a new negotiation session with initial version."""
+        """Create a new negotiation session with initial version (round 1)."""
         session_id = str(uuid.uuid4())
 
         session = NegotiationSession(
@@ -98,6 +98,8 @@ class NegotiationService:
             counterparty=body.counterparty,
             stage=NegotiationStage.DRAFTING.value,
             health_score=50.0,
+            current_round=1,
+            max_rounds=3,
         )
         await self.repo.create_session(session)
 
@@ -147,6 +149,8 @@ class NegotiationService:
                 counterparty=s.counterparty,
                 stage=s.stage,
                 healthScore=s.health_score,
+                currentRound=s.current_round,
+                maxRounds=s.max_rounds,
                 startedAt=s.started_at,
                 updatedAt=s.updated_at,
             ))
@@ -200,6 +204,64 @@ class NegotiationService:
     async def delete_session(self, session_id: str) -> bool:
         """Delete a session and all cascaded children."""
         return await self.repo.delete_session(session_id)
+
+    # ── Versions (Round Tracking) ────────────────────────────────
+
+    async def create_version(
+        self,
+        session_id: str,
+        label: str,
+        clauses: list[dict[str, Any]],
+        change_summary: Optional[str] = None,
+        is_counter_proposal: bool = False,
+    ) -> Optional[NegotiationSessionResponse]:
+        """Create a new document version, incrementing round for counter-proposals."""
+        session = await self.repo.get_session(session_id)
+        if not session:
+            return None
+
+        # Determine next version number
+        next_ver = max((v.version_number for v in (session.versions or [])), default=0) + 1
+
+        # Mark previous CURRENT versions as SUPERSEDED
+        for v in (session.versions or []):
+            if v.status == VersionStatus.CURRENT.value:
+                await self.repo.update_version_status(v.version_id, VersionStatus.SUPERSEDED.value)
+
+        version = NegotiationVersion(
+            session_id=session_id,
+            version_number=next_ver,
+            label=label,
+            author=self.actor_id,
+            status=VersionStatus.CURRENT.value,
+            clauses=clauses,
+            word_count=sum(len(c.get("content", "").split()) for c in clauses),
+            change_summary=change_summary,
+        )
+        await self.repo.create_version(version)
+
+        # Increment round for counter-proposals
+        if is_counter_proposal and session.current_round < session.max_rounds:
+            new_round = session.current_round + 1
+            await self.repo.update_session(session_id, current_round=new_round)
+            await self.repo.log_audit(
+                session_id=session_id,
+                event_type="negotiation.round_incremented",
+                actor_id=self.actor_id,
+                previous_state={"current_round": session.current_round},
+                new_state={"current_round": new_round},
+                change_summary=f"Negotiation round advanced from {session.current_round} to {new_round}",
+            )
+
+        await self.repo.log_audit(
+            session_id=session_id,
+            event_type="negotiation.version_created",
+            actor_id=self.actor_id,
+            new_state={"version_number": next_ver, "label": label},
+            change_summary=f"Version {next_ver} ('{label}') created",
+        )
+
+        return await self._build_session_response(session_id)
 
     # ── Redlines ─────────────────────────────────────────────────
 
@@ -680,6 +742,8 @@ class NegotiationService:
             contractTitle=session.contract_title,
             counterparty=session.counterparty,
             stage=session.stage,
+            currentRound=session.current_round,
+            maxRounds=session.max_rounds,
             versions=versions,
             currentVersionId=current_version_id,
             redlines=redlines,

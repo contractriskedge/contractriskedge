@@ -11,9 +11,6 @@ import {
 } from "lucide-react";
 import type { SearchCategory, SavedSearch, SearchFilter, FilterCategory } from "./types";
 
-const mockSearchCategories: SearchCategory[] = [];
-const mockSavedSearches: SavedSearch[] = [];
-
 interface SearchLeftSidebarProps {
   categories: SearchCategory[];
   activeCategory: string;

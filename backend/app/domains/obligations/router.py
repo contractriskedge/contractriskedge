@@ -19,7 +19,8 @@ from app.domains.obligations.schemas import (
     SlaMetricResponse, SlaBreachResponse, VendorRiskResponse, SlaPredictionResponse,
 )
 from app.domains.obligations.service import ObligationService
-from app.dependencies import get_db, get_tenant_id
+from app.dependencies import get_db, get_tenant_id, get_current_user
+from app.kernel.security.auth import UserContext
 from app.kernel.security.rbac import require_permission
 from app.kernel.security.permissions import Permissions
 
@@ -31,8 +32,9 @@ router = APIRouter(prefix="/obligations", tags=["Obligation Management"])
 async def get_obligation_service(
     session: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
+    user: UserContext = Depends(get_current_user),
 ) -> ObligationService:
-    return ObligationService(session, tenant_id)
+    return ObligationService(session, tenant_id, user_role=user.role)
 
 
 @router.get("", response_model=None, include_in_schema=False)
@@ -46,6 +48,7 @@ async def list_obligations(
     risk_level: Optional[str] = Query(None),
     sla_status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    contract_id: Optional[str] = Query(None, description="Filter by contract UUID"),
     sort_by: str = Query("updated_at"),
     sort_order: str = Query("desc"),
     service: ObligationService = Depends(get_obligation_service),
@@ -53,9 +56,31 @@ async def list_obligations(
 ):
     items, total = await service.list_obligations(
         page, page_size, status, obligation_type, vendor, risk_level,
-        sla_status, search, sort_by, sort_order,
+        sla_status, search, contract_id, sort_by, sort_order,
     )
     return {"data": [i.model_dump() for i in items], "pagination": {"page": page, "page_size": page_size, "total": total, "total_pages": max(1, (total + page_size - 1) // page_size)}}
+
+
+@router.get("/by-contract/{contract_id}", response_model=None)
+async def get_obligations_by_contract(
+    contract_id: str,
+    service: ObligationService = Depends(get_obligation_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Get obligations count and list for a specific contract."""
+    items, total = await service.list_obligations(
+        page=1, page_size=100, contract_id=contract_id,
+    )
+    open_count = sum(1 for o in items if o.status in ("pending", "in_progress", "open", "active"))
+    completed_count = sum(1 for o in items if o.status == "completed")
+    overdue_count = sum(1 for o in items if o.status == "overdue")
+    return {
+        "total": total,
+        "open": open_count,
+        "completed": completed_count,
+        "overdue": overdue_count,
+        "obligations": [o.model_dump() for o in items],
+    }
 
 
 @router.get("/kpis", response_model=None)
@@ -496,6 +521,16 @@ async def cancel_obligation(
 ):
     """Cancel an obligation."""
     return (await service.cancel_obligation(obligation_id)).model_dump()
+
+
+@router.post("/{obligation_id}/reopen", response_model=None)
+async def reopen_obligation(
+    obligation_id: str,
+    service: ObligationService = Depends(get_obligation_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Reopen a completed or cancelled obligation."""
+    return (await service.reopen_obligation(obligation_id)).model_dump()
 
 
 @router.post("/{obligation_id}/archive", response_model=None)

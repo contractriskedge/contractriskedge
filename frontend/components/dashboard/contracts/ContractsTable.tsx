@@ -10,6 +10,16 @@ import { RISK_BG, RISK_TEXT, RISK_BG_LIGHT, RISK_DARK_BG, RISK_DARK_TEXT, AI_FLA
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useFavorites } from "@/hooks/useFavorites";
 
+// ── Money Formatter ────────────────────────────────────────────────────────
+
+function formatMoneyShort(value: number, currency: string = "USD"): string {
+  if (!value) return "—";
+  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`;
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return value.toFixed(0);
+}
+
 // ── Risk Badge ──────────────────────────────────────────────────────────────
 
 function RiskBadge({ score }: { score: number }) {
@@ -82,6 +92,42 @@ function RenewalRisk({ level }: { level: string }) {
   return <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${colors[level] || colors.low}`}>{level}</span>;
 }
 
+// ── Health Dot ──────────────────────────────────────────────────────────────
+//
+// Health is a server-derived bucket (healthy / needs_review / high_risk /
+// expired / expiring_soon) summarizing risk + expiry + SLA. Rendered as a
+// colored dot with a tooltip so reviewers can triage the row at a glance.
+//
+type HealthBucket = "healthy" | "needs_review" | "high_risk" | "expired" | "expiring_soon";
+
+const HEALTH_CONFIG: Record<HealthBucket, { label: string; dot: string; pill: string; ring: string }> = {
+  healthy:       { label: "Healthy",       dot: "bg-emerald-500",  pill: "text-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 dark:text-emerald-300",  ring: "ring-emerald-400/40" },
+  needs_review:  { label: "Needs Review",  dot: "bg-amber-500",    pill: "text-amber-700 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-300",       ring: "ring-amber-400/40" },
+  high_risk:     { label: "High Risk",     dot: "bg-red-500",      pill: "text-red-700 bg-red-50 dark:bg-red-900/20 dark:text-red-300",                ring: "ring-red-400/40" },
+  expired:       { label: "Expired",       dot: "bg-gray-400",     pill: "text-gray-700 bg-gray-100 dark:bg-gray-800 dark:text-gray-300",            ring: "ring-gray-400/40" },
+  expiring_soon: { label: "Expiring Soon", dot: "bg-orange-500",   pill: "text-orange-700 bg-orange-50 dark:bg-orange-900/20 dark:text-orange-300",  ring: "ring-orange-400/40" },
+};
+
+function HealthDot({ health, withLabel = false }: { health?: string; withLabel?: boolean }) {
+  const h = (health as HealthBucket) || "needs_review";
+  const cfg = HEALTH_CONFIG[h] || HEALTH_CONFIG.needs_review;
+  if (withLabel) {
+    return (
+      <span className={`inline-flex items-center gap-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${cfg.pill}`}>
+        <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+        {cfg.label}
+      </span>
+    );
+  }
+  return (
+    <span
+      title={cfg.label}
+      data-testid="health-dot"
+      className={`inline-block w-2 h-2 rounded-full ${cfg.dot} ring-2 ${cfg.ring}`}
+    />
+  );
+}
+
 // ── AI Confidence Status ────────────────────────────────────────────────────
 
 function AiStatus({ confidence, findings }: { confidence: number; findings: number }) {
@@ -146,17 +192,17 @@ const ALL_COLUMNS = [
   { key: "name", label: "Contract Name", default: true },
   { key: "lifecycle", label: "Lifecycle", default: true },
   { key: "contractType", label: "Agreement Type", default: true },
+  { key: "vendor", label: "Vendor", default: true },
   { key: "owner", label: "Owner", default: true },
-  { key: "effectiveDate", label: "Effective", default: true },
+  { key: "effectiveDate", label: "Effective", default: false },
   { key: "expirationDate", label: "Expiration", default: true },
-  { key: "renewalRisk", label: "Renewal Risk", default: true },
+  { key: "renewalRisk", label: "Renewal Risk", default: false },
   { key: "riskScore", label: "Risk", default: true },
   { key: "aiStatus", label: "AI Review", default: true },
   { key: "status", label: "Status", default: true },
   { key: "lastActivity", label: "Last Activity", default: false },
-  { key: "financialValue", label: "Value", default: false },
+  { key: "financialValue", label: "Value", default: true },
   { key: "workflowStage", label: "Workflow", default: false },
-  { key: "vendor", label: "Vendor", default: false },
 ];
 
 // ── Main Table ──────────────────────────────────────────────────────────────
@@ -264,11 +310,49 @@ export function ContractsTable({ contracts, onSelectContract, onAction }: Contra
       {/* Selection bar */}
       {selectedIds.size > 0 && (
         <div className="px-3 py-1.5 bg-blue-50 dark:bg-blue-900/10 border-b border-blue-200 dark:border-blue-900/30 flex items-center justify-between">
-          <span className="text-[11px] font-medium text-blue-700 dark:text-blue-400">{selectedIds.size} selected</span>
+          <span className="text-[11px] font-medium text-blue-700 dark:text-blue-400">
+            {selectedIds.size} selected
+            <button
+              type="button"
+              onClick={() => setSelectedIds(new Set())}
+              className="ml-2 text-[10px] text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Clear
+            </button>
+          </span>
           <div className="flex gap-1">
-            {["Analyze", "Export", "Assign", "Tag", "Archive"].map((a) => (
-              <button key={a} className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-white dark:bg-navy-700 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-navy-600 transition-colors">{a}</button>
-            ))}
+            <button
+              type="button"
+              onClick={() => onAction?.(Array.from(selectedIds).join(","), "analyze-risks" as ActionType)}
+              className="text-[10px] font-medium px-2 py-0.5 rounded bg-white dark:bg-navy-700 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-navy-600 transition-colors inline-flex items-center gap-1"
+              title="Analyze all selected"
+            >
+              <AlertTriangle className="w-2.5 h-2.5" /> Analyze
+            </button>
+            <button
+              type="button"
+              onClick={() => onAction?.(Array.from(selectedIds).join(","), "assign-reviewer" as ActionType)}
+              className="text-[10px] font-medium px-2 py-0.5 rounded bg-white dark:bg-navy-700 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-navy-600 transition-colors"
+              title="Assign all to a reviewer"
+            >
+              Assign
+            </button>
+            <button
+              type="button"
+              onClick={() => onAction?.(Array.from(selectedIds).join(","), "export-pdf" as ActionType)}
+              className="text-[10px] font-medium px-2 py-0.5 rounded bg-white dark:bg-navy-700 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-navy-600 transition-colors"
+              title="Export all as PDF"
+            >
+              Export
+            </button>
+            <button
+              type="button"
+              onClick={() => onAction?.(Array.from(selectedIds).join(","), "archive" as ActionType)}
+              className="text-[10px] font-medium px-2 py-0.5 rounded bg-white dark:bg-navy-700 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              title="Archive all selected"
+            >
+              Archive
+            </button>
           </div>
         </div>
       )}
@@ -317,6 +401,11 @@ export function ContractsTable({ contracts, onSelectContract, onAction }: Contra
                 <input type="checkbox" checked={allSelected} ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }} onChange={toggleAll}
                   className="w-3 h-3 rounded border-gray-300 dark:border-navy-500 text-blue-500 focus:ring-blue-400 cursor-pointer" />
               </th>
+              <th className="py-2 px-1 w-8" title="Contract health">
+                <div className="flex items-center justify-center">
+                  <span className="block w-2 h-2 rounded-full bg-gray-300 dark:bg-navy-600" />
+                </div>
+              </th>
               {ALL_COLUMNS.filter(c => visibleColumns.has(c.key)).map(col => {
                 if (["name", "vendor", "riskScore", "financialValue", "renewalDate", "aiConfidence", "lastModified", "effectiveDate", "expirationDate"].includes(col.key)) {
                   return <SortHeader key={col.key} label={col.label} k={col.key as SortKey} />;
@@ -360,6 +449,11 @@ export function ContractsTable({ contracts, onSelectContract, onAction }: Contra
                       onChange={() => { const next = new Set(selectedIds); isSelected ? next.delete(c.id) : next.add(c.id); setSelectedIds(next); }}
                       className="w-3 h-3 rounded border-gray-300 dark:border-navy-500 text-blue-500 focus:ring-blue-400 cursor-pointer" />
                   </td>
+                  <td className="py-2 px-1" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-center">
+                      <HealthDot health={c.health} />
+                    </div>
+                  </td>
                   {visibleColumns.has("name") && (
                     <td className="py-2 px-2">
                       <div className="flex items-start gap-2">
@@ -382,7 +476,10 @@ export function ContractsTable({ contracts, onSelectContract, onAction }: Contra
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-[12px] font-semibold text-navy-900 dark:text-white truncate max-w-[280px] block">{c.name}</span>
+                            <span className="text-[12px] font-semibold text-navy-900 dark:text-white truncate max-w-[280px] block">
+                              {c.contractNumber ? <span className="text-[10px] font-mono text-gray-400 dark:text-gray-500 mr-1">{c.contractNumber}</span> : ""}
+                              {c.name}
+                            </span>
                             <Eye className="w-3 h-3 text-blue-500 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                           </div>
                           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
@@ -423,7 +520,7 @@ export function ContractsTable({ contracts, onSelectContract, onAction }: Contra
                   {visibleColumns.has("aiStatus") && <td className="py-2 px-2"><AiStatus confidence={c.aiConfidence} findings={c.aiFindingsCount || 0} /></td>}
                   {visibleColumns.has("status") && <td className="py-2 px-2"><StatusBadge status={c.status} /></td>}
                   {visibleColumns.has("lastActivity") && <td className="py-2 px-2 text-[10px] text-gray-400 dark:text-gray-500 tabular-nums">{c.lastActivity || c.lastModified || '—'}</td>}
-                  {visibleColumns.has("financialValue") && <td className="py-2 px-2"><span className="font-medium tabular-nums text-[11px] text-gray-800 dark:text-gray-200">${c.financialValue}M</span></td>}
+                  {visibleColumns.has("financialValue") && <td className="py-2 px-2"><span className="font-medium tabular-nums text-[11px] text-gray-800 dark:text-gray-200">${formatMoneyShort(c.financialValue, c.currency)}</span></td>}
                   {visibleColumns.has("workflowStage") && <td className="py-2 px-2"><span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-navy-700 text-gray-600 dark:text-gray-300">{(WORKFLOW_STAGES[c.workflowStage as keyof typeof WORKFLOW_STAGES] || WORKFLOW_STAGES.draft).label}</span></td>}
                   <td className="py-2 px-2 relative" onClick={(e) => e.stopPropagation()}>
                     <button onClick={() => setOpenActions(openActions === c.id ? null : c.id)}

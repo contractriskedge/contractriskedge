@@ -116,7 +116,7 @@ export function DocumentViewer({ review, findings, selectedFindingId, onFindingC
   const rawSections = documentContent?.sections ?? FALLBACK_SECTIONS;
   const totalPages = documentContent?.total_pages ?? 15;
 
-  // Merge API sections with synthetic anchors from findings (Locate Source Clause).
+  // Merge API sections with synthetic anchors from findings (View Source Location).
   const DOCUMENT_SECTIONS = useMemo(() => {
     const merged: DocumentSection[] = [...rawSections];
 

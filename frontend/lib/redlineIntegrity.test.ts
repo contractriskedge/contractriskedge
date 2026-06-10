@@ -77,6 +77,72 @@ describe("redlineIntegrity", () => {
     expect(result.mismatch_warning).toBeTruthy();
   });
 
+  it("rejects liability redline linked to privacy finding", () => {
+    const result = reconcileRedlineAssociations(
+      {
+        clause_type: "liability",
+        section: "4",
+        page: 4,
+        original_text: "4. Warranties",
+        proposed_text: "Limitation of Liability. Cap at 12 months fees.",
+        finding_id: "f-privacy",
+        finding_title: "Missing Data Privacy Clause",
+      },
+      {
+        finding_id: "f-privacy",
+        clause_type: "data_privacy",
+        title: "Missing Data Privacy Clause",
+        clause_text: "Vendor shall comply with GDPR data processing requirements.",
+      },
+    );
+    expect(result.mapping_status).toBe("invalid_mapping");
+    expect(result.mapping_valid).toBe(false);
+  });
+
+  it("accepts liability finding with liability redline", () => {
+    const result = reconcileRedlineAssociations(
+      {
+        clause_type: "liability",
+        section: "12",
+        page: 12,
+        original_text: "No liability cap present.",
+        proposed_text: "Aggregate liability shall not exceed 12 months fees.",
+        finding_id: "f-liability",
+        finding_title: "Missing Liability Cap Clause",
+      },
+      {
+        finding_id: "f-liability",
+        clause_type: "liability",
+        title: "Missing Liability Cap Clause",
+        clause_text: "Contract lacks a limitation of liability clause.",
+      },
+    );
+    expect(result.mapping_status).toBe("valid");
+    expect(result.mapping_valid).toBe(true);
+  });
+
+  it("accepts IP finding with IP redline", () => {
+    const result = reconcileRedlineAssociations(
+      {
+        clause_type: "ip",
+        section: "8",
+        page: 8,
+        original_text: "Work product ownership unclear.",
+        proposed_text: "All intellectual property rights vest in Customer.",
+        finding_id: "f-ip",
+        finding_title: "IP Ownership Risk",
+      },
+      {
+        finding_id: "f-ip",
+        clause_type: "intellectual_property",
+        title: "IP Ownership Risk",
+        clause_text: "Vendor retains broad IP rights in deliverables.",
+      },
+    );
+    expect(result.mapping_status).toBe("valid");
+    expect(categoriesCompatible(result.finding_category, result.proposed_category)).toBe(true);
+  });
+
   it("classifies section labels vs substantive text", () => {
     expect(isSectionLabelOnly("§ Fees")).toBe(true);
     expect(isSectionLabelOnly("2. Fees")).toBe(true);

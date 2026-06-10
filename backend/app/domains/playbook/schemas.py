@@ -232,6 +232,33 @@ class PolicyRuleItem(BaseModel):
     updated_at: datetime
 
 
+class PolicyRuleWithPlaybook(PolicyRuleItem):
+    """Policy rule enriched with parent playbook metadata for tenant-wide listings."""
+    playbook_name: Optional[str] = None
+    playbook_status: Optional[str] = None
+    playbook_jurisdiction: Optional[str] = None
+
+
+class TraceabilityChainItem(BaseModel):
+    playbook_id: str
+    playbook_name: str
+    policy_version: str = "1.0"
+    playbook_status: Optional[str] = None
+    rule_count: int = 0
+    clause_requirement_count: int = 0
+    finding_count: int = 0
+    redline_count: int = 0
+    resolved_count: int = 0
+    evaluation_count: int = 0
+    deviations_found: int = 0
+
+
+class TraceabilityResponse(BaseModel):
+    chains: list[TraceabilityChainItem] = Field(default_factory=list)
+    total_findings_linked: int = 0
+    total_redlines: int = 0
+
+
 # ── Evaluation Schemas ──────────────────────────────────────────────
 
 

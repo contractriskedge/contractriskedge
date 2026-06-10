@@ -28,66 +28,198 @@ class SearchService:
     user: Optional[UserContext] = None
 
     async def search(self, request: SearchRequest) -> SearchResponse:
-        """Execute search with caching, authorization, and analytics logging."""
+        """Execute search with caching, authorization, and analytics logging.
+        
+        Searches across multiple entity types:
+        - chunks (contract text via hybrid vector/keyword search)
+        - findings (AI findings)
+        - obligations (if entity_types includes 'obligation')
+        """
         start = time.monotonic()
         repo = SearchRepository(self.session, tenant_id=self.tenant_id)
         engine = HybridRetrievalEngine(self.session, self.tenant_id, self.user)
+        entity_types = request.entity_types or ["chunk"]
 
-        # Check semantic cache
-        cache_key = self._cache_key(request)
-        cached = await repo.cache_get(self.tenant_id, cache_key)
-        if cached:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            results = [SearchResultItem(**item) for item in cached]
-            return SearchResponse(
-                results=results, total=len(results),
-                page=request.page, page_size=request.page_size,
-                query=request.query, strategy=request.strategy,
-                latency_ms=latency_ms,
-            )
+        all_results: list[SearchResultItem] = []
+        total = 0
 
-        # Execute retrieval
-        result = await engine.search(
-            query=request.query,
-            strategy=request.strategy,
-            filters=request.filters,
-            clause_type=request.clause_type,
-            contract_id=request.contract_id,
-            page=request.page,
-            page_size=request.page_size,
-        )
+        # ── 1. Chunk search (full-text + vector) ──────────────────
+        if "chunk" in entity_types:
+            cache_key = self._cache_key(request)
+            cached = await repo.cache_get(self.tenant_id, cache_key)
+            if cached:
+                results = [SearchResultItem(**item) for item in cached]
+                chunk_total = len(results)
+            else:
+                result = await engine.search(
+                    query=request.query,
+                    strategy=request.strategy,
+                    filters=request.filters,
+                    clause_type=request.clause_type,
+                    contract_id=request.contract_id,
+                    page=request.page,
+                    page_size=request.page_size,
+                )
+                chunk_total = result.total
+                results = []
+                for chunk in result.results:
+                    snippet = HybridRetrievalEngine.generate_snippet(chunk.text, request.query)
+                    results.append(SearchResultItem(
+                        chunk_id=chunk.chunk_id,
+                        entity_type="chunk",
+                        upload_id=chunk.upload_id,
+                        contract_id=chunk.contract_id,
+                        contract_name=chunk.contract_name,
+                        page_numbers=chunk.page_numbers,
+                        section_heading=chunk.section_heading,
+                        clause_type=chunk.clause_type,
+                        snippet=snippet,
+                        score=round(chunk.score, 4),
+                        strategy=chunk.strategy,
+                        token_count=chunk.token_count,
+                    ))
 
-        # Build response items with citations
-        items = []
-        for chunk in result.results:
-            snippet = HybridRetrievalEngine.generate_snippet(chunk.text, request.query)
-            items.append(SearchResultItem(
-                chunk_id=chunk.chunk_id,
-                upload_id=chunk.upload_id,
-                contract_id=chunk.contract_id,
-                contract_name=chunk.contract_name,
-                page_numbers=chunk.page_numbers,
-                section_heading=chunk.section_heading,
-                clause_type=chunk.clause_type,
-                snippet=snippet,
-                score=round(chunk.score, 4),
-                strategy=chunk.strategy,
-                token_count=chunk.token_count,
-            ))
+                # Cache chunk results
+                if request.strategy == "hybrid" and results:
+                    cache_data = [item.model_dump() for item in results]
+                    await repo.cache_set(self.tenant_id, cache_key, request.query, cache_data, ttl=300)
 
-        # Cache results (only for hybrid searches with results)
-        if request.strategy == "hybrid" and items:
-            cache_data = [item.model_dump() for item in items]
-            await repo.cache_set(self.tenant_id, cache_key, request.query, cache_data, ttl=300)
+            all_results.extend(results)
+            total += chunk_total
 
+        # ── 2. Finding search ─────────────────────────────────────
+        if "finding" in entity_types:
+            from sqlalchemy import text as sa_text
+            bind = {"tenant_id": self.tenant_id, "query": f"%{request.query}%"}
+            conditions = ["f.tenant_id = :tenant_id"]
+            if request.contract_id:
+                conditions.append("f.review_id = :contract_id")
+                bind["contract_id"] = request.contract_id
+
+            where = " AND ".join(conditions)
+            f_sql = sa_text(f"""
+                SELECT f.finding_id, f.review_id, f.severity, f.clause_type,
+                       f.title, f.description, f.recommendation, f.confidence,
+                       f.resolution, f.page_numbers, f.created_at,
+                       cr.metadata->>'name' as contract_name,
+                       cr.metadata->>'contract_number' as contract_number
+                FROM review_findings f
+                JOIN contract_reviews cr ON cr.review_id = f.review_id AND cr.tenant_id = f.tenant_id
+                WHERE {where}
+                  AND (f.title ILIKE :query OR f.description ILIKE :query OR f.recommendation ILIKE :query)
+                ORDER BY
+                    CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                    f.created_at DESC
+                LIMIT :limit OFFSET :offset
+            """)
+            offset = (request.page - 1) * request.page_size
+            bind["limit"] = request.page_size
+            bind["offset"] = offset
+
+            # Count
+            count_sql = sa_text(f"""
+                SELECT COUNT(*)::int FROM review_findings f
+                WHERE {where}
+                  AND (f.title ILIKE :query OR f.description ILIKE :query OR f.recommendation ILIKE :query)
+            """)
+            count_result = await self.session.execute(count_sql, {k: v for k, v in bind.items() if k != "limit" and k != "offset"})
+            finding_total = count_result.scalar() or 0
+
+            f_result = await self.session.execute(f_sql, bind)
+            for row in f_result.fetchall():
+                all_results.append(SearchResultItem(
+                    chunk_id=f"finding-{row.finding_id}",
+                    entity_type="finding",
+                    entity_id=str(row.finding_id),
+                    contract_id=str(row.review_id) if row.review_id else None,
+                    contract_name=row.contract_name,
+                    contract_number=row.contract_number,
+                    clause_type=row.clause_type,
+                    snippet=(row.title or "") + ": " + (row.description or "")[:200],
+                    score=round((row.confidence or 0) * 10, 4),
+                    strategy="keyword",
+                    status=row.resolution,
+                ))
+            total += finding_total
+
+        # ── 3. Obligation search ──────────────────────────────────
+        if "obligation" in entity_types:
+            from sqlalchemy import text as sa_text
+            bind = {"tenant_id": self.tenant_id, "query": f"%{request.query}%"}
+            o_conditions = ["o.tenant_id = :tenant_id"]
+            if request.contract_id:
+                try:
+                    uuid.UUID(request.contract_id)
+                    o_conditions.append("o.contract_uuid_id = :contract_id")
+                    bind["contract_id"] = request.contract_id
+                except ValueError:
+                    o_conditions.append("o.contract_id = :contract_id")
+                    bind["contract_id"] = request.contract_id
+
+            o_where = " AND ".join(o_conditions)
+            offset = (request.page - 1) * request.page_size
+
+            o_count_sql = sa_text(f"""
+                SELECT COUNT(*)::int FROM obligations o
+                WHERE {o_where}
+                  AND (o.name ILIKE :query OR o.description ILIKE :query OR o.vendor ILIKE :query OR o.contract_name ILIKE :query)
+            """)
+            o_count = await self.session.execute(o_count_sql, {k: v for k, v in bind.items() if k != "limit" and k != "offset"})
+            ob_total = o_count.scalar() or 0
+
+            o_sql = sa_text(f"""
+                SELECT o.id, o.name, o.description, o.obligation_type, o.status,
+                       o.contract_uuid_id, o.contract_name, o.vendor,
+                       o.owner, o.due_date, o.risk_level, o.risk_score,
+                       cr.metadata->>'contract_number' as contract_number
+                FROM obligations o
+                LEFT JOIN contract_reviews cr ON cr.review_id = o.contract_uuid_id
+                WHERE {o_where}
+                  AND (o.name ILIKE :query OR o.description ILIKE :query OR o.vendor ILIKE :query OR o.contract_name ILIKE :query)
+                ORDER BY
+                    CASE WHEN o.name ILIKE :query THEN 0 ELSE 1 END,
+                    o.created_at DESC
+                LIMIT :limit OFFSET :offset
+            """)
+            bind["limit"] = request.page_size
+            bind["offset"] = offset
+
+            o_result = await self.session.execute(o_sql, bind)
+            for row in o_result.fetchall():
+                all_results.append(SearchResultItem(
+                    chunk_id=f"obligation-{row.id}",
+                    entity_type="obligation",
+                    entity_id=str(row.id),
+                    contract_id=str(row.contract_uuid_id) if row.contract_uuid_id else None,
+                    contract_name=row.contract_name,
+                    contract_number=row.contract_number,
+                    snippet=f"{row.name}: {row.description or ''}"[:300],
+                    score=10.0 - (row.risk_score or 0),
+                    strategy="keyword",
+                    status=row.status,
+                    owner=row.owner,
+                    due_date=str(row.due_date) if row.due_date else None,
+                ))
+            total += ob_total
+
+        # Sort combined results by score descending
+        all_results.sort(key=lambda r: r.score, reverse=True)
+
+        # Paginate combined results
+        page = request.page
+        page_size = request.page_size
+        start_idx = (page - 1) * page_size
+        paginated = all_results[start_idx:start_idx + page_size]
+
+        latency_ms = int((time.monotonic() - start) * 1000)
         return SearchResponse(
-            results=items,
-            total=result.total,
-            page=request.page,
-            page_size=request.page_size,
+            results=paginated,
+            total=total,
+            page=page,
+            page_size=page_size,
             query=request.query,
             strategy=request.strategy,
-            latency_ms=result.latency_ms,
+            latency_ms=latency_ms,
         )
 
     async def log_click(
@@ -405,6 +537,85 @@ class SearchService:
             "popular_queries": popular_queries,
             "suggestions": suggestions,
             "insights": insights,
+        }
+
+    async def search_obligations(
+        self, query: str, status: Optional[str] = None,
+        contract_id: Optional[str] = None, page: int = 1, page_size: int = 20,
+    ) -> dict:
+        """Search across obligations by name, description, vendor, and contract name."""
+        from sqlalchemy import text as sa_text
+
+        conditions = ["o.tenant_id = :tenant_id"]
+        bind = {"tenant_id": self.tenant_id, "query": f"%{query}%"}
+
+        if status:
+            conditions.append("o.status = :status")
+            bind["status"] = status
+        if contract_id:
+            try:
+                uuid.UUID(contract_id)
+                conditions.append("o.contract_uuid_id = :contract_id")
+                bind["contract_id"] = contract_id
+            except ValueError:
+                conditions.append("o.contract_id = :contract_id")
+                bind["contract_id"] = contract_id
+
+        where = " AND ".join(conditions)
+
+        # Count
+        count_sql = sa_text(f"""
+            SELECT COUNT(*)::int FROM obligations o
+            WHERE {where}
+              AND (o.name ILIKE :query OR o.description ILIKE :query OR o.vendor ILIKE :query OR o.contract_name ILIKE :query)
+        """)
+        result = await self.session.execute(count_sql, bind)
+        total = result.scalar() or 0
+
+        # Fetch
+        offset = (page - 1) * page_size
+        data_sql = sa_text(f"""
+            SELECT o.id, o.name, o.description, o.obligation_type, o.status,
+                   o.contract_id, o.contract_uuid_id, o.contract_name, o.vendor,
+                   o.owner, o.due_date, o.risk_level, o.risk_score,
+                   o.created_at
+            FROM obligations o
+            WHERE {where}
+              AND (o.name ILIKE :query OR o.description ILIKE :query OR o.vendor ILIKE :query OR o.contract_name ILIKE :query)
+            ORDER BY
+                CASE WHEN o.name ILIKE :query THEN 0 ELSE 1 END,
+                o.created_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        bind["limit"] = page_size
+        bind["offset"] = offset
+        result = await self.session.execute(data_sql, bind)
+
+        obligations = []
+        for row in result.fetchall():
+            obligations.append({
+                "id": str(row.id),
+                "name": row.name,
+                "description": (row.description or "")[:200] + ("..." if row.description and len(row.description) > 200 else ""),
+                "obligation_type": row.obligation_type,
+                "status": row.status,
+                "contract_id": row.contract_id,
+                "contract_uuid_id": str(row.contract_uuid_id) if row.contract_uuid_id else None,
+                "contract_name": row.contract_name,
+                "vendor": row.vendor,
+                "owner": row.owner,
+                "due_date": row.due_date.isoformat() if row.due_date else None,
+                "risk_level": row.risk_level,
+                "risk_score": row.risk_score,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            })
+
+        return {
+            "obligations": obligations,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "query": query,
         }
 
     @staticmethod

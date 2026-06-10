@@ -46,3 +46,19 @@ export const formatDateOrDash = (value: string | null | undefined): string => fo
 export function formatDateShort(value: string | null | undefined): string {
   return formatDate(value, { year: "numeric", month: "2-digit", day: "2-digit" });
 }
+
+/**
+ * Format a timestamp as a relative time string (e.g., "5m ago", "2h ago").
+ */
+export function formatTime(ts: string | null | undefined): string {
+  if (!ts) return "—";
+  const t = new Date(ts).getTime();
+  if (Number.isNaN(t)) return "—";
+  const diff = Date.now() - t;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}

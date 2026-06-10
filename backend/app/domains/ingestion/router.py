@@ -14,13 +14,15 @@ and Celery for fully asynchronous processing.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
+import threading
 import time
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -29,6 +31,7 @@ from app.kernel.security.auth import UserContext
 from app.kernel.security.rbac import require_permission
 from app.kernel.security.permissions import Permissions
 from app.kernel.security.events import log_security_event, SecurityEventType, SecurityEventSeverity
+from app.kernel.database.session import TenantAwareSessionFactory
 from app.kernel.web.pagination import PaginatedResponse, PaginationMeta
 from app.kernel.web.exceptions import AppError, NotFoundError, ConflictError, ValidationError, RateLimitError
 from app.kernel.events.bus import EventBus
@@ -148,6 +151,7 @@ async def check_upload_rate_limit(tenant_id: str) -> None:
     },
 )
 async def upload_document(
+    request: Request,
     file: UploadFile = File(...),
     client_checksum_sha256: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
@@ -274,21 +278,51 @@ async def upload_document(
             # Commit before queuing Celery so workers see the upload row (get_db commits after response).
             await db.commit()
 
-            try:
-                ingest_document.delay(
+            queued_to_celery = False
+            if settings.environment != "development":
+                try:
+                    ingest_document.apply_async(
+                        kwargs={
+                            "upload_id": str(upload.upload_id),
+                            "tenant_id": tenant_id,
+                            "user_id": user.id,
+                        },
+                        countdown=2,
+                    )
+                    queued_to_celery = True
+                    print("STEP 19 — ingestion task queued")
+
+                except Exception as queue_exc:
+                    logger.warning(
+                        "Upload saved but ingestion task not queued: %s",
+                        queue_exc,
+                    )
+                    print(f"STEP 19 — ingestion queue skipped: {queue_exc}")
+
+            # Development: always run inline — Celery workers are optional and often
+            # misconfigured locally (duplicate nodenames, stale processes).
+            if settings.environment == "development":
+                logger.info(
+                    "Starting inline ingestion pipeline for upload %s (dev mode)",
+                    upload.upload_id,
+                )
+                _schedule_inline_ingestion(
                     upload_id=str(upload.upload_id),
                     tenant_id=tenant_id,
+                    user_id=user.id,
+                    db_factory=request.app.state.db_factory,
+                    correlation_id=correlation_id,
                 )
-
-                print("STEP 19 — ingestion task queued")
-
-            except Exception as queue_exc:
-                logger.warning(
-                    "Upload saved but ingestion task not queued (start Redis/Celery or ignore for dev): %s",
-                    queue_exc,
-                )
-
-                print(f"STEP 19 — ingestion queue skipped: {queue_exc}")
+            elif not queued_to_celery:
+                try:
+                    await repo.update_state(
+                        str(upload.upload_id), tenant_id,
+                        IngestionState.FAILED,
+                        error="Ingestion queue unavailable — start Redis/Celery worker or retry",
+                    )
+                    await db.commit()
+                except Exception:
+                    pass
 
             return UploadResponse(
                 upload_id=str(upload.upload_id),
@@ -313,71 +347,107 @@ async def upload_document(
         raise
 
 
-async def _trigger_inline_ingestion(
+def _schedule_inline_ingestion(
     upload_id: str,
     tenant_id: str,
     user_id: str,
-    db: AsyncSession,
+    db_factory: TenantAwareSessionFactory,
     correlation_id: str,
 ) -> None:
-    """Run ingestion inline (fallback when Celery is unavailable)."""
+    """Start inline ingestion on a daemon thread (dev mode).
+
+    Uses a thread-local event loop and DB pool — the app-scoped async engine
+    cannot be shared across uvicorn's loop and a worker thread.
+    """
+    def _thread_main() -> None:
+        try:
+            asyncio.run(
+                _run_inline_ingestion(
+                    upload_id=upload_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    correlation_id=correlation_id,
+                )
+            )
+        except Exception:
+            logger.exception("Inline ingestion thread crashed for upload %s", upload_id)
+
+    thread = threading.Thread(
+        target=_thread_main,
+        name=f"ingest-{upload_id[:8]}",
+        daemon=True,
+    )
+    thread.start()
+
+
+async def _run_inline_ingestion(
+    upload_id: str,
+    tenant_id: str,
+    user_id: str,
+    correlation_id: str,
+) -> None:
+    """Run ingestion inline after the upload response (dev mode).
+
+    Creates a thread-local DB pool — never reuse the app/request async engine.
+    """
     from app.domains.ingestion.services.ingestion_orchestrator import IngestionOrchestrator
     from app.domains.vectors.services.embedding_service import EmbeddingService
     from app.integrations.storage.s3 import storage_service
+    from app.kernel.database.orm_registry import register_orm_models
     from app.kernel.events.bus import EventBus
 
-    repo = IngestionRepository(db, tenant_id=tenant_id)
-    upload = await repo.get_upload(upload_id, tenant_id)
-    if not upload:
-        raise UploadNotFoundError(upload_id)
-
-    file_data = await storage_service.download_fileobj(
-        upload.storage_bucket or settings.s3_bucket or "contractrisk-documents",
-        upload.storage_key or "",
+    register_orm_models()
+    thread_db = TenantAwareSessionFactory(
+        database_url=settings.database_url,
+        pool_size=2,
+        max_overflow=1,
     )
+    session = await thread_db.create_session(tenant_id, user_id, "admin")
+    try:
+        repo = IngestionRepository(session, tenant_id=tenant_id)
+        upload = await repo.get_upload(upload_id, tenant_id)
+        if not upload:
+            logger.error("Inline ingestion: upload %s not found", upload_id)
+            return
 
-    embedding_service = EmbeddingService(
-        api_key=settings.openai_api_key,
-        model=settings.default_embedding_model,
-    )
+        file_data = await storage_service.download_fileobj(
+            upload.storage_bucket or settings.s3_bucket or "contractrisk-documents",
+            upload.storage_key or "",
+        )
 
-    orchestrator = IngestionOrchestrator(
-        session=db,
-        embedding_service=embedding_service,
-        event_bus=EventBus(),
-        tenant_id=tenant_id,
-    )
-
-    # Keep a strong reference to prevent garbage collection of the task
-    _background_tasks: set[asyncio.Task] = set()
-
-    async def _run_pipeline_with_recovery() -> None:
-        """Run pipeline and handle failures to avoid stuck uploads."""
+        orchestrator = IngestionOrchestrator(
+            session=session,
+            embedding_service=EmbeddingService(
+                api_key=settings.openai_api_key,
+                model=settings.default_embedding_model,
+            ),
+            event_bus=EventBus(),
+            tenant_id=tenant_id,
+        )
+        await orchestrator.run_pipeline(
+            upload_id=upload_id,
+            file_data=file_data,
+            filename=upload.filename,
+            content_type=upload.content_type,
+            correlation_id=correlation_id,
+        )
+        await session.commit()
+    except Exception as exc:
+        error_msg = f"Inline ingestion failed: {exc}"
+        logger.exception("Inline ingestion pipeline failed for upload %s", upload_id)
         try:
-            await orchestrator.run_pipeline(
-                upload_id=upload_id,
-                file_data=file_data,
-                filename=upload.filename,
-                content_type=upload.content_type,
-                correlation_id=correlation_id,
+            repo = IngestionRepository(session, tenant_id=tenant_id)
+            await repo.update_state(
+                upload_id, tenant_id,
+                IngestionState.FAILED,
+                error=error_msg[:500],
             )
+            await session.commit()
         except Exception:
-            logger.exception("Inline ingestion pipeline failed for upload %s", upload_id)
-            # Mark the upload as failed so it doesn't get stuck
-            try:
-                repo = IngestionRepository(db, tenant_id=tenant_id)
-                await repo.update_state(
-                    upload_id, tenant_id,
-                    IngestionState.FAILED,
-                    error="Inline ingestion pipeline crashed",
-                )
-                await db.commit()
-            except Exception:
-                logger.exception("Failed to mark upload %s as failed after pipeline crash", upload_id)
-
-    task = asyncio.create_task(_run_pipeline_with_recovery())
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+            logger.exception("Failed to mark upload %s as failed after pipeline crash", upload_id)
+    finally:
+        await session.close()
+        await thread_db.close()
 
 
 # ── GET /uploads/{upload_id} ──────────────────────────────────────────────────
@@ -414,27 +484,33 @@ async def get_upload(
         ingestion_error=upload.ingestion_error,
         retry_count=upload.retry_count,
         max_retries=3,
-        can_retry=(
-            upload.retry_count < 3
-            and (
-                ingestion_state_for_api(upload.ingestion_state) == IngestionState.FAILED
-                or ingestion_state_for_api(upload.ingestion_state)
-                in (
-                    IngestionState.OCR_PENDING,
-                    IngestionState.OCR_PROCESSING,
-                    IngestionState.STORAGE_CONFIRMED,
-                    IngestionState.OCR_COMPLETE,
-                    IngestionState.CHUNKING_PENDING,
-                    IngestionState.EMBEDDING_PENDING,
-                )
-            )
-        ),
+        can_retry=_upload_can_retry(upload),
         storage_key=upload.storage_key,
         checksum_sha256=upload.server_checksum_sha256,
         created_at=upload.created_at,
         updated_at=upload.updated_at,
         completed_at=upload.completed_at,
     )
+
+
+def _upload_can_retry(upload) -> bool:
+    """Whether an upload can be retried or resumed from its current state."""
+    if upload.retry_count >= 3:
+        return False
+    api_state = ingestion_state_for_api(upload.ingestion_state)
+    resumable = {
+        IngestionState.UPLOADED,
+        IngestionState.VALIDATING,
+        IngestionState.VALIDATED,
+        IngestionState.OCR_PENDING,
+        IngestionState.OCR_PROCESSING,
+        IngestionState.STORAGE_CONFIRMED,
+        IngestionState.OCR_COMPLETE,
+        IngestionState.CHUNKING_PENDING,
+        IngestionState.EMBEDDING_PENDING,
+        IngestionState.ANALYSIS_PENDING,
+    }
+    return api_state == IngestionState.FAILED or api_state in resumable
 
 
 # ── GET /uploads/{upload_id}/status ───────────────────────────────────────────
@@ -474,21 +550,7 @@ async def get_upload_status(
         ingestion_error=upload.ingestion_error,
         retry_count=upload.retry_count,
         max_retries=3,
-        can_retry=(
-            upload.retry_count < 3
-            and (
-                api_state == IngestionState.FAILED
-                or api_state
-                in (
-                    IngestionState.OCR_PENDING,
-                    IngestionState.OCR_PROCESSING,
-                    IngestionState.STORAGE_CONFIRMED,
-                    IngestionState.OCR_COMPLETE,
-                    IngestionState.CHUNKING_PENDING,
-                    IngestionState.EMBEDDING_PENDING,
-                )
-            )
-        ),
+        can_retry=_upload_can_retry(upload),
         progress=progress,
         storage_key=upload.storage_key,
         checksum_sha256=upload.server_checksum_sha256,
@@ -566,6 +628,172 @@ async def retry_ingestion(
         raise ConflictError(str(exc))
 
 
+# ── POST /uploads/{upload_id}/process (dev mode) ─────────────────────────────
+
+
+@router.post(
+    "/{upload_id}/process",
+    response_model=UploadRetryResponse,
+    summary="Process upload synchronously (dev mode)",
+    description="Run the full ingestion pipeline synchronously for development environments without Celery/Redis. "
+                "Only available when environment='development'. Skips OCR and uses direct text extraction.",
+    responses={
+        200: {"model": UploadRetryResponse, "description": "Processing complete"},
+        404: {"model": ErrorResponse, "description": "Upload not found"},
+        400: {"model": ErrorResponse, "description": "Not available in production mode"},
+    },
+)
+async def process_upload_sync(
+    upload_id: str,
+    service: IngestionService = Depends(get_ingestion_service),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Run the full ingestion pipeline synchronously.
+
+    Development-only. Processes the upload through validation, extraction,
+    chunking, embedding, and AI analysis in a single request.
+    """
+    if settings.environment != "development":
+        raise HTTPException(status_code=400, detail="Synchronous processing only available in development mode")
+
+    repo = IngestionRepository(db, tenant_id=tenant_id)
+    upload = await repo.get_upload(upload_id, tenant_id)
+    if not upload:
+        raise NotFoundError(f"Upload {upload_id} not found")
+
+    from app.domains.ingestion.models import IngestionState, coerce_ingestion_state
+    from app.domains.extraction.repository import ExtractionRepository
+    from app.domains.extraction.service import ExtractionService
+    from app.domains.vectors.repository import VectorRepository
+    from app.domains.vectors.chunking import chunking_service
+    from app.domains.vectors.embeddings import OpenAIEmbeddingProvider, EmbeddingRequest, embedding_registry
+    from app.domains.ai.repository import AIRepository
+    from app.domains.ai.service import AIService
+    from app.domains.ai.llm import OpenAIProvider
+    from app.domains.ai.providers.registry import llm_registry
+    from app.kernel.events.bus import EventBus
+
+    current_state = coerce_ingestion_state(upload.ingestion_state)
+
+    # Helper: transition if current state allows it, otherwise skip
+    async def _try_transition(from_state: IngestionState, to_state: IngestionState) -> bool:
+        nonlocal current_state
+        if current_state == from_state:
+            await repo.update_state(upload_id, tenant_id, to_state)
+            await db.commit()
+            current_state = to_state
+            return True
+        return False
+
+    # Step 1: Validate (skip if already past)
+    await _try_transition(IngestionState.UPLOADED, IngestionState.VALIDATING)
+    await _try_transition(IngestionState.VALIDATING, IngestionState.VALIDATED)
+    await _try_transition(IngestionState.VALIDATED, IngestionState.STORAGE_CONFIRMED)
+
+    # Step 2: Extract text (skip if already past OCR)
+    await _try_transition(IngestionState.STORAGE_CONFIRMED, IngestionState.OCR_PENDING)
+    await _try_transition(IngestionState.OCR_PENDING, IngestionState.OCR_PROCESSING)
+
+    if current_state in (IngestionState.OCR_PROCESSING, IngestionState.STORAGE_CONFIRMED, IngestionState.OCR_PENDING):
+        extract_repo = ExtractionRepository(db, tenant_id=tenant_id)
+        extract_svc = ExtractionService(
+            extraction_repo=extract_repo,
+            ingestion_repo=repo,
+            event_bus=EventBus(),
+            user=None,
+            tenant_id=tenant_id,
+        )
+        try:
+            storage_key = upload.storage_key
+            if storage_key:
+                bucket = upload.storage_bucket or settings.s3_bucket or "contractrisk-documents"
+                file_data = await storage_service.download_fileobj(bucket, storage_key)
+                result = await extract_svc.extract_text(upload_id, tenant_id, file_data)
+                logger.info("Extraction complete: %s pages", result.get("page_count", 0))
+        except Exception as exc:
+            logger.error("Extraction failed: %s", exc)
+            await repo.update_state(upload_id, tenant_id, IngestionState.FAILED, error=str(exc))
+            await db.commit()
+            return UploadRetryResponse(upload_id=upload_id, ingestion_state="failed", retry_count=upload.retry_count)
+
+    await _try_transition(IngestionState.OCR_COMPLETE, IngestionState.CHUNKING_PENDING)
+    # If already past OCR_COMPLETE, current_state is already CHUNKING_PENDING or beyond
+
+    # Step 3: Chunk (skip if chunks already exist)
+    if current_state in (IngestionState.CHUNKING_PENDING, IngestionState.OCR_COMPLETE):
+        vector_repo = VectorRepository(db, tenant_id=tenant_id)
+        pages = await extract_repo.get_pages_by_upload(upload_id, tenant_id)
+        if pages:
+            page_dicts = [{"page_number": p.page_number, "text": p.text} for p in pages]
+            chunks = chunking_service.chunk_pages(page_dicts, strategy="semantic")
+            await vector_repo.store_chunks_bulk(upload_id, tenant_id, chunks)
+            await db.commit()
+
+    await _try_transition(IngestionState.CHUNKING_PENDING, IngestionState.EMBEDDING_PENDING)
+
+    # Step 4: Embed (skip if already embedded)
+    if current_state in (IngestionState.EMBEDDING_PENDING, IngestionState.CHUNKING_PENDING):
+        vector_repo = VectorRepository(db, tenant_id=tenant_id)
+        chunks = await vector_repo.get_pending_chunks(upload_id, tenant_id)
+        if chunks:
+            provider = OpenAIEmbeddingProvider(api_key=settings.openai_api_key)
+            embedding_registry.register(provider)
+            for i in range(0, len(chunks), provider.MAX_BATCH_SIZE):
+                batch = chunks[i:i + provider.MAX_BATCH_SIZE]
+                requests_batch = [EmbeddingRequest(text=c.text) for c in batch]
+                try:
+                    responses = await provider.embed_batch(requests_batch)
+                    for j, response in enumerate(responses):
+                        if j < len(batch):
+                            await vector_repo.update_embedding(
+                                chunk_id=batch[j].chunk_id,
+                                tenant_id=tenant_id,
+                                embedding=response.embedding,
+                                model=response.model,
+                                dimension=1536,
+                                token_count=response.token_count,
+                            )
+                except Exception as exc:
+                    logger.error("Embedding batch failed: %s", exc)
+
+    await _try_transition(IngestionState.EMBEDDING_PENDING, IngestionState.ANALYSIS_PENDING)
+
+    # Step 5: AI Analysis (skip if already past)
+    if current_state in (IngestionState.ANALYSIS_PENDING, IngestionState.EMBEDDING_PENDING):
+        llm_provider = OpenAIProvider(api_key=settings.openai_api_key)
+        llm_registry.register(llm_provider)
+
+        ai_service = AIService(
+            ai_repo=AIRepository(db, tenant_id=tenant_id),
+            vector_repo=vector_repo,
+            ingest_repo=repo,
+            event_bus=EventBus(),
+            user=None,
+            tenant_id=tenant_id,
+        )
+        try:
+            result = await ai_service.analyze(upload_id, "full", force=True)
+            await db.commit()
+            logger.info("AI analysis complete: risk=%.4f findings=%d redlines=%d",
+                         result.risk_score, len(result.findings), len(result.redlines))
+        except Exception as exc:
+            logger.error("AI analysis failed: %s", exc)
+            try:
+                await repo.update_state(upload_id, tenant_id, IngestionState.FAILED, error=str(exc))
+                await db.commit()
+            except ValueError:
+                logger.warning("Could not transition to FAILED (already in terminal state)")
+            return UploadRetryResponse(upload_id=upload_id, ingestion_state="failed", retry_count=upload.retry_count)
+
+    return UploadRetryResponse(
+        upload_id=upload_id,
+        ingestion_state="review_ready",
+        retry_count=upload.retry_count,
+    )
+
+
 # ── GET /uploads/{upload_id}/chunks ───────────────────────────────────────────
 
 
@@ -598,7 +826,7 @@ async def get_upload_chunks(
         UploadChunkResponse(
             chunk_id=str(c.chunk_id),
             chunk_index=c.chunk_index,
-            text=c.text[:500] + ("..." if len(c.text) > 500 else ""),
+            text=c.text,
             token_count=c.token_count,
             page_numbers=list(c.page_numbers) if c.page_numbers else [],
             section_heading=c.section_heading,
@@ -630,21 +858,38 @@ async def list_uploads(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     service: IngestionService = Depends(get_ingestion_service),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
     _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
 ):
     """List upload sessions with pagination and optional state filter."""
     items, total = await service.list_uploads(state, page, page_size)
-    data = [
-        UploadSummary(
-            upload_id=str(u.upload_id),
-            filename=u.filename,
-            file_size=u.file_size,
-            content_type=u.content_type,
-            ingestion_state=ingestion_state_for_api(u.ingestion_state),
-            created_at=u.created_at,
+    data = []
+    for u in items:
+        # Fetch contract_number from linked contract_review
+        contract_number = None
+        try:
+            from sqlalchemy import text as sa_text
+            row = await db.execute(
+                sa_text("SELECT metadata->>'contract_number' FROM contract_reviews WHERE upload_id = :uid AND tenant_id = :tid"),
+                {"uid": u.upload_id, "tid": tenant_id},
+            )
+            cn = row.scalar()
+            if cn:
+                contract_number = cn
+        except Exception:
+            pass
+        data.append(
+            UploadSummary(
+                upload_id=str(u.upload_id),
+                filename=u.filename,
+                file_size=u.file_size,
+                content_type=u.content_type,
+                ingestion_state=ingestion_state_for_api(u.ingestion_state),
+                created_at=u.created_at,
+                contract_number=contract_number,
+            )
         )
-        for u in items
-    ]
     return PaginatedResponse(
         data=data,
         pagination=PaginationMeta(

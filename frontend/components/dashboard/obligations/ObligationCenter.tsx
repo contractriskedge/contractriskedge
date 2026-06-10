@@ -20,7 +20,7 @@ import {
   useUpdateObligation,
 } from "@/services/hooks/useObligations";
 import { obligationsService, obligationKeys } from "@/services/api/obligations";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { useCreateObligation } from "@/services/hooks/useObligations";
 
@@ -30,8 +30,9 @@ function toObligationRecord(o: ObligationResponse): ObligationRecord {
   return {
     id: o.id,
     name: o.name,
-    contractId: o.contract_id ?? "",
+    contractId: o.contract_uuid_id ?? o.contract_id ?? "",
     contractName: o.contract_name ?? "",
+    contractNumber: (o as Record<string, unknown>).contract_number as string ?? "",
     vendor: o.vendor ?? "",
     type: (o.obligation_type as ObligationRecord["type"]) ?? "sla",
     owner: o.owner ?? "",
@@ -123,6 +124,7 @@ const defaultFilters: ObligationFilters = { type: "", status: "", vendor: "", sl
 
 export function ObligationCenter() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const createObligation = useCreateObligation();
   const [filters, setFilters] = useState<ObligationFilters>({ ...defaultFilters });
@@ -133,6 +135,9 @@ export function ObligationCenter() {
   const [searchQuery, setSearchQuery] = useState("");
   const [auditObligationId, setAuditObligationId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  // ── Auto-select obligation from URL query param ──────────────
+  const obligationIdParam = searchParams.get("obligationId");
 
   // ── Action Mutations ──────────────────────────────────────────
   const completeMutation = useMutation({
@@ -196,6 +201,16 @@ export function ObligationCenter() {
     [obligationsData],
   );
 
+  // Auto-select obligation from URL query param once data is loaded
+  React.useEffect(() => {
+    if (obligationIdParam && obligations.length > 0) {
+      const match = obligations.find((o) => o.id === obligationIdParam);
+      if (match) {
+        setSelectedObligation(match);
+      }
+    }
+  }, [obligationIdParam, obligations]);
+
   const filteredObligations = useMemo(() => {
     let list = obligations;
     if (filters.vendor) list = list.filter((o) => o.vendor.toLowerCase().includes(filters.vendor.toLowerCase()));
@@ -244,8 +259,8 @@ export function ObligationCenter() {
       { id: "escalated", label: "Escalated", value: kpisData.escalated_count.toString(), trend: 12, trendDirection: "up" as const, icon: "AlertOctagon", color: "from-purple-500 to-purple-700", severity: "warning" as const, sparklineData: [2, 3, 5, 4, 6, 7, kpisData.escalated_count], tooltip: "Escalated obligations" },
       { id: "completed", label: "Completed", value: kpisData.completed_count.toString(), trend: 15, trendDirection: "up" as const, icon: "CheckCircle", color: "from-emerald-500 to-emerald-700", severity: "success" as const, sparklineData: [5, 8, 10, 12, 15, 18, kpisData.completed_count], tooltip: "Completed obligations this period" },
       { id: "breached", label: "SLA Breaches", value: kpisData.breached_count.toString(), trend: -5, trendDirection: "down" as const, icon: "Flag", color: "from-rose-500 to-rose-700", severity: "critical" as const, sparklineData: [4, 6, 3, 5, 2, 3, kpisData.breached_count], tooltip: "SLA breaches this period" },
-      { id: "exposure", label: "At Risk ($M)", value: `$${kpisData.at_risk_amount.toFixed(1)}M`, trend: 3, trendDirection: "up" as const, icon: "DollarSign", color: "from-amber-500 to-amber-700", severity: "warning" as const, sparklineData: [10, 12, 15, 14, 18, 16, kpisData.at_risk_amount], tooltip: "Financial amount at risk" },
-      { id: "compliance", label: "Compliance", value: `${(kpisData.compliance_rate * 100).toFixed(0)}%`, trend: 2, trendDirection: "up" as const, icon: "Shield", color: "from-teal-500 to-teal-700", severity: kpisData.compliance_rate > 0.8 ? "success" : "warning", sparklineData: [70, 72, 75, 73, 78, 76, kpisData.compliance_rate * 100], tooltip: "Overall compliance rate" },
+      { id: "exposure", label: "At Risk ($)", value: `$${kpisData.at_risk_amount.toLocaleString()}`, trend: 3, trendDirection: "up" as const, icon: "DollarSign", color: "from-amber-500 to-amber-700", severity: "warning" as const, sparklineData: [10, 12, 15, 14, 18, 16, kpisData.at_risk_amount], tooltip: "Financial amount at risk" },
+      { id: "compliance", label: "Compliance", value: `${Math.min(kpisData.compliance_rate, 100).toFixed(0)}%`, trend: 2, trendDirection: "up" as const, icon: "Shield", color: "from-teal-500 to-teal-700", severity: kpisData.compliance_rate >= 80 ? "success" : kpisData.compliance_rate >= 50 ? "warning" : "critical", sparklineData: [70, 72, 75, 73, 78, 76, Math.min(kpisData.compliance_rate, 100)], tooltip: "Overall compliance rate (0-100%)" },
     ];
   }, [kpisData]);
 

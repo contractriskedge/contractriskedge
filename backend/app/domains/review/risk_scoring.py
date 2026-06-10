@@ -671,6 +671,11 @@ def risk_breakdown_payload(
 def risk_breakdown_shell(overall: float = 0.0, *, status: Optional[str] = None, **extra) -> dict:
     """Consistent early-return payload."""
     remaining = extra.get("remaining_exposure", overall)
+    contract_value = float(extra.get("contract_value", 0) or 0)
+    currency = extra.get("currency", "USD")
+    current_risk = float(remaining or 0)
+    after_mitigation = round(min(current_risk * 0.18, 0.05), 4)
+
     return {
         "overall_risk_score": round(overall, 4),
         "overall_label": risk_score_label(overall),
@@ -694,5 +699,14 @@ def risk_breakdown_shell(overall: float = 0.0, *, status: Optional[str] = None, 
         "open_findings": extra.get("open_findings", []),
         "delta_explanations": extra.get("delta_explanations", []),
         "exposure_contributors": extra.get("exposure_contributors", []),
+        "financial_impact": {
+            "contract_value": round(contract_value, 2),
+            "currency": currency,
+            "current_risk_pct": round(current_risk * 100, 1),
+            "current_exposure": round(contract_value * current_risk, 2),
+            "after_mitigation_pct": round(after_mitigation * 100, 1),
+            "after_mitigation_exposure": round(contract_value * after_mitigation, 2),
+            "potential_savings": round(contract_value * (current_risk - after_mitigation), 2),
+        },
         **({"status": status} if status else {}),
     }

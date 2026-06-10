@@ -31,6 +31,14 @@ celery_app.conf.beat_schedule = {
         "options": {"queue": "default"},
     },
 
+    # Obligation overdue check — every 5 minutes
+    "check-obligations-overdue": {
+        "task": "check_obligations_overdue",
+        "schedule": crontab(minute="*/5"),  # Every 5 minutes
+        "args": (),
+        "options": {"queue": "default"},
+    },
+
     # System metrics aggregation — every 15 minutes
     "aggregate-system-metrics": {
         "task": "aggregate_system_metrics",

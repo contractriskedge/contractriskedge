@@ -11,10 +11,12 @@
 
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { FileEdit, CheckCircle2, XCircle, Edit3, BookOpen, Lock, AlertTriangle, TrendingDown, Shield } from "lucide-react";
 import type { RedlineItem, ReviewDetail, ConfidenceLabel, LocatorResponse, RiskTraceability } from "@/services/api/client";
 import { useReviewRedlines, useUpdateRedline, useReview } from "@/services/hooks";
+import { useQueryClient } from "@tanstack/react-query";
+import { reviewService } from "@/services/api/reviews";
 import { AsyncBoundary } from "@/components/shared/AsyncBoundary";
 import { CardSkeleton } from "@/components/shared/LoadingSkeleton";
 import { RedlineEditModal } from "./RedlineEditModal";
@@ -208,8 +210,16 @@ export function RedlinesPanel({ reviewId, onRedlineSelect, review }: RedlinesPan
 
   const redlinesQuery = useReviewRedlines(reviewId, filterStatus || undefined);
   const updateMutation = useUpdateRedline(reviewId);
+  const queryClient = useQueryClient();
 
   const redlines = redlinesQuery.data?.redlines ?? [];
+
+  // Refresh counters immediately after mutation success
+  useEffect(() => {
+    if (!updateMutation.isPending && updateMutation.isSuccess) {
+      redlinesQuery.refetch();
+    }
+  }, [updateMutation.isSuccess, updateMutation.isPending]);
 
   const handleAccept = async (redlineId: string, reviewNotes?: string) => {
     setVersionNotice(null);
@@ -258,6 +268,29 @@ export function RedlinesPanel({ reviewId, onRedlineSelect, review }: RedlinesPan
     setEditTarget(null);
   };
 
+  /** Regenerate a redline using the finding's category as mandatory filter */
+  const handleRegenerate = async (redline: RedlineItem) => {
+    if (!redline.finding_id || !redline.finding_category) {
+      setErrorNotice("Cannot regenerate: redline is not linked to a finding with a category.");
+      return;
+    }
+    setVersionNotice(null);
+    setErrorNotice(null);
+    try {
+      const result = await reviewService.regenerateRedline(reviewId, {
+        finding_id: redline.finding_id,
+        finding_category: redline.finding_category,
+        redline_id: redline.redline_id,
+      });
+      setVersionNotice(result.message || `Redline regenerated with category '${redline.finding_category}'`);
+      // Refresh redlines list to show the new redline and hide the superseded one
+      queryClient.invalidateQueries({ queryKey: ["reviews", reviewId, "redlines"] });
+      queryClient.invalidateQueries({ queryKey: ["reviews", "detail", reviewId] });
+    } catch (e: any) {
+      setErrorNotice(e?.message || "Failed to regenerate redline.");
+    }
+  };
+
   const statusBadge = (status: string) => {
     const colors: Record<string, string> = {
       proposed: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
@@ -298,27 +331,40 @@ export function RedlinesPanel({ reviewId, onRedlineSelect, review }: RedlinesPan
             <option value="fallback_language">Fallback Language</option>
           </select>
         </div>
-        {/* Review Progress */}
+        {/* Review Progress — computed from ALL fetched redlines for accurate aggregation */}
         {(() => {
-          const total = redlines.length;
-          const accepted = redlines.filter(r => r.status === "accepted").length;
-          const rejected = redlines.filter(r => r.status === "rejected").length;
-          const modified = redlines.filter(r => r.status === "modified").length;
-          const reviewed = accepted + rejected + modified;
-          const pending = total - reviewed;
-          const pct = total > 0 ? Math.round((reviewed / total) * 100) : 0;
+          // Compute status counts from ALL fetched redlines (not filtered)
+          const totalRedlines = redlines.length;
+          const acceptedCount = redlines.filter(r => r.status === "accepted").length;
+          const rejectedCount = redlines.filter(r => r.status === "rejected").length;
+          const modifiedCount = redlines.filter(r => r.status === "modified").length;
+          const pendingCount = redlines.filter(r => r.status === "proposed" || r.status === "needs_legal_review" || r.status === "customer_requested" || r.status === "fallback_language").length;
+          const reviewedCount = acceptedCount + rejectedCount + modifiedCount;
+          const progressPct = totalRedlines > 0 ? Math.round((reviewedCount / totalRedlines) * 100) : 0;
+          // Count mapping integrity issues
+          const mappingMismatches = redlines.filter(r =>
+            r.finding_id && r.finding_category && r.clause_type &&
+            r.finding_category.toLowerCase().replace(/[_-]/g, " ").trim() !== r.clause_type.toLowerCase().replace(/[_-]/g, " ").trim() &&
+            !r.finding_category.toLowerCase().replace(/[_-]/g, " ").includes(r.clause_type.toLowerCase().replace(/[_-]/g, " ")) &&
+            !r.clause_type.toLowerCase().replace(/[_-]/g, " ").includes(r.finding_category.toLowerCase().replace(/[_-]/g, " "))
+          ).length;
           return (
             <div className="mt-3 flex items-center gap-4 text-[11px]">
               <div className="flex items-center gap-2 flex-1">
                 <div className="h-1.5 flex-1 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-                  <div className="h-full rounded-full bg-emerald-500 transition-all duration-500" style={{ width: `${pct}%` }} />
+                  <div className="h-full rounded-full bg-emerald-500 transition-all duration-500" style={{ width: `${progressPct}%` }} />
                 </div>
-                <span className="text-gray-500 dark:text-gray-400 font-medium whitespace-nowrap">{reviewed}/{total} reviewed</span>
+                <span className="text-gray-500 dark:text-gray-400 font-medium whitespace-nowrap">{reviewedCount}/{totalRedlines} reviewed</span>
               </div>
-              <span className="text-emerald-600 dark:text-emerald-400 font-medium">{accepted} accepted</span>
-              <span className="text-red-600 dark:text-red-400 font-medium">{rejected} rejected</span>
-              <span className="text-purple-600 dark:text-purple-400 font-medium">{modified} modified</span>
-              {pending > 0 && <span className="text-gray-500 dark:text-gray-400">{pending} pending</span>}
+              <span className="text-emerald-600 dark:text-emerald-400 font-medium">{acceptedCount} accepted</span>
+              <span className="text-red-600 dark:text-red-400 font-medium">{rejectedCount} rejected</span>
+              <span className="text-purple-600 dark:text-purple-400 font-medium">{modifiedCount} modified</span>
+              {pendingCount > 0 && <span className="text-gray-500 dark:text-gray-400">{pendingCount} pending</span>}
+              {mappingMismatches > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                  ⚠ {mappingMismatches} mapping issue{mappingMismatches !== 1 ? "s" : ""}
+                </span>
+              )}
             </div>
           );
         })()}
@@ -360,9 +406,7 @@ export function RedlinesPanel({ reviewId, onRedlineSelect, review }: RedlinesPan
         loadingSkeleton={<CardSkeleton count={2} />}
         emptyMessage="No redline suggestions"
         emptyDescription={
-          (currentReview?.finding_count ?? 0) > 0
-            ? "Findings were identified but no clause edits were generated. Use Re-analyze to regenerate redlines (medium/high/critical findings)."
-            : "AI did not suggest any clause changes for this contract."
+          "Redline suggestions are AI-generated clause edits. Findings may exist without corresponding redlines. Use Re-analyze to regenerate if needed."
         }
         onRetry={() => redlinesQuery.refetch()}
       >
@@ -397,6 +441,7 @@ export function RedlinesPanel({ reviewId, onRedlineSelect, review }: RedlinesPan
                         onAccept={handleAccept}
                         onReject={handleReject}
                         onEdit={setEditTarget}
+                        onRegenerate={handleRegenerate}
                         immutable={immutable}
                         defaultExpanded={
                           expandedAll === "all" ? true :

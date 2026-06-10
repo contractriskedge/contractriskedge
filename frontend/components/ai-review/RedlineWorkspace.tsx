@@ -45,7 +45,7 @@ import { mapApiRedlineRecord, buildLocatePayloadFromRedline } from "@/lib/mapRed
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-type RedlineStatus = "proposed" | "under_review" | "accepted" | "rejected" | "modified";
+type RedlineStatus = "proposed" | "under_review" | "accepted" | "rejected" | "modified" | "invalid_mapping";
 
 interface RedlineComment {
   id: string;
@@ -87,6 +87,19 @@ interface RedlineItem {
   mismatch_warning?: string | null;
   source_category?: string | null;
   proposed_category?: string | null;
+  mapping_valid?: boolean;
+  mapping_status?: "valid" | "invalid_mapping";
+  mapping_warning?: string | null;
+  redline_title?: string | null;
+  redline_category?: string | null;
+  finding_category?: string | null;
+  mapping_details?: {
+    finding_title?: string | null;
+    redline_title?: string | null;
+    category?: string | null;
+    finding_category?: string | null;
+    redline_category?: string | null;
+  } | null;
 }
 
 // ── Status Config ───────────────────────────────────────────────────────────
@@ -97,7 +110,19 @@ const STATUS_CONFIG: Record<RedlineStatus, { color: string; bg: string; dot: str
   accepted:     { color: "text-green-700", bg: "bg-green-100", dot: "bg-green-500", label: "Accepted" },
   rejected:     { color: "text-red-700",   bg: "bg-red-100",   dot: "bg-red-500",   label: "Rejected" },
   modified:     { color: "text-purple-700",bg: "bg-purple-100",dot: "bg-purple-500", label: "Modified" },
+  invalid_mapping: { color: "text-red-800", bg: "bg-red-100", dot: "bg-red-600", label: "Invalid Mapping" },
 };
+
+function isMappingInvalid(rl: RedlineItem): boolean {
+  return rl.mapping_valid === false
+    || rl.mapping_status === "invalid_mapping"
+    || rl.status === "invalid_mapping";
+}
+
+function formatCategoryLabel(cat: string | null | undefined): string {
+  if (!cat) return "—";
+  return cat.replace(/_/g, " ");
+}
 
 const ESCALATION_REASONS = [
   "Unlimited Liability",
@@ -212,7 +237,7 @@ function renderOriginalPanel(
     if (opts?.contextExcerpt?.trim()) {
       return (
         <>
-          <span className="text-[7px] font-semibold text-amber-600 uppercase block mb-1">
+          <span className="text-xs font-semibold text-amber-600 uppercase block mb-1">
             Surrounding contract text
           </span>
           <span>{opts.contextExcerpt}</span>
@@ -228,7 +253,7 @@ function renderOriginalPanel(
     }
     return (
       <span className="text-gray-400 italic">
-        Original clause text was not returned by the API. Use Locate Original Clause if linked to a finding.
+        Original clause text was not returned by the API. Use View Source Location if linked to a finding.
       </span>
     );
   }
@@ -476,6 +501,8 @@ export function RedlineWorkspace() {
   const reviewPct = stats.total > 0 ? Math.round((reviewed / stats.total) * 100) : 0;
 
   const handleAccept = (id: string, notes?: string) => {
+    const rl = redlines.find((r) => r.id === id);
+    if (rl && isMappingInvalid(rl)) return;
     setRedlines(prev => prev.map(r =>
       r.id === id ? { ...r, status: "accepted" as RedlineStatus, review_notes: notes || r.review_notes } : r
     ));
@@ -519,7 +546,7 @@ export function RedlineWorkspace() {
     [findings, setShowLeftPanel],
   );
 
-  // More Actions → Locate Source Clause (stays on Redline tab)
+  // More Actions -> View Source Location (stays on Redline tab)
   React.useEffect(() => {
     return onRedlineLocateSource(({ redlineId }) => {
       const target =
@@ -555,10 +582,13 @@ export function RedlineWorkspace() {
   };
 
   const handleBulkAccept = () => {
-    const ids = Array.from(selectedIds);
+    const ids = Array.from(selectedIds).filter((id) => {
+      const rl = redlines.find((r) => r.id === id);
+      return rl && !isMappingInvalid(rl);
+    });
     if (ids.length === 0) return;
     setRedlines(prev => prev.map(r =>
-      selectedIds.has(r.id) ? { ...r, status: "accepted" as RedlineStatus } : r
+      ids.includes(r.id) ? { ...r, status: "accepted" as RedlineStatus } : r
     ));
     bulkAcceptMutation.mutate({ redlineIds: ids });
   };
@@ -786,9 +816,9 @@ export function RedlineWorkspace() {
             <button onClick={() => setShowCompare(false)} className="text-gray-400 text-[9px]">Close</button>
           </div>
           <div className="grid grid-cols-2 gap-0">
-            <div className="p-2 border-r border-gray-200 dark:border-navy-700">
-              <span className="text-[7px] font-semibold text-red-600 uppercase">Original</span>
-              <p className="text-[9px] text-gray-700 dark:text-gray-300 mt-0.5 leading-relaxed">
+            <div className="p-3 border-r border-gray-200 dark:border-navy-700">
+              <span className="text-xs font-semibold text-red-600 uppercase tracking-wide">Original</span>
+              <p className="text-sm text-gray-800 dark:text-gray-200 mt-1.5 leading-relaxed">
                 {renderOriginalPanel(
                   selectedRedline.original_text,
                   selectedRedline.proposed_text,
@@ -799,9 +829,9 @@ export function RedlineWorkspace() {
                 )}
               </p>
             </div>
-            <div className="p-2">
-              <span className="text-[7px] font-semibold text-green-600 uppercase">Proposed</span>
-              <p className="text-[9px] text-gray-700 dark:text-gray-300 mt-0.5 leading-relaxed">
+            <div className="p-3">
+              <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">Proposed</span>
+              <p className="text-sm text-gray-800 dark:text-gray-200 mt-1.5 leading-relaxed">
                 {renderProposedPanel(
                   selectedRedline.original_text,
                   selectedRedline.proposed_text,
@@ -835,7 +865,10 @@ export function RedlineWorkspace() {
             {filteredRedlines.map(rl => {
               const isSelected = selectedRedlineId === rl.id;
               const sc = STATUS_CONFIG[rl.status] || STATUS_CONFIG.proposed;
-              const isActionable = rl.status === "proposed" || rl.status === "under_review";
+              const mappingInvalid = isMappingInvalid(rl);
+              const isActionable =
+                (rl.status === "proposed" || rl.status === "under_review")
+                && !mappingInvalid;
 
               return (
                 <div
@@ -871,8 +904,8 @@ export function RedlineWorkspace() {
 
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
-                            <span className="text-[10px] font-semibold text-navy-900 dark:text-white">
-                              {rl.clause_type}
+                            <span className="text-sm font-semibold text-navy-900 dark:text-white">
+                              {rl.redline_title || rl.mapping_details?.redline_title || rl.clause_type}
                             </span>
                             <span className="text-[8px] text-gray-400">§{rl.section}</span>
                             {/* Status badge */}
@@ -892,7 +925,7 @@ export function RedlineWorkspace() {
                               </span>
                             )}
                           </div>
-                          <p className="text-[8px] text-gray-500 truncate">
+                          <p className="text-xs text-gray-500 truncate">
                             {(rl.original_text || rl.context_excerpt || rl.proposed_text).slice(0, 80)}
                             {(rl.original_text || rl.context_excerpt || rl.proposed_text).length > 80 ? "…" : ""}
                           </p>
@@ -947,31 +980,69 @@ export function RedlineWorkspace() {
                   {/* ── Expanded View ────────────────────────────────── */}
                   {isSelected && (
                     <div className="px-3 pb-3 space-y-2 border-t border-gray-50 dark:border-navy-750 pt-2">
-                      {rl.mismatch_warning && (
+                      {mappingInvalid && (
                         <div
-                          className="flex items-start gap-1.5 p-2 rounded border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700"
+                          className="rounded-lg border border-red-300 bg-red-50 dark:bg-red-900/20 dark:border-red-700 p-3 space-y-2"
                           role="alert"
                         >
-                          <AlertTriangle className="w-3 h-3 text-amber-600 flex-shrink-0 mt-0.5" />
-                          <p className="text-[8px] text-amber-900 dark:text-amber-200 leading-snug">
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                            <p className="text-sm font-semibold text-red-900 dark:text-red-200">
+                              Invalid redline-to-finding mapping — Accept is disabled
+                            </p>
+                          </div>
+                          <p className="text-sm text-red-800 dark:text-red-200 leading-relaxed">
+                            {rl.mapping_warning || rl.mismatch_warning}
+                          </p>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
+                            <div className="rounded-md bg-white/70 dark:bg-navy-800/60 px-2.5 py-2 border border-red-200 dark:border-red-800">
+                              <span className="text-xs font-semibold text-red-700 uppercase tracking-wide">Finding</span>
+                              <p className="text-sm text-red-900 dark:text-red-100 mt-0.5">
+                                {rl.mapping_details?.finding_title || rl.finding_title || "—"}
+                              </p>
+                            </div>
+                            <div className="rounded-md bg-white/70 dark:bg-navy-800/60 px-2.5 py-2 border border-red-200 dark:border-red-800">
+                              <span className="text-xs font-semibold text-red-700 uppercase tracking-wide">Redline</span>
+                              <p className="text-sm text-red-900 dark:text-red-100 mt-0.5">
+                                {rl.mapping_details?.redline_title || rl.redline_title || rl.clause_type}
+                              </p>
+                            </div>
+                            <div className="rounded-md bg-white/70 dark:bg-navy-800/60 px-2.5 py-2 border border-red-200 dark:border-red-800">
+                              <span className="text-xs font-semibold text-red-700 uppercase tracking-wide">Category</span>
+                              <p className="text-sm text-red-900 dark:text-red-100 mt-0.5">
+                                Finding: {formatCategoryLabel(rl.mapping_details?.finding_category || rl.finding_category)}
+                                <br />
+                                Redline: {formatCategoryLabel(rl.mapping_details?.redline_category || rl.redline_category || rl.clause_type)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      {!mappingInvalid && rl.mismatch_warning && (
+                        <div
+                          className="flex items-start gap-2 p-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700"
+                          role="alert"
+                        >
+                          <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                          <p className="text-sm text-amber-900 dark:text-amber-200 leading-relaxed">
                             {rl.mismatch_warning}
                           </p>
                         </div>
                       )}
                       {/* Word-Level Diff View */}
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="p-2 rounded bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-800">
-                          <span className="text-[7px] font-semibold text-red-600 uppercase">Original</span>
-                          <p className="text-[8px] text-gray-700 dark:text-gray-300 mt-0.5 leading-relaxed">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-800">
+                          <span className="text-xs font-semibold text-red-600 uppercase tracking-wide">Original</span>
+                          <p className="text-sm text-gray-800 dark:text-gray-200 mt-1.5 leading-relaxed">
                             {renderOriginalPanel(rl.original_text, rl.proposed_text, {
                               isPureInsert: rl.is_pure_insert,
                               contextExcerpt: rl.context_excerpt,
                             })}
                           </p>
                         </div>
-                        <div className="p-2 rounded bg-green-50 dark:bg-green-900/10 border border-green-100 dark:border-green-800">
-                          <span className="text-[7px] font-semibold text-green-600 uppercase">Proposed</span>
-                          <p className="text-[8px] text-gray-700 dark:text-gray-300 mt-0.5 leading-relaxed">
+                        <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/10 border border-green-100 dark:border-green-800">
+                          <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">Proposed</span>
+                          <p className="text-sm text-gray-800 dark:text-gray-200 mt-1.5 leading-relaxed">
                             {renderProposedPanel(
                               rl.original_text,
                               rl.proposed_text,
@@ -982,65 +1053,65 @@ export function RedlineWorkspace() {
                       </div>
 
                       {/* ── Clause Metadata Panel ── */}
-                      <div className="grid grid-cols-3 gap-1.5 px-1">
-                        <div className="p-1.5 rounded bg-gray-50 dark:bg-navy-700">
-                          <span className="text-[6px] font-semibold text-gray-500 uppercase">Finding ID</span>
-                          <p className="text-[8px] font-mono text-navy-900 dark:text-white truncate">{rl.finding_id ? rl.finding_id.slice(0, 12) : "—"}</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-navy-700">
+                          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Finding ID</span>
+                          <p className="text-sm font-mono text-navy-900 dark:text-white truncate mt-0.5">{rl.finding_id ? rl.finding_id.slice(0, 12) : "—"}</p>
                         </div>
-                        <div className="p-1.5 rounded bg-gray-50 dark:bg-navy-700">
-                          <span className="text-[6px] font-semibold text-gray-500 uppercase">Risk Category</span>
-                          <p className="text-[8px] font-medium text-navy-900 dark:text-white capitalize">{rl.clause_type.replace(/_/g, " ")}</p>
+                        <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-navy-700">
+                          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Risk Category</span>
+                          <p className="text-sm font-medium text-navy-900 dark:text-white capitalize mt-0.5">{rl.clause_type.replace(/_/g, " ")}</p>
                         </div>
-                        <div className="p-1.5 rounded bg-gray-50 dark:bg-navy-700">
-                          <span className="text-[6px] font-semibold text-gray-500 uppercase">Severity</span>
-                          <p className={`text-[8px] font-semibold ${
+                        <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-navy-700">
+                          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Severity</span>
+                          <p className={`text-sm font-semibold mt-0.5 ${
                             rl.severity === "critical" ? "text-red-600" : rl.severity === "high" ? "text-orange-600" : "text-amber-600"
                           }`}>{rl.severity || "medium"}</p>
                         </div>
-                        <div className="p-1.5 rounded bg-gray-50 dark:bg-navy-700">
-                          <span className="text-[6px] font-semibold text-gray-500 uppercase">Confidence</span>
-                          <p className="text-[8px] font-medium text-navy-900 dark:text-white">{rl.confidence ? `${Math.round(rl.confidence * 100)}%` : "—"}</p>
+                        <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-navy-700">
+                          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Confidence</span>
+                          <p className="text-sm font-medium text-navy-900 dark:text-white mt-0.5">{rl.confidence ? `${Math.round(rl.confidence * 100)}%` : "—"}</p>
                         </div>
-                        <div className="p-1.5 rounded bg-gray-50 dark:bg-navy-700">
-                          <span className="text-[6px] font-semibold text-gray-500 uppercase">Version</span>
-                          <p className="text-[8px] font-medium text-navy-900 dark:text-white">v{rl.version}</p>
+                        <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-navy-700">
+                          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Version</span>
+                          <p className="text-sm font-medium text-navy-900 dark:text-white mt-0.5">v{rl.version}</p>
                         </div>
-                        <div className="p-1.5 rounded bg-gray-50 dark:bg-navy-700">
-                          <span className="text-[6px] font-semibold text-gray-500 uppercase">Status</span>
-                          <p className={`text-[8px] font-semibold ${sc.color}`}>{sc.label}</p>
+                        <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-navy-700">
+                          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</span>
+                          <p className={`text-sm font-semibold mt-0.5 ${sc.color}`}>{sc.label}</p>
                         </div>
                       </div>
 
                       {/* ── Traceability Chain ── */}
-                      <div className="flex items-center gap-1 text-[7px] text-gray-400 px-1 flex-wrap">
-                        <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium">
+                      <div className="flex items-center gap-1.5 text-xs text-gray-400 flex-wrap">
+                        <span className="flex items-center gap-0.5 px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium">
                           Original Clause
                         </span>
-                        <ChevronDown className="w-2 h-2 -rotate-90" />
+                        <ChevronDown className="w-3 h-3 -rotate-90" />
                         {rl.finding_id && (
                           <>
-                            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 font-medium">
+                            <span className="flex items-center gap-0.5 px-2 py-1 rounded-md bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 font-medium">
                               AI Finding
                             </span>
-                            <ChevronDown className="w-2 h-2 -rotate-90" />
+                            <ChevronDown className="w-3 h-3 -rotate-90" />
                           </>
                         )}
                         {rl.recommendation_id && (
                           <>
-                            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-cyan-50 dark:bg-cyan-900/20 text-cyan-600 dark:text-cyan-400 font-medium">
+                            <span className="flex items-center gap-0.5 px-2 py-1 rounded-md bg-cyan-50 dark:bg-cyan-900/20 text-cyan-600 dark:text-cyan-400 font-medium">
                               Recommendation
                             </span>
-                            <ChevronDown className="w-2 h-2 -rotate-90" />
+                            <ChevronDown className="w-3 h-3 -rotate-90" />
                           </>
                         )}
-                        <span className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded font-medium ${
+                        <span className={`flex items-center gap-0.5 px-2 py-1 rounded-md font-medium ${
                           rl.status === "accepted" ? "bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400" :
                           rl.status === "rejected" ? "bg-gray-100 dark:bg-gray-800 text-gray-400" : "bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400"
                         }`}>
                           Generated Redline
                         </span>
-                        <ChevronDown className="w-2 h-2 -rotate-90" />
-                        <span className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded font-medium ${
+                        <ChevronDown className="w-3 h-3 -rotate-90" />
+                        <span className={`flex items-center gap-0.5 px-2 py-1 rounded-md font-medium ${
                           rl.status === "accepted" ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300" :
                           rl.modified_text ? "bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300" :
                           "bg-gray-100 dark:bg-gray-800 text-gray-400"
@@ -1050,16 +1121,16 @@ export function RedlineWorkspace() {
                       </div>
 
                       {/* ── Locate source in document (always available) ─ */}
-                      <div className="flex items-center justify-between gap-2 p-1.5 rounded bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800">
+                      <div className="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800">
                         {rl.finding_id && rl.finding_title ? (
                           <>
-                            <Target className="w-2.5 h-2.5 text-blue-500 flex-shrink-0" />
-                            <span className="text-[8px] text-blue-700 dark:text-blue-300 flex-1 truncate">
+                            <Target className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                            <span className="text-sm text-blue-700 dark:text-blue-300 flex-1 truncate">
                               Linked to: {rl.finding_title}
                             </span>
                           </>
                         ) : (
-                          <span className="text-[8px] text-blue-700 dark:text-blue-300 flex-1">
+                          <span className="text-sm text-blue-700 dark:text-blue-300 flex-1">
                             Source: §{rl.section !== "—" ? rl.section : rl.clause_type}
                             {rl.page > 0 ? ` · Page ${rl.page}` : ""}
                           </span>
@@ -1067,9 +1138,9 @@ export function RedlineWorkspace() {
                         <button
                           type="button"
                           onClick={() => locateRedlineSource(rl)}
-                          className="flex items-center gap-0.5 text-[7px] font-medium text-blue-600 hover:text-blue-800 flex-shrink-0"
+                          className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 flex-shrink-0"
                         >
-                          <ExternalLink className="w-2 h-2" /> Locate Source Clause
+                          <ExternalLink className="w-3.5 h-3.5" /> View Source Location
                         </button>
                       </div>
 
@@ -1080,7 +1151,7 @@ export function RedlineWorkspace() {
                             value={reviewNotes}
                             onChange={e => setReviewNotes(e.target.value)}
                             placeholder="Add review notes..."
-                            className="w-full px-2 py-1 text-[8px] bg-gray-50 dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-navy-400"
+                            className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded-lg text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-navy-400"
                             rows={2}
                           />
                         </div>
@@ -1097,48 +1168,48 @@ export function RedlineWorkspace() {
                                 onChange={e => { setShowReviewNotes(rl.id); setReviewNotes(e.target.value); }}
                                 onFocus={() => setShowReviewNotes(rl.id)}
                                 placeholder="Add reviewer comment..."
-                                className="flex-1 px-2 py-1 text-[8px] bg-gray-50 dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-navy-400"
+                                className="flex-1 px-3 py-2 text-sm bg-gray-50 dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded-lg text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-navy-400"
                               />
                             </div>
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <button
                                 onClick={() => { handleAccept(rl.id, reviewNotes || undefined); setReviewNotes(""); setShowReviewNotes(null); }}
-                                className="flex items-center gap-1 px-2.5 py-1 text-[8px] font-medium rounded bg-green-600 text-white hover:bg-green-700 border border-green-700 transition-colors shadow-sm"
+                                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md bg-green-600 text-white hover:bg-green-700 border border-green-700 transition-colors shadow-sm"
                               >
-                                <CheckCircle2 className="w-3 h-3" /> Accept
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Accept
                               </button>
                               <button
                                 onClick={() => setEditTarget(rl)}
-                                className="flex items-center gap-1 px-2.5 py-1 text-[8px] font-medium rounded bg-purple-600 text-white hover:bg-purple-700 border border-purple-700 transition-colors shadow-sm"
+                                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 border border-purple-700 transition-colors shadow-sm"
                               >
-                                <Edit3 className="w-3 h-3" /> Modify
+                                <Edit3 className="w-3.5 h-3.5" /> Modify
                               </button>
                               <button
                                 onClick={() => { handleReject(rl.id, reviewNotes || undefined); setReviewNotes(""); setShowReviewNotes(null); }}
-                                className="flex items-center gap-1 px-2.5 py-1 text-[8px] font-medium rounded bg-red-600 text-white hover:bg-red-700 border border-red-700 transition-colors shadow-sm"
+                                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md bg-red-600 text-white hover:bg-red-700 border border-red-700 transition-colors shadow-sm"
                               >
-                                <XCircle className="w-3 h-3" /> Reject
+                                <XCircle className="w-3.5 h-3.5" /> Reject
                               </button>
                               {/* Assign */}
                               <button
                                 onClick={() => setAssignTarget(rl)}
-                                className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-blue-600 text-white hover:bg-blue-700 border border-blue-700 transition-colors shadow-sm"
+                                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 border border-blue-700 transition-colors shadow-sm"
                               >
-                                <User className="w-2.5 h-2.5" /> Assign
+                                <User className="w-3.5 h-3.5" /> Assign
                               </button>
                               {/* Escalate */}
                               <button
                                 onClick={() => setEscalateTarget(rl)}
-                                className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-orange-600 text-white hover:bg-orange-700 border border-orange-700 transition-colors shadow-sm"
+                                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md bg-orange-600 text-white hover:bg-orange-700 border border-orange-700 transition-colors shadow-sm"
                               >
-                                <AlertTriangle className="w-2.5 h-2.5" /> Escalate
+                                <AlertTriangle className="w-3.5 h-3.5" /> Escalate
                               </button>
                               {/* Counter Proposal */}
                               <button
                                 onClick={() => { setCounterTarget(rl); setCounterText(rl.modified_text || rl.proposed_text); }}
-                                className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-700 transition-colors shadow-sm"
+                                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-700 transition-colors shadow-sm"
                               >
-                                <FileText className="w-2.5 h-2.5" /> Counter Proposal
+                                <FileText className="w-3.5 h-3.5" /> Counter Proposal
                               </button>
                             </div>
                           </>
@@ -1146,7 +1217,7 @@ export function RedlineWorkspace() {
 
                         {!isActionable && (
                           <div className="flex items-center gap-2 w-full">
-                            <span className="text-[8px] text-gray-400 italic">
+                            <span className="text-sm text-gray-500 italic">
                               {rl.status === "accepted" ? "✓ Accepted" :
                                rl.status === "modified" ? "✎ Modified" : "✕ Rejected"}
                               {rl.review_notes && ` — ${rl.review_notes}`}
@@ -1160,9 +1231,9 @@ export function RedlineWorkspace() {
                                     setTimeout(() => setVersionNotice(null), 3000);
                                   }, 1500);
                                 }}
-                                className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm ml-auto"
+                                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm ml-auto"
                               >
-                                <FileText className="w-2.5 h-2.5" /> Create New Version
+                                <FileText className="w-3.5 h-3.5" /> Create New Version
                               </button>
                             )}
                           </div>
@@ -1170,30 +1241,30 @@ export function RedlineWorkspace() {
 
                         <button
                           onClick={() => setShowCompare(true)}
-                          className="flex items-center gap-1 px-1.5 py-1 text-[8px] font-medium rounded bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200 transition-colors"
+                          className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200 transition-colors"
                         >
-                          <GitCompare className="w-2 h-2" /> Compare
+                          <GitCompare className="w-3.5 h-3.5" /> Compare
                         </button>
 
                         {/* Audit Trail Toggle */}
                         <button
                           onClick={() => setShowAuditTrail(showAuditTrail === rl.id ? null : rl.id)}
-                          className="flex items-center gap-1 px-1.5 py-1 text-[8px] font-medium rounded bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200 transition-colors"
+                          className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200 transition-colors"
                         >
-                          <History className="w-2 h-2" /> Audit Trail
+                          <History className="w-3.5 h-3.5" /> Audit Trail
                         </button>
                       </div>
 
                       {/* ── Audit Trail Section ──────────────────────── */}
                       {showAuditTrail === rl.id && (
-                        <div className="rounded border border-gray-200 dark:border-navy-700 bg-gray-50 dark:bg-navy-850 p-2 space-y-1">
-                          <span className="text-[7px] font-semibold text-gray-500 uppercase">Audit Trail</span>
+                        <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-gray-50 dark:bg-navy-850 p-3 space-y-1.5">
+                          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Audit Trail</span>
                           {(rl.audit_trail.length > 0 ? rl.audit_trail : [
                             { id: "at-1", action: "Created by AI", actor: "System", timestamp: rl.created_at },
                             { id: "at-2", action: "Under review", actor: "You", timestamp: new Date().toISOString() },
                           ]).map(entry => (
-                            <div key={entry.id} className="flex items-center gap-2 text-[8px] text-gray-600 dark:text-gray-400">
-                              <Clock className="w-2 h-2 text-gray-400 flex-shrink-0" />
+                            <div key={entry.id} className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                              <Clock className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
                               <span className="font-medium">{entry.action}</span>
                               <span className="text-gray-400">by {entry.actor}</span>
                               <span className="text-gray-400 ml-auto">{formatTimeAgo(entry.timestamp)}</span>
@@ -1206,15 +1277,15 @@ export function RedlineWorkspace() {
                       <div className="space-y-1">
                         {rl.comments.map(c => (
                           <div key={c.id} className="flex items-start gap-1.5 p-1.5 rounded bg-gray-50 dark:bg-navy-850">
-                            <div className="w-4 h-4 rounded-full bg-navy-100 dark:bg-navy-700 flex items-center justify-center text-[6px] font-bold text-navy-600 flex-shrink-0">
+                            <div className="w-6 h-6 rounded-full bg-navy-100 dark:bg-navy-700 flex items-center justify-center text-[10px] font-bold text-navy-600 flex-shrink-0">
                               {getInitials(c.author)}
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-1">
-                                <span className="text-[8px] font-medium text-navy-900 dark:text-white">{c.author}</span>
-                                <span className="text-[7px] text-gray-400">{formatTimeAgo(c.created_at)}</span>
+                                <span className="text-sm font-medium text-navy-900 dark:text-white">{c.author}</span>
+                                <span className="text-xs text-gray-400">{formatTimeAgo(c.created_at)}</span>
                               </div>
-                              <p className="text-[8px] text-gray-600 dark:text-gray-400">{c.text}</p>
+                              <p className="text-sm text-gray-600 dark:text-gray-400">{c.text}</p>
                             </div>
                           </div>
                         ))}
@@ -1225,12 +1296,12 @@ export function RedlineWorkspace() {
                             onChange={e => { setActiveCommentId(rl.id); setCommentText(e.target.value); }}
                             onFocus={() => setActiveCommentId(rl.id)}
                             placeholder="Add comment..."
-                            className="flex-1 px-1.5 py-1 text-[8px] bg-gray-50 dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-navy-400"
+                            className="flex-1 px-3 py-2 text-sm bg-gray-50 dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded-lg text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-navy-400"
                           />
                           {activeCommentId === rl.id && (
                             <button
                               onClick={() => handleAddComment(rl.id)}
-                              className="px-1.5 py-1 text-[8px] font-medium rounded bg-navy-600 text-white hover:bg-navy-700 transition-colors"
+                              className="px-3 py-2 text-xs font-medium rounded-md bg-navy-600 text-white hover:bg-navy-700 transition-colors"
                             >
                               Send
                             </button>
@@ -1255,26 +1326,26 @@ export function RedlineWorkspace() {
             </h3>
             <div className="space-y-2">
               <div>
-                <span className="text-[8px] font-semibold text-gray-500 uppercase">Original Text</span>
-                <p className="text-[9px] text-gray-600 dark:text-gray-400 mt-0.5 p-2 rounded bg-red-50 dark:bg-red-900/10 border border-red-100">
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Original Text</span>
+                <p className="text-sm text-gray-800 dark:text-gray-200 mt-1.5 p-3 rounded-lg bg-red-50 dark:bg-red-900/10 border border-red-100 leading-relaxed">
                   {editTarget.original_text}
                 </p>
               </div>
               <div>
-                <span className="text-[8px] font-semibold text-gray-500 uppercase">Modified Text</span>
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Modified Text</span>
                 <textarea
                   value={editText || editTarget.proposed_text}
                   onChange={e => setEditText(e.target.value)}
-                  className="w-full mt-0.5 px-2 py-1 text-[9px] bg-white dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded text-navy-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-navy-400"
-                  rows={4}
+                  className="w-full mt-1.5 px-3 py-2 text-sm leading-relaxed bg-white dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded-lg text-navy-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-navy-400"
+                  rows={5}
                 />
               </div>
               <div>
-                <span className="text-[8px] font-semibold text-gray-500 uppercase">Review Notes (optional)</span>
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Review Notes (optional)</span>
                 <textarea
                   value={reviewNotes}
                   onChange={e => setReviewNotes(e.target.value)}
-                  className="w-full mt-0.5 px-2 py-1 text-[8px] bg-gray-50 dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-navy-400"
+                  className="w-full mt-1.5 px-3 py-2 text-sm leading-relaxed bg-gray-50 dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded-lg text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-navy-400"
                   rows={2}
                   placeholder="Optional notes..."
                 />
@@ -1406,24 +1477,24 @@ export function RedlineWorkspace() {
             </h3>
             <div className="space-y-2">
               <div>
-                <span className="text-[8px] font-semibold text-red-600 uppercase">Original (Vendor)</span>
-                <p className="text-[9px] text-gray-600 dark:text-gray-400 mt-0.5 p-2 rounded bg-red-50 dark:bg-red-900/10 border border-red-100">
+                <span className="text-xs font-semibold text-red-600 uppercase tracking-wide">Original (Vendor)</span>
+                <p className="text-sm text-gray-800 dark:text-gray-200 mt-1.5 p-3 rounded-lg bg-red-50 dark:bg-red-900/10 border border-red-100 leading-relaxed">
                   {counterTarget.original_text}
                 </p>
               </div>
               <div>
-                <span className="text-[8px] font-semibold text-green-600 uppercase">Proposed (Our)</span>
-                <p className="text-[9px] text-gray-600 dark:text-gray-400 mt-0.5 p-2 rounded bg-green-50 dark:bg-green-900/10 border border-green-100">
+                <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">Proposed (Our)</span>
+                <p className="text-sm text-gray-800 dark:text-gray-200 mt-1.5 p-3 rounded-lg bg-green-50 dark:bg-green-900/10 border border-green-100 leading-relaxed">
                   {counterTarget.proposed_text}
                 </p>
               </div>
               <div>
-                <span className="text-[8px] font-semibold text-indigo-600 uppercase">Counter (Negotiated)</span>
+                <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Counter (Negotiated)</span>
                 <textarea
                   value={counterText}
                   onChange={e => setCounterText(e.target.value)}
-                  className="w-full mt-0.5 px-2 py-1 text-[9px] bg-white dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded text-navy-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                  rows={4}
+                  className="w-full mt-1.5 px-3 py-2 text-sm leading-relaxed bg-white dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded-lg text-navy-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                  rows={5}
                   placeholder="Enter negotiated text..."
                 />
               </div>

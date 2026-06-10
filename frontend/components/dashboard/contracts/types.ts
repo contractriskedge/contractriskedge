@@ -20,9 +20,15 @@ export interface ContractKpi {
 export interface ContractRecord {
   id: string;
   name: string;
-  vendor: string;
+  originalFilename: string;
+  contractNumber: string;
   contractType: string;
+  vendor: string;
   businessUnit: string;
+  geography: string;
+  department: string;
+  description: string;
+  tags: string[];
   riskScore: number;
   riskLevel: RiskLevel;
   financialValue: number;
@@ -31,28 +37,36 @@ export interface ContractRecord {
   effectiveDate: string;
   expirationDate: string;
   renewalDate: string;
+  lastReviewDate: string;
+  autoRenew: boolean;
+  topRisk: string;
   aiConfidence: number;
   aiFindingsCount: number;
+  openFindings: number;
+  clauseCount: number;
   unresolvedRisks: number;
   owner: string;
+  ownerId: string;
   workflowStage: WorkflowStage;
   lastActivity: string;
   lastModified: string;
-  tags: string[];
-  geography: string;
-  counterparty: string;
-  description: string;
-  aiSummary: string;
-  clauseCount: number;
+  createdAt: string;
   missingClauses: string[];
   aiFlags: AiFlag[];
+  aiSummary: string;
   obligationsDue: number;
   hasRedlines: boolean;
   hasDpa: boolean;
-  autoRenew: boolean;
-  renewalRisk: "low" | "medium" | "high";
   totalPages: number;
-  createdAt: string;
+  slaCompliant: boolean;
+  slaStatus: string;
+  slaDeadline: string;
+  /** health bucket derived from risk/expiry/SLA — drives the row health dot */
+  health: "healthy" | "needs_review" | "high_risk" | "expired" | "expiring_soon";
+  /** legacy convenience alias */
+  renewalRisk: "low" | "medium" | "high";
+  /** legacy convenience alias */
+  counterparty: string;
 }
 
 export interface ContractFilterState {

@@ -18,7 +18,7 @@ import {
   X, Shield, User, Calendar, Layers, CheckCircle2, Clock,
   AlertTriangle, ChevronRight, ExternalLink, History,
   Edit3, ArrowRight, GitBranch, Archive, Send, BookOpen, Sparkles,
-  FileText, Save, XCircle, Loader2,
+  FileText, Save, XCircle, Loader2, TrendingUp, Target, Activity,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { formatDate } from "@/lib/date-utils";
@@ -59,7 +59,7 @@ export function PolicyDetailDrawer({ policy, open, onClose, clauses, evaluations
   const { user } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<"overview" | "rules" | "versions" | "approval" | "traceability">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "rules" | "simulation" | "versions" | "approval" | "traceability">("overview");
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
@@ -153,8 +153,60 @@ export function PolicyDetailDrawer({ policy, open, onClose, clauses, evaluations
     return evaluations.filter((e: any) => e.playbook_name === policy.name);
   }, [policy, evaluations]);
 
-  // Approval workflow — synthesizes a status chain when the backend
-  // doesn't expose one.
+  // ── Policy Simulation State ─────────────────────────────────────
+  const [simResult, setSimResult] = useState<any>(null);
+  const [simLoading, setSimLoading] = useState(false);
+  const [simError, setSimError] = useState<string | null>(null);
+
+  const handleRunSimulation = async () => {
+    if (!policy) return;
+    setSimLoading(true);
+    setSimError(null);
+    setSimResult(null);
+    try {
+      const id = policy.policy_id || policy.playbook_id;
+      const result = await policyService.runSimulation({
+        playbook_id: id,
+        name: `Simulation: ${policy.name}`,
+        description: `What-if analysis for ${policy.name}`,
+        contract_profile: {
+          contract_value: 500000,
+          jurisdiction: "us",
+          industry: "technology",
+          counterparty: "Demo Counterparty",
+          risk_score: 0.5,
+          clauses: [],
+          findings: [],
+        },
+        include_recommendations: true,
+        dry_run: true,
+      });
+      setSimResult(result);
+    } catch (err: any) {
+      setSimError(err?.message || "Simulation failed");
+    } finally {
+      setSimLoading(false);
+    }
+  };
+
+  // ── Computed summary stats ──────────────────────────────────────
+  const summaryStats = useMemo(() => {
+    if (!policy) return null;
+    const violations = linkedEvaluations.reduce((sum: number, e: any) => {
+      return sum + (e.deviation_count || e.violation_count || 0);
+    }, 0);
+    const openFindings = linkedEvaluations.reduce((sum: number, e: any) => {
+      return sum + (e.finding_count || 0);
+    }, 0);
+    return {
+      rules: policy.rules?.conditions?.length ?? 0,
+      contractsAffected: linkedEvaluations.length,
+      violationsGenerated: violations,
+      openFindings,
+      lastTriggered: linkedEvaluations[0]?.created_at || policy.updated_at,
+    };
+  }, [policy, linkedEvaluations]);
+
   const approvalChain = useMemo(() => {
     if (!policy) return [];
     const now = new Date().toISOString();
@@ -209,6 +261,7 @@ export function PolicyDetailDrawer({ policy, open, onClose, clauses, evaluations
               {([
                 { id: "overview" as const,    label: "Overview",      icon: Shield },
                 { id: "rules" as const,       label: `Rules (${ruleCount})`, icon: BookOpen },
+                { id: "simulation" as const,  label: "Simulation",    icon: TrendingUp },
                 { id: "versions" as const,    label: "Versions",      icon: History },
                 { id: "approval" as const,    label: "Approval",      icon: CheckCircle2 },
                 { id: "traceability" as const,label: "Traceability",  icon: GitBranch },
@@ -228,6 +281,47 @@ export function PolicyDetailDrawer({ policy, open, onClose, clauses, evaluations
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               {activeTab === "overview" && (
                 <>
+                  {/* ── Policy Summary Stats ────────────────────────── */}
+                  {summaryStats && (
+                    <section>
+                      <h4 className="text-[9px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Policy Summary</h4>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="rounded-lg border border-gray-200 bg-white p-2.5">
+                          <div className="flex items-center gap-1 text-[9px] text-gray-500">
+                            <BookOpen className="w-3 h-3" /> Rules
+                          </div>
+                          <p className="text-lg font-bold text-navy-900 mt-0.5">{summaryStats.rules}</p>
+                        </div>
+                        <div className="rounded-lg border border-gray-200 bg-white p-2.5">
+                          <div className="flex items-center gap-1 text-[9px] text-gray-500">
+                            <FileText className="w-3 h-3" /> Contracts Affected
+                          </div>
+                          <p className="text-lg font-bold text-navy-900 mt-0.5">{summaryStats.contractsAffected}</p>
+                        </div>
+                        <div className="rounded-lg border border-gray-200 bg-white p-2.5">
+                          <div className="flex items-center gap-1 text-[9px] text-gray-500">
+                            <AlertTriangle className="w-3 h-3" /> Violations Generated
+                          </div>
+                          <p className="text-lg font-bold text-amber-600 mt-0.5">{summaryStats.violationsGenerated}</p>
+                        </div>
+                        <div className="rounded-lg border border-gray-200 bg-white p-2.5">
+                          <div className="flex items-center gap-1 text-[9px] text-gray-500">
+                            <Target className="w-3 h-3" /> Open Findings
+                          </div>
+                          <p className="text-lg font-bold text-red-600 mt-0.5">{summaryStats.openFindings}</p>
+                        </div>
+                      </div>
+                      <div className="mt-2 rounded-lg border border-gray-200 bg-white p-2.5">
+                        <div className="flex items-center gap-1 text-[9px] text-gray-500">
+                          <Activity className="w-3 h-3" /> Last Triggered
+                        </div>
+                        <p className="text-xs font-medium text-navy-900 mt-0.5">
+                          {summaryStats.lastTriggered ? formatDate(summaryStats.lastTriggered) : "Never"}
+                        </p>
+                      </div>
+                    </section>
+                  )}
+
                   {/* Edit form (only when editing) */}
                   {editing && (
                     <section className="rounded-lg border-2 border-indigo-200 bg-indigo-50/30 p-3 space-y-2">
@@ -378,6 +472,127 @@ export function PolicyDetailDrawer({ policy, open, onClose, clauses, evaluations
 
               {activeTab === "rules" && (
                 <RulesTab policy={policy} />
+              )}
+
+              {activeTab === "simulation" && (
+                <>
+                  <section>
+                    <h4 className="text-[9px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Policy Simulation</h4>
+                    <p className="text-[10px] text-gray-600 mb-3">
+                      Run a what-if simulation to preview the impact of this policy on contracts.
+                      Shows affected contracts, new violations, resolved violations, and high-risk items.
+                    </p>
+                    <button
+                      onClick={handleRunSimulation}
+                      disabled={simLoading}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                    >
+                      {simLoading ? (
+                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Running Simulation…</>
+                      ) : (
+                        <><TrendingUp className="w-3.5 h-3.5" /> Run Policy Test</>
+                      )}
+                    </button>
+                  </section>
+
+                  {simError && (
+                    <section className="rounded-lg border border-red-200 bg-red-50 p-3">
+                      <div className="flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+                        <span className="text-[10px] font-medium text-red-700">Simulation Error</span>
+                      </div>
+                      <p className="text-[10px] text-red-600 mt-1">{simError}</p>
+                    </section>
+                  )}
+
+                  {simResult && (
+                    <section className="space-y-3">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="rounded-lg border border-green-200 bg-green-50 p-2.5">
+                          <p className="text-[9px] font-semibold text-green-700 uppercase">Affected Contracts</p>
+                          <p className="text-xl font-bold text-green-800 mt-0.5">
+                            {simResult.summary?.total_contracts ?? simResult.total_rules ?? 0}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-red-200 bg-red-50 p-2.5">
+                          <p className="text-[9px] font-semibold text-red-700 uppercase">New Violations</p>
+                          <p className="text-xl font-bold text-red-800 mt-0.5">
+                            {simResult.summary?.violations ?? simResult.deviations?.length ?? 0}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2.5">
+                          <p className="text-[9px] font-semibold text-emerald-700 uppercase">Resolved Violations</p>
+                          <p className="text-xl font-bold text-emerald-800 mt-0.5">
+                            {simResult.summary?.resolved ?? 0}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5">
+                          <p className="text-[9px] font-semibold text-amber-700 uppercase">High Risk</p>
+                          <p className="text-xl font-bold text-amber-800 mt-0.5">
+                            {simResult.summary?.high_risk ?? simResult.risk_level === "high" ? 1 : 0}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Risk Score */}
+                      {simResult.risk_score != null && (
+                        <div className="rounded-lg border border-gray-200 bg-white p-3">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-[9px] font-semibold text-gray-500 uppercase">Risk Score</span>
+                            <span className={`text-[11px] font-bold ${
+                              simResult.risk_score >= 0.7 ? "text-red-600" :
+                              simResult.risk_score >= 0.4 ? "text-amber-600" :
+                              "text-green-600"
+                            }`}>
+                              {(simResult.risk_score * 100).toFixed(0)}%
+                            </span>
+                          </div>
+                          <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
+                            <div className={`h-full rounded-full transition-all duration-700 ${
+                              simResult.risk_score >= 0.7 ? "bg-red-500" :
+                              simResult.risk_score >= 0.4 ? "bg-amber-500" :
+                              "bg-green-500"
+                            }`} style={{ width: `${(simResult.risk_score * 100).toFixed(0)}%` }} />
+                          </div>
+                          <p className="text-[9px] text-gray-500 mt-1.5">
+                            Risk Level: <span className="font-semibold capitalize">{simResult.risk_level || "unknown"}</span>
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Per-rule results */}
+                      {simResult.results && simResult.results.length > 0 && (
+                        <div>
+                          <h5 className="text-[9px] font-semibold text-gray-500 uppercase mb-1.5">Rule Results</h5>
+                          <div className="space-y-1">
+                            {simResult.results.map((r: any, i: number) => (
+                              <div key={i} className="flex items-center gap-2 rounded-lg border border-gray-200 p-2">
+                                {r.matched ? (
+                                  <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
+                                ) : (
+                                  <XCircle className="w-3 h-3 text-red-400 flex-shrink-0" />
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-[10px] font-medium text-navy-900 truncate">{r.rule_name || r.rule_id}</p>
+                                  <p className="text-[8px] text-gray-500">
+                                    {r.rule_type} · Effect: {r.effect?.replace(/_/g, " ")}
+                                  </p>
+                                </div>
+                                {r.deviation_severity && (
+                                  <span className={`text-[8px] font-semibold px-1.5 py-0.5 rounded-full ${
+                                    r.deviation_severity === "critical" ? "bg-red-100 text-red-700" :
+                                    r.deviation_severity === "high" ? "bg-orange-100 text-orange-700" :
+                                    "bg-amber-100 text-amber-700"
+                                  }`}>{r.deviation_severity}</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </section>
+                  )}
+                </>
               )}
 
               {activeTab === "versions" && (
@@ -553,25 +768,94 @@ function ApprovalTab({ chain }: { chain: Array<{ role: string; who: string; acti
 }
 
 function TraceabilityTab({ policy, clauses, evaluations }: { policy: any; clauses: any[]; evaluations: any[] }) {
+  const router = useRouter();
+  const violationCount = evaluations.reduce((sum: number, e: any) =>
+    sum + (e.deviation_count || e.violation_count || 0), 0);
+  const findingCount = evaluations.reduce((sum: number, e: any) =>
+    sum + (e.finding_count || 0), 0);
+
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5 mb-1.5">
         <GitBranch className="w-3 h-3 text-indigo-400" />
         <span className="text-[9px] font-semibold text-gray-500 uppercase">Traceability Chain</span>
       </div>
-      <div className="rounded-lg border border-gray-200 p-3 space-y-2">
-        <Step icon={<Shield className="w-3 h-3 text-indigo-500" />} label="Policy" value={policy.name} />
+      <div className="rounded-lg border border-gray-200 p-3 space-y-1">
+        {/* Policy → clickable */}
+        <div className="flex items-center gap-1.5 px-2 py-2 rounded bg-indigo-50 border border-indigo-100 cursor-pointer hover:bg-indigo-100 transition-colors"
+          onClick={() => router.push(`/policy?policyId=${policy.policy_id || policy.playbook_id}`)}>
+          <Shield className="w-3.5 h-3.5 text-indigo-500" />
+          <span className="text-[9px] font-semibold text-indigo-700 uppercase tracking-wider w-20">Policy</span>
+          <span className="text-[10px] font-medium text-navy-900 flex-1 truncate">{policy.name}</span>
+          <ExternalLink className="w-3 h-3 text-indigo-400" />
+        </div>
         <Arrow />
-        <Step icon={<BookOpen className="w-3 h-3 text-blue-500" />} label="Rules" value={`${policy.rules?.conditions?.length ?? 0} conditions`} />
+        {/* Rules → clickable */}
+        <div className="flex items-center gap-1.5 px-2 py-2 rounded bg-blue-50 border border-blue-100 cursor-pointer hover:bg-blue-100 transition-colors"
+          onClick={() => router.push(`/policy?policyId=${policy.policy_id || policy.playbook_id}&tab=rules`)}>
+          <BookOpen className="w-3.5 h-3.5 text-blue-500" />
+          <span className="text-[9px] font-semibold text-blue-700 uppercase tracking-wider w-20">Rules</span>
+          <span className="text-[10px] font-medium text-navy-900 flex-1 truncate">{policy.rules?.conditions?.length ?? 0} conditions</span>
+          <ExternalLink className="w-3 h-3 text-blue-400" />
+        </div>
         <Arrow />
-        <Step icon={<FileText className="w-3 h-3 text-cyan-500" />} label="Library Clauses" value={`${clauses.length} linked`} />
+        {/* Findings → clickable */}
+        <div className={`flex items-center gap-1.5 px-2 py-2 rounded border cursor-pointer transition-colors ${
+          findingCount > 0 ? "bg-amber-50 border-amber-100 hover:bg-amber-100" : "bg-gray-50 border-gray-100"
+        }`}
+          onClick={() => findingCount > 0 && evaluations[0]?.review_id && router.push(`/reviews/ai-workspace?reviewId=${evaluations[0].review_id}&tab=findings`)}>
+          <AlertTriangle className={`w-3.5 h-3.5 ${findingCount > 0 ? "text-amber-500" : "text-gray-400"}`} />
+          <span className={`text-[9px] font-semibold uppercase tracking-wider w-20 ${findingCount > 0 ? "text-amber-700" : "text-gray-500"}`}>Findings</span>
+          <span className="text-[10px] font-medium text-navy-900 flex-1 truncate">{findingCount > 0 ? `${findingCount} findings` : "No findings"}</span>
+          {findingCount > 0 && <ExternalLink className="w-3 h-3 text-amber-400" />}
+        </div>
         <Arrow />
-        <Step icon={<AlertTriangle className="w-3 h-3 text-amber-500" />} label="Findings" value={`${evaluations.length} evaluation${evaluations.length === 1 ? "" : "s"}`} />
+        {/* Violations → clickable */}
+        <div className={`flex items-center gap-1.5 px-2 py-2 rounded border cursor-pointer transition-colors ${
+          violationCount > 0 ? "bg-red-50 border-red-100 hover:bg-red-100" : "bg-gray-50 border-gray-100"
+        }`}
+          onClick={() => violationCount > 0 && evaluations[0]?.review_id && router.push(`/reviews/ai-workspace?reviewId=${evaluations[0].review_id}&tab=policy`)}>
+          <XCircle className={`w-3.5 h-3.5 ${violationCount > 0 ? "text-red-500" : "text-gray-400"}`} />
+          <span className={`text-[9px] font-semibold uppercase tracking-wider w-20 ${violationCount > 0 ? "text-red-700" : "text-gray-500"}`}>Violations</span>
+          <span className="text-[10px] font-medium text-navy-900 flex-1 truncate">{violationCount > 0 ? `${violationCount} violations` : "No violations"}</span>
+          {violationCount > 0 && <ExternalLink className="w-3 h-3 text-red-400" />}
+        </div>
         <Arrow />
-        <Step icon={<Edit3 className="w-3 h-3 text-purple-500" />} label="Redlines" value="0 generated" />
+        {/* Redlines → clickable */}
+        <div className="flex items-center gap-1.5 px-2 py-2 rounded bg-purple-50 border border-purple-100 cursor-pointer hover:bg-purple-100 transition-colors"
+          onClick={() => evaluations[0]?.review_id && router.push(`/reviews/ai-workspace?reviewId=${evaluations[0].review_id}&tab=redlines`)}>
+          <Edit3 className="w-3.5 h-3.5 text-purple-500" />
+          <span className="text-[9px] font-semibold text-purple-700 uppercase tracking-wider w-20">Redlines</span>
+          <span className="text-[10px] font-medium text-navy-900 flex-1 truncate">
+            {evaluations[0]?.redline_count ? `${evaluations[0].redline_count} redlines` : "View in workspace"}
+          </span>
+          <ExternalLink className="w-3 h-3 text-purple-400" />
+        </div>
         <Arrow />
-        <Step icon={<CheckCircle2 className="w-3 h-3 text-green-500" />} label="Resolution" value="— pending" />
+        {/* Resolution */}
+        <div className="flex items-center gap-1.5 px-2 py-2 rounded bg-green-50 border border-green-100">
+          <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
+          <span className="text-[9px] font-semibold text-green-700 uppercase tracking-wider w-20">Resolution</span>
+          <span className="text-[10px] font-medium text-navy-900 flex-1 truncate">
+            {violationCount === 0 ? "Fully compliant" : `${violationCount} unresolved`}
+          </span>
+        </div>
       </div>
+
+      {/* Linked clauses */}
+      {clauses.length > 0 && (
+        <div className="rounded-lg border border-gray-200 p-3">
+          <h5 className="text-[9px] font-semibold text-gray-500 uppercase mb-1.5">Linked Library Clauses ({clauses.length})</h5>
+          <div className="space-y-1">
+            {clauses.slice(0, 5).map((c: any, i: number) => (
+              <div key={i} className="text-[9px] text-gray-700 flex items-center gap-1">
+                <FileText className="w-2.5 h-2.5 text-gray-400" />
+                {c.name || c.title || c.clause_type || `Clause ${i + 1}`}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

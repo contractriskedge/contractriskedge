@@ -9,6 +9,8 @@
  * - Resolve/dismiss actions
  * - Jump between findings (N hotkey)
  * - Filter by severity and status
+ * - Policy Traceability: Finding → Policy → Rule → Violation → Recommendation chain
+ *   (matches policy violations by finding_id or clause_type, shows full traceability)
  */
 
 "use client";
@@ -19,17 +21,17 @@ import {
   ChevronDown, ChevronUp, Search, Filter, Target, TrendingUp,
   TrendingDown, Minus, BookOpen, FileText, ExternalLink,
   BarChart3, Cpu, ThumbsUp, ThumbsDown, HelpCircle, Loader2,
-  SkipForward, Zap, GitCompare, Edit3, GitBranch,
+  SkipForward, Zap, GitCompare, Edit3, GitBranch, Shield, GitMerge, Scale,
 } from "lucide-react";
 import { useReviewContext } from "./ReviewContext";
 import { useResolveFinding, useSubmitFeedback, useReviewRedlinesData } from "./hooks";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/services/api/client";
-import type { Finding, AiFeedback } from "./types";
+import type { Finding, AiFeedback, PolicyViolation } from "./types";
 
 export function FindingsSection() {
   const ctx = useReviewContext();
-  const { findings, selectedFindingId, setSelectedFindingId, expandedFindingId, setExpandedFindingId, selectedReviewId, recommendations: ctxRecs } = ctx;
+  const { findings, selectedFindingId, setSelectedFindingId, expandedFindingId, setExpandedFindingId, selectedReviewId, recommendations: ctxRecs, policyViolations } = ctx;
 
   const [severityFilter, setSeverityFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -115,6 +117,50 @@ export function FindingsSection() {
     });
     return map;
   }, [redlines]);
+
+  // ── Build finding → policy violations lookup ─────────────────────────
+
+  const policyViolationsByFinding = useMemo(() => {
+    const map = new Map<string, PolicyViolation[]>();
+    if (!policyViolations) return map;
+    policyViolations.forEach(v => {
+      // Match by explicit finding_id first
+      if (v.finding_id) {
+        const existing = map.get(v.finding_id) ?? [];
+        existing.push(v);
+        map.set(v.finding_id, existing);
+      }
+      // Also index by clause_type for findings that share the same clause type
+      if (v.clause_type) {
+        const clauseKey = `__clause__${v.clause_type}`;
+        const existing = map.get(clauseKey) ?? [];
+        existing.push(v);
+        map.set(clauseKey, existing);
+      }
+    });
+    return map;
+  }, [policyViolations]);
+
+  /** Get policy violations relevant to a finding — matched by finding_id or clause_type */
+  const getFindingPolicyViolations = useCallback((finding: Finding): PolicyViolation[] => {
+    const byId = policyViolationsByFinding.get(finding.finding_id) ?? [];
+    const byClause = policyViolationsByFinding.get(`__clause__${finding.clause_type}`) ?? [];
+    // Deduplicate by violation id
+    const seen = new Set<string>();
+    return [...byId, ...byClause].filter(v => {
+      if (seen.has(v.id)) return false;
+      seen.add(v.id);
+      return true;
+    });
+  }, [policyViolationsByFinding]);
+
+  /** Get the single best-matching policy violation for a finding (prefer finding_id match) */
+  const getPrimaryPolicyViolation = useCallback((finding: Finding): PolicyViolation | null => {
+    const byId = policyViolationsByFinding.get(finding.finding_id) ?? [];
+    if (byId.length > 0) return byId[0];
+    const byClause = policyViolationsByFinding.get(`__clause__${finding.clause_type}`) ?? [];
+    return byClause.length > 0 ? byClause[0] : null;
+  }, [policyViolationsByFinding]);
 
   // ── Next / Previous navigation ───────────────────────────────────────
 
@@ -398,6 +444,197 @@ export function FindingsSection() {
                         </div>
                       </div>
 
+                      {/* ── Policy Traceability: Finding → Policy → Rule → Violation → Recommendation ── */}
+                      {(() => {
+                        const pv = getPrimaryPolicyViolation(finding);
+                        const allPv = getFindingPolicyViolations(finding);
+                        return (
+                          <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-gray-50 dark:bg-navy-850 overflow-hidden">
+                            <div className="px-2.5 py-1.5 bg-gray-100 dark:bg-navy-800 flex items-center gap-1.5">
+                              <Shield className="w-3 h-3 text-emerald-500" />
+                              <span className="text-[9px] font-semibold text-gray-600 dark:text-gray-400 uppercase">Policy Traceability</span>
+                              {pv && (
+                                <span className={`ml-auto text-[7px] font-medium px-1.5 py-0.5 rounded-full ${
+                                  pv.compliance_impact === "critical" ? "bg-red-100 text-red-700" :
+                                  pv.compliance_impact === "high" ? "bg-amber-100 text-amber-700" :
+                                  "bg-gray-100 text-gray-600"
+                                }`}>
+                                  {pv.compliance_impact ?? "open"}
+                                </span>
+                              )}
+                            </div>
+                            <div className="p-2.5 space-y-2">
+                              {pv ? (
+                                <>
+                                  {/* Chain: Finding → Policy → Rule → Violation → Recommendation */}
+                                  <div className="flex items-center gap-1 text-[8px] flex-wrap">
+                                    <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">
+                                      <Brain className="w-2.5 h-2.5" /> Finding
+                                    </div>
+                                    <GitMerge className="w-2 h-2 text-gray-300 rotate-180" />
+                                    <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">
+                                      <Shield className="w-2.5 h-2.5" /> Policy
+                                    </div>
+                                    <GitMerge className="w-2 h-2 text-gray-300 rotate-180" />
+                                    <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded font-medium ${
+                                      pv.rule_id ? "bg-indigo-100 text-indigo-700" : "bg-gray-100 text-gray-400"
+                                    }`}>
+                                      <Scale className="w-2.5 h-2.5" /> Rule
+                                    </div>
+                                    <GitMerge className="w-2 h-2 text-gray-300 rotate-180" />
+                                    <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded font-medium ${
+                                      pv.description ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-400"
+                                    }`}>
+                                      <AlertTriangle className="w-2.5 h-2.5" /> Violation
+                                    </div>
+                                    <GitMerge className="w-2 h-2 text-gray-300 rotate-180" />
+                                    <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded font-medium ${
+                                      pv.recommendation ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-400"
+                                    }`}>
+                                      <Lightbulb className="w-2.5 h-2.5" /> Recommendation
+                                    </div>
+                                  </div>
+
+                                  {/* Policy Details */}
+                                  <div className="grid grid-cols-2 gap-1.5">
+                                    <div className="rounded bg-white dark:bg-navy-800 p-1.5 border border-gray-150 dark:border-navy-700">
+                                      <p className="text-[7px] font-semibold text-gray-500 uppercase mb-0.5">Policy</p>
+                                      <p className="text-[8px] font-medium text-navy-900 dark:text-white truncate" title={pv.policy_name}>
+                                        {pv.policy_name}
+                                      </p>
+                                      {pv.policy_version && (
+                                        <p className="text-[7px] text-gray-400">v{pv.policy_version}</p>
+                                      )}
+                                      {pv.regulation && (
+                                        <p className="text-[7px] text-gray-400 mt-0.5 truncate" title={pv.regulation}>
+                                          {pv.regulation}
+                                        </p>
+                                      )}
+                                    </div>
+                                    <div className="rounded bg-white dark:bg-navy-800 p-1.5 border border-gray-150 dark:border-navy-700">
+                                      <p className="text-[7px] font-semibold text-gray-500 uppercase mb-0.5">Rule</p>
+                                      {pv.rule_id ? (
+                                        <>
+                                          <p className="text-[8px] font-mono text-navy-900 dark:text-white truncate" title={pv.rule_id}>
+                                            {pv.rule_id}
+                                          </p>
+                                          {pv.rule_description && (
+                                            <p className="text-[7px] text-gray-500 mt-0.5 leading-relaxed line-clamp-2">
+                                              {pv.rule_description}
+                                            </p>
+                                          )}
+                                          {pv.effect && (
+                                            <p className="text-[7px] text-gray-400 mt-0.5">
+                                              Effect: <span className="font-medium text-navy-700 dark:text-navy-300">{pv.effect}</span>
+                                            </p>
+                                          )}
+                                          {pv.playbook_id && (
+                                            <p className="text-[7px] text-gray-400 mt-0.5">
+                                              Playbook: <span className="font-mono">{pv.playbook_id}</span>
+                                            </p>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <p className="text-[8px] text-gray-400 italic">No specific rule linked</p>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Violation Details */}
+                                  {pv.description && (
+                                    <div className="rounded bg-red-50 dark:bg-red-900/10 p-1.5 border border-red-100 dark:border-red-800">
+                                      <p className="text-[7px] font-semibold text-red-600 dark:text-red-400 uppercase mb-0.5">Violation</p>
+                                      <p className="text-[8px] text-red-700 dark:text-red-300 leading-relaxed">{pv.description}</p>
+                                      <div className="mt-1 grid grid-cols-2 gap-1 text-[7px]">
+                                        {pv.expected && (
+                                          <div>
+                                            <span className="text-gray-400">Expected: </span>
+                                            <span className="text-gray-600 dark:text-gray-400">{pv.expected}</span>
+                                          </div>
+                                        )}
+                                        {pv.actual && (
+                                          <div>
+                                            <span className="text-gray-400">Actual: </span>
+                                            <span className="text-gray-600 dark:text-gray-400">{pv.actual}</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Recommendation */}
+                                  {pv.recommendation && (
+                                    <div className="rounded bg-amber-50 dark:bg-amber-900/10 p-1.5 border border-amber-100 dark:border-amber-800">
+                                      <p className="text-[7px] font-semibold text-amber-600 dark:text-amber-400 uppercase mb-0.5">Policy Recommendation</p>
+                                      <p className="text-[8px] text-amber-700 dark:text-amber-300 leading-relaxed">{pv.recommendation}</p>
+                                    </div>
+                                  )}
+
+                                  {/* Waiver Status */}
+                                  {pv.waiver_status && (
+                                    <div className="flex items-center gap-1.5 text-[8px] text-gray-500">
+                                      <span>Waiver:</span>
+                                      <span className={`font-medium px-1 py-0.5 rounded ${
+                                        pv.waiver_status === "approved" ? "bg-green-100 text-green-700" :
+                                        pv.waiver_status === "rejected" ? "bg-red-100 text-red-700" :
+                                        pv.waiver_status === "pending" ? "bg-amber-100 text-amber-700" :
+                                        "bg-gray-100 text-gray-500"
+                                      }`}>{pv.waiver_status}</span>
+                                      {pv.waiver_justification && (
+                                        <span className="text-gray-400 truncate" title={pv.waiver_justification}>
+                                          · {pv.waiver_justification}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* Additional violations count */}
+                                  {allPv.length > 1 && (
+                                    <details className="group">
+                                      <summary className="text-[7px] font-semibold text-gray-400 uppercase cursor-pointer hover:text-gray-600 flex items-center gap-1">
+                                        <ChevronDown className="w-2.5 h-2.5 group-open:rotate-180 transition-transform" />
+                                        Additional Policy Violations ({allPv.length - 1})
+                                      </summary>
+                                      <div className="mt-1 space-y-1 pl-1">
+                                        {allPv.slice(1).map(v => (
+                                          <div key={v.id} className="flex items-start gap-1.5 p-1.5 rounded bg-white dark:bg-navy-800 border border-gray-150 dark:border-navy-700">
+                                            <Shield className="w-2 h-2 text-gray-400 mt-0.5 flex-shrink-0" />
+                                            <div className="flex-1 min-w-0">
+                                              <p className="text-[8px] font-medium text-navy-900 dark:text-white truncate">{v.policy_name}</p>
+                                              {v.description && (
+                                                <p className="text-[7px] text-gray-500 leading-relaxed line-clamp-1">{v.description}</p>
+                                              )}
+                                              {v.recommendation && (
+                                                <p className="text-[7px] text-amber-600 mt-0.5 line-clamp-1">{v.recommendation}</p>
+                                              )}
+                                            </div>
+                                            <span className={`text-[7px] font-medium px-1 py-0.5 rounded-full flex-shrink-0 ${
+                                              v.severity === "critical" ? "bg-red-100 text-red-700" :
+                                              v.severity === "high" ? "bg-amber-100 text-amber-700" :
+                                              "bg-gray-100 text-gray-500"
+                                            }`}>{v.severity}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </details>
+                                  )}
+                                </>
+                              ) : (
+                                <div className="flex items-center gap-2 p-2 rounded bg-gray-50 dark:bg-navy-750 border border-dashed border-gray-200 dark:border-navy-700">
+                                  <Shield className="w-3 h-3 text-gray-300 dark:text-gray-600 flex-shrink-0" />
+                                  <div>
+                                    <p className="text-[8px] font-medium text-gray-500 dark:text-gray-400">No applicable policy found</p>
+                                    <p className="text-[7px] text-gray-400 dark:text-gray-500">
+                                      This finding does not map to any active policy rule in the playbook engine.
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       {/* Business Impact */}
                       {finding.business_impact && (
                         <div className="flex items-start gap-1.5 p-2 rounded bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-800">
@@ -655,7 +892,15 @@ export function FindingsSection() {
                                   p.{finding.page_numbers.join(", ")}
                                 </span>
                               )}
-                              <button className="flex items-center gap-0.5 px-1.5 py-0.5 text-[7px] font-medium rounded bg-cyan-100 text-cyan-700 hover:bg-cyan-200 transition-colors">
+                              <button onClick={() => {
+                                import("@/lib/highlightClause").then(({ locateClause }) => {
+                                  locateClause({
+                                    page: finding.page_numbers[0] || 1,
+                                    findingId: finding.finding_id,
+                                    clauseText: finding.clause_text || undefined,
+                                  });
+                                });
+                              }} className="flex items-center gap-0.5 px-1.5 py-0.5 text-[7px] font-medium rounded bg-cyan-100 text-cyan-700 hover:bg-cyan-200 transition-colors cursor-pointer">
                                 <ExternalLink className="w-2 h-2" /> Jump to Page
                               </button>
                             </div>

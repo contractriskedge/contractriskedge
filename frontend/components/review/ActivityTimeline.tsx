@@ -22,7 +22,7 @@ import {
   Upload, Cpu, User, MessageSquare, AlertTriangle,
   CheckCircle2, XCircle, RefreshCw, Archive, Clock,
   UserCheck, ArrowUpRight, ThumbsUp, ThumbsDown, Activity,
-  FileText, Loader2, Shield, FileEdit,
+  FileText, Loader2, Shield, FileEdit, Edit3,
 } from "lucide-react";
 import { useReviewHistory, useReviewComments } from "@/services/hooks";
 import { useActivity } from "@/components/ai-review/hooks";
@@ -53,6 +53,10 @@ const EVENT_ICONS: Record<string, React.ReactNode> = {
   redline_rejected: <XCircle className="h-4 w-4" />,
   redline_modified: <FileText className="h-4 w-4" />,
   redline_updated: <FileEdit className="h-4 w-4" />,
+  redline_escalated: <AlertTriangle className="h-4 w-4" />,
+  redline_counter_proposed: <Edit3 className="h-4 w-4" />,
+  redline_ai_generated: <Cpu className="h-4 w-4" />,
+  finding_auto_resolved: <CheckCircle2 className="h-4 w-4" />,
   version_created: <FileText className="h-4 w-4" />,
   recommendation_applied: <Activity className="h-4 w-4" />,
   status_change: <Activity className="h-4 w-4" />,
@@ -78,6 +82,10 @@ const EVENT_COLORS: Record<string, string> = {
   redline_rejected: "bg-red-500",
   redline_modified: "bg-amber-500",
   redline_updated: "bg-amber-500",
+  redline_escalated: "bg-orange-500",
+  redline_counter_proposed: "bg-purple-500",
+  redline_ai_generated: "bg-indigo-500",
+  finding_auto_resolved: "bg-emerald-500",
   version_created: "bg-blue-500",
   recommendation_applied: "bg-purple-500",
   status_change: "bg-gray-500",
@@ -103,6 +111,10 @@ const EVENT_BADGE_COLORS: Record<string, string> = {
   redline_rejected: "bg-red-100 text-red-700",
   redline_modified: "bg-amber-100 text-amber-700",
   redline_updated: "bg-amber-100 text-amber-700",
+  redline_escalated: "bg-orange-100 text-orange-700",
+  redline_counter_proposed: "bg-purple-100 text-purple-700",
+  redline_ai_generated: "bg-indigo-100 text-indigo-700",
+  finding_auto_resolved: "bg-emerald-100 text-emerald-700",
   version_created: "bg-blue-100 text-blue-700",
   recommendation_applied: "bg-purple-100 text-purple-700",
   status_change: "bg-gray-100 text-gray-600",
@@ -355,7 +367,7 @@ export function ActivityTimeline({ reviewId }: ActivityTimelineProps) {
                         {formatTimestamp(event.timestamp)}
                       </span>
                       <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                        {new Date(event.timestamp).toLocaleString()}
+                        {new Date(event.timestamp).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
                   </div>

@@ -192,7 +192,44 @@ export const policyService = {
 
   /** Update an existing policy — maps to playbooks update endpoint */
   update: (policyId: string, body: Partial<PolicyCreateRequest>) =>
-    api.put<PolicyDefinition>(`/playbooks/${policyId}`, body),
+    api.patch<PolicyDefinition>(`/playbooks/${policyId}`, body),
+
+  /** List all policy rules across playbooks for the tenant */
+  listRules: (params?: {
+    search?: string;
+    is_active?: boolean;
+    page?: number;
+    page_size?: number;
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.search) query.set("search", params.search);
+    if (params?.is_active !== undefined) query.set("is_active", String(params.is_active));
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.page_size) query.set("page_size", String(params.page_size));
+    const qs = query.toString();
+    return api.get<{ data: Record<string, unknown>[]; pagination: Record<string, unknown> }>(
+      qs ? `/playbooks/rules?${qs}` : "/playbooks/rules",
+    );
+  },
+
+  /** Policy traceability aggregates (policy → finding → redline chains) */
+  getTraceability: () =>
+    api.get<{
+      chains: Array<{
+        playbook_id: string;
+        playbook_name: string;
+        policy_version: string;
+        rule_count: number;
+        clause_requirement_count: number;
+        finding_count: number;
+        redline_count: number;
+        resolved_count: number;
+        evaluation_count: number;
+        deviations_found: number;
+      }>;
+      total_findings_linked: number;
+      total_redlines: number;
+    }>("/playbooks/traceability"),
 
   /** Delete a policy — maps to playbooks archive endpoint */
   delete: (policyId: string) => api.post(`/playbooks/${policyId}/archive`),
@@ -208,6 +245,50 @@ export const policyService = {
   /** Simulate a policy change without saving (dry-run) — maps to policy simulate endpoint */
   simulate: (body: PolicyEvaluationRequest & { proposed_rules: ConditionGroup }) =>
     api.post<PolicyEvaluationResult>("/policy/dry-run", body),
+
+  /** Run a what-if policy simulation against a hypothetical contract profile */
+  runSimulation: (body: {
+    playbook_id: string;
+    name?: string;
+    description?: string;
+    contract_profile: {
+      contract_value?: number;
+      jurisdiction?: string;
+      industry?: string;
+      counterparty?: string;
+      risk_score?: number;
+      clauses?: Array<{ category: string; text: string; text_snippet?: string; confidence?: number }>;
+      findings?: Array<{ severity?: string; clause_type?: string; title?: string; description?: string }>;
+    };
+    rule_overrides?: Array<{ rule_id: string; override_effect?: string; override_conditions?: Record<string, unknown>; is_active?: boolean }>;
+    include_recommendations?: boolean;
+    dry_run?: boolean;
+  }) => api.post<{
+    simulation_id: string;
+    playbook_id: string;
+    name: string;
+    description?: string;
+    results: Array<{
+      rule_id: string;
+      rule_name: string;
+      rule_type: string;
+      effect: string;
+      matched: boolean;
+      priority: number;
+      details?: string;
+      deviation_severity?: string;
+      was_overridden: boolean;
+    }>;
+    deviations: Array<{ clause_category: string; severity: string; score: number; expected: string; actual: string; recommendation?: string }>;
+    total_rules: number;
+    rules_passed: number;
+    rules_failed: number;
+    deviations_found: number;
+    mandatory_blocks: number;
+    approval_required: number;
+    risk_score?: number;
+    risk_level?: string;
+  }>("/policy/simulate", body),
 
   /** Get policy version history — maps to playbooks versions endpoint */
   listVersions: (policyId: string) =>

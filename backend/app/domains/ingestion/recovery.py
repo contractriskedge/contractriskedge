@@ -67,7 +67,7 @@ async def recover_stuck_uploads_on_startup(
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=STUCK_GRACE_MINUTES)
 
         stuck_sql = sa_text("""
-            SELECT upload_id::text, tenant_id::text, filename, ingestion_state,
+            SELECT upload_id::text, tenant_id::text, user_id, filename, ingestion_state,
                    retry_count, updated_at
             FROM upload_sessions
             WHERE ingestion_state = ANY(:states)
@@ -100,33 +100,58 @@ async def recover_stuck_uploads_on_startup(
             state = row.ingestion_state
             age_minutes = round((datetime.now(timezone.utc) - row.updated_at).total_seconds() / 60, 1)
 
-            # ── Special handling for analysis_pending ──────────────
-            # Don't mark as failed — re-dispatch the AI analysis task.
-            # The task may have been queued but not yet processed by a worker.
-            if state == "analysis_pending":
+            # Re-dispatch pipeline work for recoverable states (worker may have died mid-step).
+            if state in _NON_TERMINAL_STATES and (row.retry_count or 0) < 3:
                 try:
-                    from workers.ai_worker import analyze_contract_task
-                    analyze_contract_task.delay(upload_id, tenant_id, "system", "full")
-                    logger.info(
-                        "[StartupRecovery] Re-dispatched AI analysis for upload %s "
-                        "(stuck in analysis_pending for %dmin)",
-                        upload_id[:8], int(age_minutes),
+                    from app.domains.ingestion.models import coerce_ingestion_state
+                    from workers.ingestion_dispatch import redispatch_ingestion
+
+                    ing_state = coerce_ingestion_state(state)
+                    action_label = redispatch_ingestion(
+                        upload_id,
+                        tenant_id,
+                        str(row.user_id or "system"),
+                        ing_state,
                     )
-                    action = {
-                        "upload_id": upload_id,
-                        "tenant_id": tenant_id[:8],
-                        "filename": row.filename,
-                        "previous_state": state,
-                        "age_minutes": age_minutes,
-                        "action": "redispatched_ai_analysis",
-                    }
-                    recovered.append(action)
+                    if action_label:
+                        await session.execute(
+                            sa_text("""
+                                UPDATE upload_sessions
+                                SET retry_count = retry_count + 1,
+                                    ingestion_error = :error,
+                                    updated_at = NOW()
+                                WHERE upload_id = CAST(:upload_id AS uuid)
+                                  AND tenant_id = CAST(:tenant_id AS uuid)
+                            """),
+                            {
+                                "upload_id": upload_id,
+                                "tenant_id": tenant_id,
+                                "error": (
+                                    f"Startup recovery: re-queued {action_label} "
+                                    f"after {age_minutes}min in {state}"
+                                ),
+                            },
+                        )
+                        action = {
+                            "upload_id": upload_id,
+                            "tenant_id": tenant_id[:8],
+                            "filename": row.filename,
+                            "previous_state": state,
+                            "age_minutes": age_minutes,
+                            "action": f"redispatched_{action_label}",
+                        }
+                        recovered.append(action)
+                        logger.info(
+                            "[StartupRecovery] Re-dispatched %s for upload %s "
+                            "(stuck in %s for %dmin)",
+                            action_label, upload_id[:8], state, int(age_minutes),
+                        )
+                        continue
                 except Exception as exc:
                     logger.error(
-                        "[StartupRecovery] Failed to re-dispatch AI analysis for %s: %s",
+                        "[StartupRecovery] Redispatch failed for %s: %s",
                         upload_id[:8], exc,
                     )
-                continue
 
             recovery_sql = sa_text("""
                 UPDATE upload_sessions

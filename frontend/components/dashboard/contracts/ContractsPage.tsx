@@ -74,15 +74,24 @@ export function ContractsPage() {
         const matchesSearch =
           (c.name || "").toLowerCase().includes(q) ||
           (c.vendor || "").toLowerCase().includes(q) ||
-          (c.id || "").toLowerCase().includes(q);
+          (c.id || "").toLowerCase().includes(q) ||
+          (c.contractNumber || "").toLowerCase().includes(q) ||
+          (c.contractType || "").toLowerCase().includes(q) ||
+          (c.owner || "").toLowerCase().includes(q);
         if (!matchesSearch) return false;
       }
       if (filters.vendor && c.vendor !== filters.vendor) return false;
+      if (filters.geography && c.geography !== filters.geography) return false;
+      if (filters.contractType && c.contractType !== filters.contractType) return false;
+      if (filters.businessUnit && c.businessUnit !== filters.businessUnit) return false;
+      if (filters.owner && c.owner !== filters.owner) return false;
+      if (filters.workflowStage && (c.workflowStage || "").toLowerCase() !== filters.workflowStage.toLowerCase()) return false;
       if (filters.riskLevel) {
-        if (filters.riskLevel === "critical" && (c.riskScore || 0) < 8) return false;
-        else if (filters.riskLevel === "high" && ((c.riskScore || 0) < 6 || (c.riskScore || 0) >= 8)) return false;
-        else if (filters.riskLevel === "medium" && ((c.riskScore || 0) < 4 || (c.riskScore || 0) >= 6)) return false;
-        else if (filters.riskLevel === "low" && (c.riskScore || 0) >= 4) return false;
+        const score = c.riskScore || 0;
+        if (filters.riskLevel === "critical" && score < 8) return false;
+        else if (filters.riskLevel === "high" && (score < 6 || score >= 8)) return false;
+        else if (filters.riskLevel === "medium" && (score < 4 || score >= 6)) return false;
+        else if (filters.riskLevel === "low" && score >= 4) return false;
       }
       if (filters.status && c.status !== filters.status) return false;
       return true;
@@ -170,7 +179,7 @@ export function ContractsPage() {
       )}
 
       {/* Filter Bar */}
-      <div className="px-3"><FilterBar filters={filters} onChange={handleFilterChange} onReset={resetFilters} /></div>
+      <div className="px-3"><FilterBar filters={filters} onChange={handleFilterChange} onReset={resetFilters} allContracts={contractRecords} /></div>
 
       {/* Contracts Table */}
       <div className="px-3">
@@ -178,6 +187,31 @@ export function ContractsPage() {
           contracts={filteredContracts}
           onSelectContract={setSelectedContract}
           onAction={(contractId, action) => {
+            // Bulk: comma-separated IDs
+            if (typeof contractId === "string" && contractId.includes(",")) {
+              const ids = contractId.split(",").filter(Boolean);
+              if (ids.length === 0) return;
+              switch (action) {
+                case "analyze-risks":
+                  ids.forEach((id) => router.push(`/reviews/ai-workspace?contractId=${id}`));
+                  break;
+                case "assign-reviewer":
+                  // Use the first selected contract's detail modal flow but for all
+                  alert(`Assign ${ids.length} contracts to a reviewer — open the first to use the picker.`);
+                  router.push(`/reviews/ai-workspace?contractId=${ids[0]}`);
+                  break;
+                case "export-pdf":
+                  ids.forEach((id) => window.open(`/api/v1/export/reviews/${id}/pdf`, "_blank"));
+                  break;
+                case "archive":
+                  if (!confirm(`Archive ${ids.length} contracts?`)) return;
+                  Promise.allSettled(ids.map((id) => fetch(`/api/v1/reviews/${id}`, { method: "DELETE" }))).then(() => {
+                    refetchContracts();
+                  });
+                  break;
+              }
+              return;
+            }
             switch (action) {
               case "view-details":
                 router.push(`/contracts/${contractId}`);
@@ -188,17 +222,11 @@ export function ContractsPage() {
               case "generate-redlines":
                 router.push(`/reviews/${contractId}/redlines`);
                 break;
-              case "assign-reviewer":
-                // Open a simple prompt — in production this would open an assignee picker
-                const name = prompt("Enter reviewer name:");
-                if (name) {
-                  fetch(`/api/v1/reviews/${contractId}/assign`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ assigned_to: name }),
-                  }).catch(() => {});
-                }
+              case "assign-reviewer": {
+                // Open the proper assign modal at the workspace level
+                router.push(`/reviews/ai-workspace?contractId=${contractId}&action=assign`);
                 break;
+              }
               case "add-tags":
                 router.push(`/contracts/${contractId}`);
                 break;
@@ -210,15 +238,18 @@ export function ContractsPage() {
                 break;
               case "archive":
                 if (confirm("Archive this contract?")) {
-                  fetch(`/api/v1/reviews/${contractId}`, {
-                    method: "DELETE",
-                  }).catch(() => {});
+                  fetch(`/api/v1/reviews/${contractId}`, { method: "DELETE" }).finally(() => {
+                    refetchContracts();
+                  });
                 }
                 break;
             }
           }}
         />
       </div>
+
+      {/* Export listener — wires ContractsHeader's Export button to a CSV download */}
+      <ExportListener contracts={filteredContracts} />
 
       {/* Preview Drawer */}
       <PreviewDrawer contract={selectedContract} onClose={() => setSelectedContract(null)} />
@@ -227,4 +258,52 @@ export function ContractsPage() {
       <UploadFlow isOpen={uploadOpen} onClose={() => setUploadOpen(false)} />
     </div>
   );
+}
+
+// ── ExportListener ──────────────────────────────────────────────────────────
+//
+// Listens for the `contracts:export-csv` custom event fired by the header
+// Export button. Serialises the currently filtered set to CSV and triggers
+// a browser download. Using a custom event keeps the header free of state.
+//
+function ExportListener({ contracts }: { contracts: ContractRecord[] }) {
+  React.useEffect(() => {
+    const handler = () => {
+      const headers = [
+        "Contract #", "Name", "Vendor", "Type", "Status", "Risk Score",
+        "Risk Level", "Financial Value", "Currency", "Owner", "Geography",
+        "Effective Date", "Expiration Date", "Renewal Date", "Workflow Stage",
+      ];
+      const rows = contracts.map((c) => [
+        c.contractNumber || "",
+        c.name || "",
+        c.vendor || "",
+        c.contractType || "",
+        c.status || "",
+        String(c.riskScore ?? 0),
+        c.riskLevel || "",
+        String(c.financialValue ?? 0),
+        c.currency || "USD",
+        c.owner || "",
+        c.geography || "",
+        c.effectiveDate || "",
+        c.expirationDate || "",
+        c.renewalDate || "",
+        c.workflowStage || "",
+      ]);
+      const csv = [headers, ...rows]
+        .map((row) => row.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
+        .join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `contracts-export-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+    window.addEventListener("contracts:export-csv", handler);
+    return () => window.removeEventListener("contracts:export-csv", handler);
+  }, [contracts]);
+  return null;
 }

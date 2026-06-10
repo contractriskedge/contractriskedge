@@ -14,13 +14,21 @@
 
 import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowUpRight, X, AlertTriangle, User } from "lucide-react";
+import { ArrowUpRight, X, AlertTriangle } from "lucide-react";
+import { getEscalationBlockReason, isImmutable } from "@/lib/workflow";
+import { UserPicker } from "@/components/shared/UserPicker";
 
 interface EscalationModalProps {
   reviewId: string;
   reviewTitle: string;
   currentPriority: string;
   currentStage: string | null;
+  /**
+   * Current workflow status of the review (e.g. "in_review", "approved",
+   * "completed"). Used to block the Escalate button when the review is
+   * already in a terminal or locked state.
+   */
+  currentStatus?: string | null;
   onEscalate: (reason: string, escalatedTo?: string, raisePriority?: boolean, targetStage?: string) => Promise<void>;
   onClose: () => void;
   isLoading?: boolean;
@@ -73,6 +81,7 @@ export function EscalationModal({
   reviewTitle,
   currentPriority,
   currentStage,
+  currentStatus,
   onEscalate,
   onClose,
   isLoading = false,
@@ -81,12 +90,26 @@ export function EscalationModal({
   const [stage, setStage] = useState("");
   const [priorityLevel, setPriorityLevel] = useState("");
   const [assignee, setAssignee] = useState("");
+  const [assigneeName, setAssigneeName] = useState("");
   const [error, setError] = useState("");
 
   const selectedStage = WORKFLOW_STAGES.find((s) => s.value === stage);
 
+  // If the review is already in a terminal/locked state, escalation is
+  // forbidden. Surface a clear reason to the user instead of letting them
+  // submit a request that the backend would reject.
+  const blockedReason = currentStatus
+    ? getEscalationBlockReason(currentStatus)
+    : null;
+  const isBlocked = blockedReason !== null || isImmutable(currentStatus ?? "");
+  const canEscalate = !isBlocked;
+
   const handleEscalate = async () => {
     const trimmedReason = reason.trim();
+    if (isBlocked) {
+      setError(blockedReason ?? "Escalation is not allowed in the current state.");
+      return;
+    }
     if (!trimmedReason) {
       setError("Escalation reason is required");
       return;
@@ -151,7 +174,29 @@ export function EscalationModal({
               <span className="font-medium">Stage:</span>
               <span>{currentStage || "reviewer"}</span>
             </div>
+            {currentStatus && (
+              <>
+                <span className="text-gray-300">|</span>
+                <div className="flex items-center gap-2 text-xs text-gray-600">
+                  <span className="font-medium">Status:</span>
+                  <span className="font-mono text-[10px]">{currentStatus}</span>
+                </div>
+              </>
+            )}
           </div>
+
+          {/* Blocked banner — shown when the review cannot be escalated */}
+          {isBlocked && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2" role="alert">
+              <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+              <div className="text-sm text-red-800">
+                <p className="font-semibold">Escalation is not allowed for this review.</p>
+                <p className="mt-0.5 text-xs text-red-700">
+                  {blockedReason ?? "This review is in a locked state."}
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Escalation Reason */}
           <div>
@@ -171,7 +216,7 @@ export function EscalationModal({
           </div>
 
           {/* Target Workflow Stage */}
-          <div>
+          <div className={isBlocked ? "opacity-50 pointer-events-none" : undefined}>
             <label className="block text-sm font-medium text-gray-900 mb-2">
               Target Workflow Stage <span className="text-red-500">*</span>
             </label>
@@ -184,7 +229,7 @@ export function EscalationModal({
                       ? "bg-orange-50 border-orange-300 ring-1 ring-orange-300"
                       : "bg-white border-gray-200 hover:bg-gray-50"
                   }`}
-                  onClick={() => { setStage(s.value); setError(""); }}
+                  onClick={() => { if (!isBlocked) { setStage(s.value); setError(""); } }}
                 >
                   <input
                     type="radio"
@@ -214,16 +259,20 @@ export function EscalationModal({
             <label className="block text-sm font-medium text-gray-900 mb-2">
               Assign To <span className="text-gray-500">(Optional)</span>
             </label>
-            <div className="relative">
-              <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                value={assignee}
-                onChange={(e) => setAssignee(e.target.value)}
-                placeholder="user_id or email of the escalation target"
-                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
-              />
-            </div>
+            <UserPicker
+              value={assignee}
+              onChange={setAssignee}
+              onSelectUser={(user) => setAssigneeName(user?.name ?? "")}
+              allowedRoles={["tenant_admin", "reviewer", "legal_ops", "compliance", "executive", "admin"]}
+              placeholder="Search by name, email, or role…"
+              size="md"
+              allowNone
+              noneLabel="— No specific assignee —"
+            />
+            <p className="mt-1 text-[11px] text-gray-500">
+              Pick a user from your tenant directory. Leave blank to keep the
+              current assignment.
+            </p>
           </div>
 
           {/* Priority Bump Selector */}
@@ -277,7 +326,7 @@ export function EscalationModal({
                   <>
                     <span className="text-blue-400">|</span>
                     <span className="font-medium">Assignee:</span>
-                    <span>{assignee}</span>
+                    <span>{assigneeName || assignee}</span>
                   </>
                 )}
               </div>
@@ -294,7 +343,12 @@ export function EscalationModal({
 
         {/* Footer */}
         <div className="sticky bottom-0 px-6 py-4 border-t border-gray-100 bg-gray-50">
-          {(reason.trim().length < MIN_REASON_LENGTH || !stage) && !isLoading && (
+          {isBlocked && !isLoading && (
+            <p className="mb-3 text-xs text-red-600 text-center font-medium">
+              {blockedReason ?? "Escalation is not allowed in this state."}
+            </p>
+          )}
+          {!isBlocked && (reason.trim().length < MIN_REASON_LENGTH || !stage) && !isLoading && (
             <p className="mb-3 text-xs text-gray-600 text-center">
               {!stage && reason.trim().length >= MIN_REASON_LENGTH
                 ? "Select a target workflow stage to continue."
@@ -313,13 +367,20 @@ export function EscalationModal({
           </button>
           <button
             onClick={handleEscalate}
-            disabled={isLoading || reason.trim().length < MIN_REASON_LENGTH || !stage}
+            disabled={
+              isLoading ||
+              isBlocked ||
+              reason.trim().length < MIN_REASON_LENGTH ||
+              !stage
+            }
             title={
-              reason.trim().length < MIN_REASON_LENGTH
-                ? `Add ${MIN_REASON_LENGTH - reason.trim().length} more character(s) in the reason field`
-                : !stage
-                  ? "Select a target workflow stage"
-                  : undefined
+              isBlocked
+                ? blockedReason ?? "Escalation is not allowed in this state"
+                : reason.trim().length < MIN_REASON_LENGTH
+                  ? `Add ${MIN_REASON_LENGTH - reason.trim().length} more character(s) in the reason field`
+                  : !stage
+                    ? "Select a target workflow stage"
+                    : undefined
             }
             className="px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 disabled:cursor-not-allowed disabled:bg-gray-400 disabled:hover:bg-gray-400 transition-colors inline-flex items-center gap-2"
           >

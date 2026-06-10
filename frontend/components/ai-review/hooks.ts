@@ -192,7 +192,9 @@ export const REVIEW_SUBRESOURCE_API = {
   workflow: true,
   activity: true,
   document: false,
-  reviewersWorkload: false,
+  // /reviews/reviewers/workload is now served by the backend
+  // (ReviewService.get_reviewer_workloads).
+  reviewersWorkload: true,
   metrics: false,
 } as const;
 

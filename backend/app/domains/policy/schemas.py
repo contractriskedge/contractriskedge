@@ -114,6 +114,40 @@ class SimulationDeviation(BaseModel):
     recommendation: Optional[str] = None
 
 
+class SimulatedFindingImpact(BaseModel):
+    """Predicted finding impact from a simulation."""
+    clause_category: str
+    severity: str
+    title: str
+    description: str
+    matched_rule_id: Optional[str] = None
+    matched_rule_name: Optional[str] = None
+    deviation_score: float = 0.0
+    would_generate_finding: bool = True
+
+
+class SimulatedViolationImpact(BaseModel):
+    """Predicted violation impact from a simulation."""
+    rule_id: str
+    rule_name: str
+    clause_category: str
+    severity: str
+    effect: str
+    is_mandatory: bool = False
+    would_violate: bool = True
+    deviation_score: float = 0.0
+
+
+class SimulatedRedlineImpact(BaseModel):
+    """Predicted redline impact from a simulation."""
+    clause_category: str
+    rule_id: str
+    rule_name: str
+    suggested_action: str  # 'modify', 'insert', 'restrict', 'remove'
+    rationale: str
+    confidence: float = 0.0
+
+
 class SimulationResult(BaseModel):
     """Complete simulation output."""
     simulation_id: str
@@ -133,6 +167,11 @@ class SimulationResult(BaseModel):
     risk_score: Optional[float] = None
     risk_level: Optional[str] = None
     created_at: datetime
+    # Predicted downstream impacts — what would change in findings,
+    # violations, and redlines if this simulation were applied.
+    predicted_finding_impacts: list[SimulatedFindingImpact] = Field(default_factory=list)
+    predicted_violation_impacts: list[SimulatedViolationImpact] = Field(default_factory=list)
+    predicted_redline_impacts: list[SimulatedRedlineImpact] = Field(default_factory=list)
 
 
 class SimulationSummary(BaseModel):

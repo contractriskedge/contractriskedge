@@ -158,6 +158,8 @@ class NegotiationSessionResponse(BaseModel):
     contract_title: str = Field(alias="contractTitle")
     counterparty: str
     stage: str
+    current_round: int = Field(1, alias="currentRound")
+    max_rounds: int = Field(3, alias="maxRounds")
     versions: list[DocumentVersionSchema] = Field(default_factory=list)
     current_version_id: Optional[str] = Field(None, alias="currentVersionId")
     redlines: list[RedlineEntrySchema] = Field(default_factory=list)
@@ -182,6 +184,8 @@ class NegotiationSessionSummary(BaseModel):
     counterparty: str
     stage: str
     health_score: float = Field(alias="healthScore")
+    current_round: int = Field(1, alias="currentRound")
+    max_rounds: int = Field(3, alias="maxRounds")
     started_at: datetime = Field(alias="startedAt")
     updated_at: datetime = Field(alias="updatedAt")
 

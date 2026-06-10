@@ -18,6 +18,14 @@ const activityEvents: ActivityEvent[] = [];
 
 // ── Risk Badge ──────────────────────────────────────────────────────────────
 
+function formatMoney(value: number, currency: string = "USD"): string {
+  if (!value) return "—";
+  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B ${currency}`;
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M ${currency}`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K ${currency}`;
+  return `${value.toFixed(0)} ${currency}`;
+}
+
 function RiskBadge({ score }: { score: number }) {
   const level = score >= 8 ? "critical" : score >= 6 ? "high" : score >= 4 ? "medium" : "low";
   return (
@@ -152,20 +160,47 @@ function OverviewTab({ contract }: { contract: ContractRecord }) {
 
       {/* Metadata */}
       <div className="bg-gray-50 rounded-lg p-3 space-y-0.5 divide-y divide-gray-100">
-        <MetaRow label="Vendor" value={contract.vendor} icon={<User className="w-3 h-3" />} />
-        <MetaRow label="Contract Type" value={contract.contractType} />
-        <MetaRow label="Business Unit" value={contract.businessUnit} />
-        <MetaRow label="Geography" value={contract.geography} />
+        <MetaRow label="Contract #" value={contract.contractNumber || "—"} />
+        <MetaRow label="Vendor" value={contract.vendor || "—"} icon={<User className="w-3 h-3" />} />
+        <MetaRow label="Contract Type" value={contract.contractType || "—"} />
+        <MetaRow label="Business Unit" value={contract.businessUnit || "—"} />
+        <MetaRow label="Geography" value={contract.geography || "—"} />
+        <MetaRow label="Health" value={
+          <span className={`inline-flex items-center gap-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+            contract.health === "healthy" ? "text-emerald-700 bg-emerald-50" :
+            contract.health === "needs_review" ? "text-amber-700 bg-amber-50" :
+            contract.health === "high_risk" ? "text-red-700 bg-red-50" :
+            contract.health === "expired" ? "text-gray-700 bg-gray-100" :
+            "text-orange-700 bg-orange-50"
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${
+              contract.health === "healthy" ? "bg-emerald-500" :
+              contract.health === "needs_review" ? "bg-amber-500" :
+              contract.health === "high_risk" ? "bg-red-500" :
+              contract.health === "expired" ? "bg-gray-400" :
+              "bg-orange-500"
+            }`} />
+            {contract.health?.replace(/_/g, " ") || "needs review"}
+          </span>
+        } />
         <MetaRow label="Risk Score" value={<RiskBadge score={contract.riskScore} />} />
-        <MetaRow label="Financial Value" value={`$${contract.financialValue}M`} icon={<DollarSign className="w-3 h-3" />} />
-        <MetaRow label="Status" value={<span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${contract.status === "active" ? "bg-green-100 text-green-700" : contract.status === "expiring_soon" ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-600"}`}>{contract.status.replace(/_/g, " ")}</span>} />
-        <MetaRow label="Renewal Date" value={contract.renewalDate} icon={<Calendar className="w-3 h-3" />} />
-        <MetaRow label="Owner" value={contract.owner} icon={<User className="w-3 h-3" />} />
-        <MetaRow label="Workflow Stage" value={WORKFLOW_STAGES[contract.workflowStage]?.label || contract.workflowStage} />
-        <MetaRow label="Pages" value={contract.totalPages.toString()} icon={<FileText className="w-3 h-3" />} />
-        <MetaRow label="Clauses" value={contract.clauseCount.toString()} />
-        <MetaRow label="Auto-Renewal" value={contract.autoRenew ? "Yes" : "No"} />
-        <MetaRow label="Has DPA" value={contract.hasDpa ? "Yes" : "No"} />
+        <MetaRow label="Financial Value" value={`$${formatMoney(contract.financialValue, contract.currency)}`} icon={<DollarSign className="w-3 h-3" />} />
+        <MetaRow label="Status" value={
+          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+            contract.status === "active" ? "bg-green-100 text-green-700" :
+            contract.status === "expiring_soon" ? "bg-yellow-100 text-yellow-700" :
+            "bg-gray-100 text-gray-600"
+          }`}>
+            {contract.status?.replace(/_/g, " ") || "draft"}
+          </span>
+        } />
+        <MetaRow label="Effective" value={contract.effectiveDate || "—"} />
+        <MetaRow label="Expiration" value={contract.expirationDate || "—"} icon={<Calendar className="w-3 h-3" />} />
+        <MetaRow label="Renewal Date" value={contract.renewalDate || "—"} />
+        <MetaRow label="Last Review" value={contract.lastReviewDate || "—"} />
+        <MetaRow label="Owner" value={contract.owner || "Unassigned"} icon={<User className="w-3 h-3" />} />
+        <MetaRow label="Workflow Stage" value={WORKFLOW_STAGES[contract.workflowStage as keyof typeof WORKFLOW_STAGES]?.label || contract.workflowStage} />
+        <MetaRow label="Original File" value={contract.originalFilename || "—"} />
       </div>
 
       {/* Tags */}

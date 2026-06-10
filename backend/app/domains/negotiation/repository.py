@@ -199,6 +199,18 @@ class NegotiationRepository:
         await self.session.flush()
         return version
 
+    async def update_version_status(self, version_id: str, status: str) -> Optional[NegotiationVersion]:
+        """Update the status of a version (e.g. CURRENT → SUPERSEDED)."""
+        query = (
+            update(NegotiationVersion)
+            .where(NegotiationVersion.version_id == version_id)
+            .values(status=status)
+            .returning(NegotiationVersion)
+        )
+        result = await self.session.execute(query)
+        await self.session.flush()
+        return result.scalar_one_or_none()
+
     async def list_versions(self, session_id: str) -> list[NegotiationVersion]:
         """List all versions for a session, scoped to tenant."""
         query = (

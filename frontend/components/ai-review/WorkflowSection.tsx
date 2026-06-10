@@ -23,6 +23,7 @@ import {
 import { useReviewContext } from "./ReviewContext";
 import { useReviewerWorkloads, useQueueMetrics, useAdvanceWorkflow, useStageHistory, useActivityComments } from "./hooks";
 import { reviewService } from "@/services/api/reviews";
+import { UserPicker } from "@/components/shared/UserPicker";
 
 export function WorkflowSection() {
   const ctx = useReviewContext();
@@ -316,7 +317,7 @@ export function WorkflowSection() {
               <ShieldAlert className="w-2.5 h-2.5" /> Escalate
             </button>
             {/* Approve */}
-            <button onClick={() => { setAdvanceModal({ action: "approve" }); }}
+            <button onClick={() => { setAdvanceModal({ action: "approved" }); }}
               className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-green-600 text-white hover:bg-green-700 transition-colors shadow-sm">
               <CheckCircle className="w-2.5 h-2.5" /> Approve
             </button>
@@ -398,16 +399,18 @@ export function WorkflowSection() {
             <div className="space-y-2.5">
               <div>
                 <label className="text-[9px] font-semibold text-gray-500 uppercase">Assignee</label>
-                <select value={advanceAssignee} onChange={e => setAdvanceAssignee(e.target.value)}
-                  className="w-full mt-0.5 px-2 py-1.5 text-[11px] border border-gray-200 rounded-lg bg-white dark:bg-navy-700 dark:border-navy-600">
-                  <option value="">Auto-assign (no specific assignee)</option>
-                  {reviewers?.map(r => (
-                    <option key={r.user_id} value={r.user_id}>{r.name} ({r.active_reviews} active)</option>
-                  ))}
-                  <option value="legal@test.com">Legal Reviewer</option>
-                  <option value="exec@test.com">Executive Reviewer</option>
-                  <option value="compliance@test.com">Compliance Reviewer</option>
-                </select>
+                <div className="mt-0.5">
+                  <UserPicker
+                    value={advanceAssignee}
+                    onChange={setAdvanceAssignee}
+                    allowedRoles={["tenant_admin", "reviewer", "legal_ops", "compliance", "executive", "admin"]}
+                    placeholder="Search by name, email, or role…"
+                    size="sm"
+                    allowNone
+                    noneLabel="— Auto-assign (no specific assignee) —"
+                    reviewerWorkloads={reviewers}
+                  />
+                </div>
               </div>
               <div>
                 <label className="text-[9px] font-semibold text-gray-500 uppercase">Handoff Note</label>
@@ -434,7 +437,7 @@ export function WorkflowSection() {
       {/* ── Reassign Modal ────────────────────────────────────────────────── */}
       {reassignModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setReassignModal(false)}>
-          <div className="bg-white dark:bg-navy-800 rounded-xl shadow-xl border border-gray-200 dark:border-navy-700 p-4 w-72 max-w-full mx-2" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-navy-800 rounded-xl shadow-xl border border-gray-200 dark:border-navy-700 p-4 w-80 max-w-full mx-2" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-xs font-bold text-navy-900 dark:text-white">Reassign Reviewer</h4>
               <button onClick={() => setReassignModal(false)} className="p-1 rounded hover:bg-gray-100"><X className="w-3.5 h-3.5" /></button>
@@ -442,13 +445,18 @@ export function WorkflowSection() {
             <div className="space-y-2.5">
               <div>
                 <label className="text-[9px] font-semibold text-gray-500 uppercase">New Assignee</label>
-                <select value={reassignTarget} onChange={e => setReassignTarget(e.target.value)}
-                  className="w-full mt-0.5 px-2 py-1.5 text-[11px] border border-gray-200 rounded-lg bg-white dark:bg-navy-700 dark:border-navy-600">
-                  <option value="">Select reviewer...</option>
-                  {reviewers?.map(r => (
-                    <option key={r.user_id} value={r.user_id}>{r.name} ({r.active_reviews} active)</option>
-                  ))}
-                </select>
+                <div className="mt-0.5">
+                  <UserPicker
+                    value={reassignTarget}
+                    onChange={setReassignTarget}
+                    allowedRoles={["tenant_admin", "reviewer", "legal_ops", "compliance", "executive", "admin"]}
+                    placeholder="Search by name, email, or role…"
+                    size="sm"
+                    allowNone
+                    noneLabel="— Select reviewer…"
+                    reviewerWorkloads={reviewers}
+                  />
+                </div>
               </div>
               <div className="flex gap-2 pt-1">
                 <button onClick={() => setReassignModal(false)}

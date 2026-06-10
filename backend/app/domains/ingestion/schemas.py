@@ -192,6 +192,7 @@ class UploadSummary(BaseModel):
     content_type: str
     ingestion_state: IngestionState
     created_at: datetime
+    contract_number: Optional[str] = None
 
 
 # ── Error ──────────────────────────────────────────────────────────

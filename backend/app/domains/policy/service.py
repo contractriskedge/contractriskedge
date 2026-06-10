@@ -27,6 +27,7 @@ from app.domains.policy.schemas import (
     SimulationRuleResult, SimulationDeviation,
     SimulationContractProfile, SimulationClause, SimulationFinding,
     SimulationRuleOverride, SimulationSummary,
+    SimulatedFindingImpact, SimulatedViolationImpact, SimulatedRedlineImpact,
     DryRunRequest, DryRunResult,
     PolicyChange, ImpactedContract, PolicyImpactAnalysis,
     PolicyAuditEvent, PolicyAuditLogResponse,
@@ -34,6 +35,16 @@ from app.domains.policy.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def deviation_score_for_rule(rule_result, deviations: list) -> float:
+    """Compute aggregate deviation score for a given rule result."""
+    if not rule_result.matched:
+        return 1.0
+    rule_devs = [d for d in deviations if getattr(d, 'clause_category', '') == rule_result.rule_type]
+    if not rule_devs:
+        return 0.0
+    return max(d.score for d in rule_devs)
 
 
 @dataclass
@@ -50,9 +61,9 @@ class PolicySimulationEngine:
     async def simulate(self, request: SimulationRequest) -> SimulationResult:
         """Run a policy simulation against a hypothetical contract profile."""
         # Load playbook rules, standards, thresholds
-        rules = await self.repo.get_active_rules(request.playbook_id)
-        standards = await self.repo.get_active_clause_standards(request.playbook_id)
-        thresholds = await self.repo.get_active_thresholds(request.playbook_id)
+        rules = await self.repo.get_active_rules_by_playbook(request.playbook_id, self.tenant_id)
+        standards = await self.repo.get_active_clauses_by_playbook(request.playbook_id, self.tenant_id)
+        thresholds = await self.repo.get_active_thresholds_by_playbook(request.playbook_id, self.tenant_id)
 
         # Apply rule overrides
         overridden_rule_ids: set[str] = set()
@@ -134,6 +145,55 @@ class PolicySimulationEngine:
             for d in eval_result.deviations
         ]
 
+        # ── Predicted downstream impacts ─────────────────────────────
+        # Translate deviations into predicted finding/violation/redline
+        # impacts so the frontend can show what would change.
+        predicted_finding_impacts: list[SimulatedFindingImpact] = []
+        predicted_violation_impacts: list[SimulatedViolationImpact] = []
+        predicted_redline_impacts: list[SimulatedRedlineImpact] = []
+
+        rule_map = {str(r.rule_id): r for r in modified_rules}
+
+        for dev in eval_result.deviations:
+            # Finding impact — each deviation maps to a simulated finding
+            predicted_finding_impacts.append(SimulatedFindingImpact(
+                clause_category=dev.clause_category,
+                severity=dev.severity,
+                title=f"Policy deviation: {dev.clause_category}",
+                description=dev.recommendation or f"Expected '{dev.expected}', got '{dev.actual}'",
+                deviation_score=dev.score,
+                would_generate_finding=dev.score >= 0.3,
+            ))
+
+        for rr in eval_result.rule_results:
+            rule = rule_map.get(rr.rule_id)
+            if not rule:
+                continue
+            # Violation impact — rules that didn't match or have deviations
+            severity = rr.deviation_severity or "medium"
+            would_violate = not rr.matched or (severity in ("critical", "high"))
+            predicted_violation_impacts.append(SimulatedViolationImpact(
+                rule_id=rr.rule_id,
+                rule_name=rr.rule_name,
+                clause_category=rr.rule_type,
+                severity=severity,
+                effect=rr.effect,
+                is_mandatory=getattr(rule, "is_mandatory", False),
+                would_violate=would_violate,
+                deviation_score=deviation_score_for_rule(rr, eval_result.deviations),
+            ))
+
+            # Redline impact — for violations that need remediation
+            if would_violate and rr.effect in ("block", "restrict"):
+                predicted_redline_impacts.append(SimulatedRedlineImpact(
+                    clause_category=rr.rule_type,
+                    rule_id=rr.rule_id,
+                    rule_name=rr.rule_name,
+                    suggested_action="modify" if rr.effect == "restrict" else "remove",
+                    rationale=f"Rule '{rr.rule_name}' requires {rr.effect} on non-compliant clauses",
+                    confidence=0.75 if rr.matched else 0.6,
+                ))
+
         return SimulationResult(
             simulation_id=uuid.uuid4().hex,
             playbook_id=request.playbook_id,
@@ -152,13 +212,16 @@ class PolicySimulationEngine:
             risk_score=eval_result.risk_score,
             risk_level=eval_result.risk_level,
             created_at=datetime.now(timezone.utc),
+            predicted_finding_impacts=predicted_finding_impacts,
+            predicted_violation_impacts=predicted_violation_impacts,
+            predicted_redline_impacts=predicted_redline_impacts,
         )
 
     async def dry_run(self, request: DryRunRequest) -> DryRunResult:
         """Dry-run policy evaluation against a real contract without persisting."""
-        rules = await self.repo.get_active_rules(request.playbook_id)
-        standards = await self.repo.get_active_clause_standards(request.playbook_id)
-        thresholds = await self.repo.get_active_thresholds(request.playbook_id)
+        rules = await self.repo.get_active_rules_by_playbook(request.playbook_id, self.tenant_id)
+        standards = await self.repo.get_active_clauses_by_playbook(request.playbook_id, self.tenant_id)
+        thresholds = await self.repo.get_active_thresholds_by_playbook(request.playbook_id, self.tenant_id)
 
         # Filter to specific rules if requested
         if request.rule_ids:
@@ -257,7 +320,7 @@ class PolicyRuleGraphBuilder:
 
     async def build_graph(self, playbook_id: str) -> RuleGraph:
         """Construct a full dependency graph of all rules in a playbook."""
-        rules = await self.repo.get_active_rules(playbook_id)
+        rules = await self.repo.get_active_rules_by_playbook(playbook_id, self.repo.tenant_id)
         sorted_rules = sorted(rules, key=lambda r: r.priority)
 
         nodes: list[RuleGraphNode] = []
@@ -368,9 +431,9 @@ class PolicyImpactAnalyzer:
     ) -> PolicyImpactAnalysis:
         """Analyze how proposed policy changes would affect existing evaluations."""
         # Load current rules
-        current_rules = await self.repo.get_active_rules(playbook_id)
-        standards = await self.repo.get_active_clause_standards(playbook_id)
-        thresholds = await self.repo.get_active_thresholds(playbook_id)
+        current_rules = await self.repo.get_active_rules_by_playbook(playbook_id, self.repo.tenant_id)
+        standards = await self.repo.get_active_clauses_by_playbook(playbook_id, self.repo.tenant_id)
+        thresholds = await self.repo.get_active_thresholds_by_playbook(playbook_id, self.repo.tenant_id)
 
         # Get recent evaluations to test against
         evaluations = await self.repo.get_recent_evaluations(playbook_id, limit=20)
@@ -502,7 +565,7 @@ class PolicyHealthChecker:
                 issues.append(f"Conflicting rules for category '{cat}': blocking and allowing simultaneously")
 
         # Check for orphaned rules (targeting non-existent clauses)
-        standards = await self.repo.get_active_clause_standards(playbook_id)
+        standards = await self.repo.get_active_clauses_by_playbook(playbook_id, self.repo.tenant_id)
         standard_categories = {s.category.value if hasattr(s.category, 'value') else str(s.category) for s in standards}
         for rule in active_rules:
             if rule.target_category and rule.target_category not in standard_categories:

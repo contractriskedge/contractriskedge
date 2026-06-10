@@ -157,6 +157,7 @@ class RedlineStatus(str, PyEnum):
     NEEDS_LEGAL_REVIEW = "needs_legal_review"
     CUSTOMER_REQUESTED = "customer_requested"
     FALLBACK_LANGUAGE = "fallback_language"
+    INVALID_MAPPING = "invalid_mapping"
 
 
 class ContractReview(Base):
@@ -240,6 +241,13 @@ class ReviewFinding(Base):
 
     chunk_ids = Column(ARRAY(UUID), nullable=False, default=list)
     page_numbers = Column(ARRAY(Integer), nullable=False, default=list)
+    page_number = Column(Integer, nullable=True)
+    section_heading = Column(Text, nullable=True)
+    paragraph_index = Column(Integer, nullable=True)
+    source_text = Column(Text, nullable=True)
+    source_start_offset = Column(Integer, nullable=True)
+    source_end_offset = Column(Integer, nullable=True)
+    confidence_score = Column(Float, nullable=True)
 
     resolution = Column(SAEnum("acknowledged", "resolved", "dismissed", "false_positive", "escalated", name="finding_resolution", create_type=True), nullable=True)
     resolution_note = Column(Text, nullable=True)
@@ -250,6 +258,13 @@ class ReviewFinding(Base):
     feedback_note = Column(Text, nullable=True)
     feedback_priority = Column(Text, nullable=True)  # "low", "medium", "high"
     feedback_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Policy engine linkage — persisted when findings match policy rules
+    playbook_id = Column(UUID, ForeignKey("legal_playbooks.playbook_id", ondelete="SET NULL"), nullable=True, index=True)
+    rule_id = Column(UUID, ForeignKey("policy_rules.rule_id", ondelete="SET NULL"), nullable=True, index=True)
+    evaluation_id = Column(UUID, ForeignKey("policy_evaluations.evaluation_id", ondelete="SET NULL"), nullable=True)
+    clause_standard_id = Column(UUID, nullable=True)
+    policy_owner = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
@@ -277,7 +292,7 @@ class ReviewRedline(Base):
     # Also: legal_domain, risk_type, ontology, insert_position from locator
     redline_metadata = Column("redline_metadata", JSONB, nullable=True, default=dict)
 
-    status = Column(SAEnum("proposed", "accepted", "rejected", "modified", "superseded", "needs_legal_review", "customer_requested", "fallback_language", name="redline_status", create_type=True), nullable=False, default=RedlineStatus.PROPOSED)
+    status = Column(SAEnum("proposed", "accepted", "rejected", "modified", "superseded", "needs_legal_review", "customer_requested", "fallback_language", "invalid_mapping", name="redline_status", create_type=True), nullable=False, default=RedlineStatus.PROPOSED)
     reviewer_modified_text = Column(Text, nullable=True)
     review_notes = Column(Text, nullable=True)
     reviewed_by = Column(Text, nullable=True)

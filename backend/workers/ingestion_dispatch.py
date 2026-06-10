@@ -58,11 +58,25 @@ def redispatch_ingestion(upload_id: str, tenant_id: str, user_id: str, state: In
         logger.info("Redispatched confirm_storage for %s", upload_id)
         return "confirm_storage"
 
-    if state in (IngestionState.UPLOADED, IngestionState.VALIDATING):
+    if state == IngestionState.UPLOADED:
+        from workers.ingestion_tasks import ingest_document
+
+        ingest_document.delay(upload_id, tenant_id, user_id)
+        logger.info("Redispatched ingest_document for %s (state=%s)", upload_id, state.value)
+        return "ingest_document"
+
+    if state == IngestionState.VALIDATING:
         from workers.ingestion import validate_upload_task
 
         validate_upload_task.delay(upload_id, tenant_id, user_id)
         logger.info("Redispatched validate_upload for %s (state=%s)", upload_id, state.value)
         return "validate_upload"
+
+    if state == IngestionState.ANALYSIS_PENDING:
+        from workers.ai_worker import analyze_contract_task
+
+        analyze_contract_task.delay(upload_id, tenant_id, user_id, "full")
+        logger.info("Redispatched analyze_contract for %s", upload_id)
+        return "analyze_contract"
 
     return None

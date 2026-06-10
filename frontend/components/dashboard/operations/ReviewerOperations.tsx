@@ -142,7 +142,7 @@ export function ReviewerOperations() {
 
 // ── My Work ────────────────────────────────────────────────────────
 
-function UnifiedWorkQueue({ items, loading }: { items: Array<{ review_id: string; contract_name: string | null; status: string; risk_score: number | null; sla_deadline: string | null; assigned_to: string | null; created_at: string }>; loading: boolean }) {
+function UnifiedWorkQueue({ items, loading }: { items: Array<{ review_id: string; contract_name: string | null; contract_number?: string | null; status: string; risk_score: number | null; sla_deadline: string | null; assigned_to: string | null; created_at: string }>; loading: boolean }) {
   if (loading) {
     return (
       <div className="space-y-2">
@@ -181,6 +181,7 @@ function UnifiedWorkQueue({ items, loading }: { items: Array<{ review_id: string
           <span className={`w-1.5 h-1.5 rounded-full ${item.risk_score && item.risk_score >= 7 ? "bg-red-500" : item.risk_score && item.risk_score >= 4 ? "bg-orange-500" : "bg-blue-500"}`} />
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium text-navy-900 dark:text-white truncate">
+              {item.contract_number ? <span className="font-mono text-[10px] text-gray-400 mr-1">{item.contract_number}</span> : ""}
               {item.contract_name ?? `Review ${item.review_id.slice(0, 8)}`}
             </p>
             <div className="flex items-center gap-2 mt-0.5">

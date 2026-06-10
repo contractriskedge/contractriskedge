@@ -96,13 +96,13 @@ export function SlaVendorTable({ data, breaches }: { data: SlaMetric[]; breaches
 export function FinancialExposurePanel({ data, valueAtRisk }: { data: FinancialExposure[]; valueAtRisk?: any }) {
   const total = data.reduce((s, d) => s + d.totalExposure, 0);
   return (
-    <SectionCard title="Financial Exposure Analysis" subtitle={`Total exposure: $${total.toFixed(1)}M`}>
+    <SectionCard title="Financial Exposure Analysis" subtitle={`Total exposure: $${total.toLocaleString()}`}>
       <div className="space-y-2">
         {data.map((d) => (
           <div key={d.category} className="space-y-1">
             <div className="flex items-center justify-between text-xs">
               <span className="text-gray-700 font-medium">{d.category}</span>
-              <span className="font-bold text-red-600">${d.totalExposure.toFixed(1)}M</span>
+              <span className="font-bold text-red-600">${d.totalExposure.toLocaleString()}</span>
             </div>
             <div className="h-2 bg-gray-200 rounded-full overflow-hidden flex">
               <div className="h-full bg-green-500" style={{ width: `${(d.recoveredAmount / d.totalExposure) * 100}%` }} />
@@ -110,9 +110,9 @@ export function FinancialExposurePanel({ data, valueAtRisk }: { data: FinancialE
               <div className="h-full bg-red-500" style={{ width: `${(d.overdueAmount / d.totalExposure) * 100}%` }} />
             </div>
             <div className="flex justify-between text-[9px] text-gray-400">
-              <span className="text-green-500">${d.recoveredAmount.toFixed(1)}M recovered</span>
-              <span className="text-yellow-500">${d.atRiskAmount.toFixed(1)}M at risk</span>
-              <span className="text-red-500">${d.overdueAmount.toFixed(1)}M overdue</span>
+              <span className="text-green-500">${d.recoveredAmount.toLocaleString()} recovered</span>
+              <span className="text-yellow-500">${d.atRiskAmount.toLocaleString()} at risk</span>
+              <span className="text-red-500">${d.overdueAmount.toLocaleString()} overdue</span>
             </div>
           </div>
         ))}

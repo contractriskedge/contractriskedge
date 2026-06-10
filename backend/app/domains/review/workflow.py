@@ -105,8 +105,22 @@ class WorkflowState(str, enum.Enum):
         return len(self.valid_transitions().get(self, set())) == 0
 
     def is_immutable(self) -> bool:
-        """States where the review content is locked (read-only)."""
-        return self in (self.APPROVED, self.REJECTED, self.FINALIZED, self.EXECUTED, self.ARCHIVED)
+        """States where the review content is locked (read-only).
+
+        A review in an immutable state cannot be edited, escalated,
+        re-assigned, or transitioned except for the explicit
+        post-completion paths (e.g. APPROVED → FINALIZED → EXECUTED).
+
+        The legacy ``closed`` DB status is mapped to ``ARCHIVED`` by
+        ``LEGACY_STATUS_MAP`` so it is also covered here.
+        """
+        return self in (
+            self.APPROVED,
+            self.REJECTED,
+            self.FINALIZED,
+            self.EXECUTED,
+            self.ARCHIVED,
+        )
 
     def is_mutable(self) -> bool:
         """States where review content can still be edited."""
@@ -212,12 +226,19 @@ def guard_mutable(review_status: str, action: str, review_id: str) -> None:
 
     Call this before any mutation operation (redline edit, finding resolve,
     reassignment, etc.) to enforce read-only semantics on immutable states.
+
+    The check first normalizes legacy status values (e.g. ``closed`` →
+    ``ARCHIVED``) before evaluating immutability, so DB statuses that
+    do not map 1:1 to a ``WorkflowState`` enum value are still
+    correctly treated as read-only.
     """
+    # First try the raw WorkflowState enum (preferred path).
+    state: Optional[WorkflowState] = None
     try:
         state = WorkflowState.from_string(review_status)
     except InvalidStateError:
-        # If we don't recognize the state, allow the operation
-        return
+        # Fall back to the legacy-status map (e.g. "closed", "draft", …).
+        state = map_legacy_status(review_status)
 
     if state.is_immutable():
         raise ImmutableReviewError(

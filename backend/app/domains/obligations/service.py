@@ -32,9 +32,10 @@ logger = logging.getLogger(__name__)
 class ObligationService:
     """Service layer for obligation management operations."""
 
-    def __init__(self, session: AsyncSession, tenant_id: str) -> None:
+    def __init__(self, session: AsyncSession, tenant_id: str, user_role: str = "viewer") -> None:
         self.session = session
         self.tenant_id = tenant_id
+        self.user_role = user_role
 
     # ── Helpers ────────────────────────────────────────────────────────
 
@@ -47,7 +48,9 @@ class ObligationService:
             obligation_type=o.obligation_type,
             status=o.status,
             contract_id=o.contract_id,
+            contract_uuid_id=str(o.contract_uuid_id) if o.contract_uuid_id else None,
             contract_name=o.contract_name,
+            contract_number=None,
             vendor=o.vendor,
             owner=o.owner,
             assignee=o.assignee,
@@ -85,14 +88,38 @@ class ObligationService:
         self, obligation_id: str, action: str, actor: str | None = None,
         changes: dict | None = None, comment: str | None = None,
     ) -> None:
-        """Record an audit event for an obligation lifecycle action."""
+        """Record an audit event for an obligation lifecycle action.
+        Automatically enriches with contract_uuid_id, contract_id, and
+        contract_name for direct contract traceability.
+        """
+        # Resolve contract info from the obligation
+        contract_uuid_id = None
+        if changes is None:
+            changes = {}
+        if "contract_id" not in changes or "contract_name" not in changes:
+            try:
+                from sqlalchemy import select as sa_select
+                q = sa_select(Obligation.contract_uuid_id, Obligation.contract_name).where(
+                    Obligation.id == uuid.UUID(obligation_id)
+                )
+                row = (await self.session.execute(q)).one_or_none()
+                if row:
+                    contract_uuid_id = row.contract_uuid_id
+                    if row.contract_uuid_id and "contract_id" not in changes:
+                        changes["contract_id"] = str(row.contract_uuid_id)
+                    if row.contract_name and "contract_name" not in changes:
+                        changes["contract_name"] = row.contract_name
+            except Exception:
+                pass
+
         log = ObligationAuditLog(
             id=uuid.uuid4(),
             tenant_id=uuid.UUID(self.tenant_id),
             obligation_id=uuid.UUID(obligation_id),
+            contract_uuid_id=contract_uuid_id,
             action=action,
             actor=actor or "system",
-            changes=changes,
+            changes=changes if changes else None,
             comment=comment,
         )
         self.session.add(log)
@@ -100,7 +127,7 @@ class ObligationService:
     async def list_obligations(
         self, page=1, page_size=20, status=None, obligation_type=None,
         vendor=None, risk_level=None, sla_status=None, search=None,
-        sort_by="updated_at", sort_order="desc",
+        contract_id=None, sort_by="updated_at", sort_order="desc",
     ):
         query = select(Obligation).where(Obligation.tenant_id == uuid.UUID(self.tenant_id))
         if status:
@@ -113,6 +140,12 @@ class ObligationService:
             query = query.where(Obligation.risk_level == risk_level)
         if sla_status:
             query = query.where(Obligation.sla_status == sla_status)
+        if contract_id:
+            try:
+                c_uid = uuid.UUID(contract_id)
+                query = query.where(Obligation.contract_uuid_id == c_uid)
+            except ValueError:
+                query = query.where(Obligation.contract_id == contract_id)
         if search:
             q = f"%{search}%"
             query = query.where(
@@ -125,7 +158,34 @@ class ObligationService:
         query = query.order_by(order).offset((page - 1) * page_size).limit(page_size)
         result = await self.session.execute(query)
         obligations = result.scalars().all()
-        return [self._to_response(o) for o in obligations], total
+        responses = [self._to_response(o) for o in obligations]
+        # Batch-resolve contract numbers from contract_reviews
+        await self._enrich_contract_numbers(responses)
+        return responses, total
+
+    async def _enrich_contract_numbers(self, responses: list) -> None:
+        """Batch-resolve contract_number from contract_reviews metadata for a list of responses."""
+        contract_ids = []
+        for r in responses:
+            cid = getattr(r, 'contract_uuid_id', None) or getattr(r, 'contract_id', None)
+            if cid:
+                try:
+                    contract_ids.append(uuid.UUID(cid))
+                except (ValueError, TypeError):
+                    pass
+        if not contract_ids:
+            return
+        from sqlalchemy import text as sa_text
+        unique_ids = list(set(contract_ids))
+        rows = await self.session.execute(
+            sa_text("SELECT review_id::text, metadata->>'contract_number' FROM contract_reviews WHERE review_id = ANY(:ids)"),
+            {"ids": unique_ids},
+        )
+        cn_map = {str(row[0]): row[1] for row in rows.fetchall() if row[1]}
+        for r in responses:
+            cid = getattr(r, 'contract_uuid_id', None) or getattr(r, 'contract_id', None)
+            if cid and cid in cn_map:
+                r.contract_number = cn_map[cid]
 
     async def get_obligation(self, obligation_id: str) -> ObligationResponse:
         from sqlalchemy import select
@@ -145,6 +205,52 @@ class ObligationService:
         return self._to_response(o)
 
     async def create_obligation(self, data: ObligationCreate) -> ObligationResponse:
+        from fastapi import HTTPException
+
+        # Validate due_date is not in the past
+        if data.due_date is not None:
+            now_utc = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            due = data.due_date.replace(tzinfo=data.due_date.tzinfo or timezone.utc)
+            if due < now_utc:
+                raise HTTPException(status_code=422, detail="Due date cannot be in the past.")
+
+        # Validate: contract_uuid_id must be provided
+        if not data.contract_uuid_id:
+            raise HTTPException(status_code=422, detail="Please select a contract.")
+
+        # Validate that the contract exists
+        try:
+            contract_uid = uuid.UUID(data.contract_uuid_id)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid contract UUID format.")
+
+        from sqlalchemy import select as sa_select
+        from app.domains.review.models import ContractReview
+        contract_check = await self.session.execute(
+            sa_select(ContractReview.review_id).where(
+                ContractReview.review_id == contract_uid,
+                ContractReview.tenant_id == uuid.UUID(self.tenant_id),
+            )
+        )
+        if not contract_check.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Referenced contract not found.")
+
+        # Auto-populate contract_name and vendor from contract_reviews metadata
+        contract = await self.session.execute(
+            sa_select(ContractReview).where(ContractReview.review_id == contract_uid)
+        )
+        contract_row = contract.scalar_one_or_none()
+        contract_name = data.contract_name
+        vendor = data.vendor
+        if contract_row:
+            md = getattr(contract_row, 'document_metadata', None) or {}
+            if not isinstance(md, dict):
+                md = {}
+            if not contract_name:
+                contract_name = md.get('name') or getattr(contract_row, 'document_name', None) or str(contract_uid)[:8]
+            if not vendor:
+                vendor = md.get('vendor') or ''
+
         status = data.status or "draft"
         o = Obligation(
             id=uuid.uuid4(),
@@ -153,9 +259,10 @@ class ObligationService:
             description=data.description,
             obligation_type=data.obligation_type,
             status=status,
-            contract_id=data.contract_id,
-            contract_name=data.contract_name,
-            vendor=data.vendor,
+            contract_id=str(contract_uid),
+            contract_uuid_id=contract_uid,
+            contract_name=contract_name,
+            vendor=vendor,
             owner=data.owner,
             assignee=data.assignee,
             due_date=data.due_date,
@@ -175,7 +282,23 @@ class ObligationService:
         self.session.add(o)
         await self.session.flush()
         await self.session.refresh(o)
-        await self._log_audit(str(o.id), "created", comment=f"Obligation '{o.name}' created with status '{status}'")
+        await self._log_audit(
+            str(o.id), "obligation.created",
+            actor="system",
+            changes={
+                "contract_id": str(contract_uid),
+                "contract_name": contract_name,
+            },
+            comment=f"Obligation '{o.name}' created with status '{status}' linked to contract '{contract_name}'",
+        )
+        # Log assignment if owner was specified
+        if data.owner:
+            await self._log_audit(
+                str(o.id), "obligation.assigned",
+                actor="system",
+                comment=f"Assigned to {data.owner}",
+                changes={"assignee": data.owner},
+            )
         return self._to_response(o)
 
     async def update_obligation(self, obligation_id: str, data: ObligationUpdate) -> ObligationResponse:
@@ -193,6 +316,19 @@ class ObligationService:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Obligation not found")
 
+        # Validate due_date: admin users may override, standard users cannot set past dates
+        if data.due_date is not None:
+            now_utc = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            due = data.due_date.replace(tzinfo=data.due_date.tzinfo or timezone.utc)
+            if due < now_utc:
+                is_admin = self.user_role in ("admin", "superadmin", "system")
+                if not is_admin:
+                    raise HTTPException(status_code=422, detail="Due date cannot be in the past.")
+                logger.info(
+                    "Admin override: allowing past due_date %s for obligation %s (role=%s)",
+                    data.due_date, obligation_id, self.user_role,
+                )
+
         old_status = o.status
         old_assignee = o.assignee
         update_data = data.model_dump(exclude_unset=True)
@@ -205,17 +341,17 @@ class ObligationService:
         # Audit: log status changes
         if "status" in update_data and update_data["status"] != old_status:
             await self._log_audit(
-                obligation_id, f"status_changed:{old_status}→{update_data['status']}",
+                obligation_id, f"obligation.status_changed:{old_status}→{update_data['status']}",
                 changes={"old_status": old_status, "new_status": update_data["status"]},
             )
         elif "assignee" in update_data and update_data["assignee"] != old_assignee:
             await self._log_audit(
-                obligation_id, "assigned",
+                obligation_id, "obligation.reassigned",
                 comment=f"Assigned to {update_data['assignee']}",
                 changes={"old_assignee": old_assignee, "new_assignee": update_data["assignee"]},
             )
         else:
-            await self._log_audit(obligation_id, "updated")
+            await self._log_audit(obligation_id, "obligation.updated")
 
         return self._to_response(o)
 
@@ -232,7 +368,7 @@ class ObligationService:
         o.updated_at = datetime.now(timezone.utc)
         await self.session.flush()
         await self.session.refresh(o)
-        await self._log_audit(obligation_id, "completed")
+        await self._log_audit(obligation_id, "obligation.completed")
         return self._to_response(o)
 
     async def cancel_obligation(self, obligation_id: str) -> ObligationResponse:
@@ -245,7 +381,21 @@ class ObligationService:
         o.updated_at = datetime.now(timezone.utc)
         await self.session.flush()
         await self.session.refresh(o)
-        await self._log_audit(obligation_id, "cancelled")
+        await self._log_audit(obligation_id, "obligation.cancelled")
+        return self._to_response(o)
+
+    async def reopen_obligation(self, obligation_id: str) -> ObligationResponse:
+        """Reopen a completed or cancelled obligation."""
+        o = await self._get_obligation_or_404(obligation_id)
+        if o.status not in ("completed", "cancelled", "overdue"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail=f"Cannot reopen obligation in '{o.status}' state")
+        o.status = "open"
+        o.completed_date = None
+        o.updated_at = datetime.now(timezone.utc)
+        await self.session.flush()
+        await self.session.refresh(o)
+        await self._log_audit(obligation_id, "obligation.reopened")
         return self._to_response(o)
 
     async def archive_obligation(self, obligation_id: str) -> ObligationResponse:
@@ -258,13 +408,13 @@ class ObligationService:
         o.updated_at = datetime.now(timezone.utc)
         await self.session.flush()
         await self.session.refresh(o)
-        await self._log_audit(obligation_id, "archived")
+        await self._log_audit(obligation_id, "obligation.archived")
         return self._to_response(o)
 
     async def delete_obligation(self, obligation_id: str) -> bool:
         """Permanently delete an obligation (admin only)."""
         o = await self._get_obligation_or_404(obligation_id)
-        await self._log_audit(obligation_id, "deleted")
+        await self._log_audit(obligation_id, "obligation.deleted")
         await self.session.delete(o)
         await self.session.flush()
         return True
@@ -289,6 +439,7 @@ class ObligationService:
                 id=str(log.id),
                 tenant_id=str(log.tenant_id) if log.tenant_id else None,
                 obligation_id=str(log.obligation_id),
+                contract_uuid_id=str(log.contract_uuid_id) if log.contract_uuid_id else None,
                 action=log.action,
                 actor=log.actor,
                 changes=log.changes,
@@ -402,7 +553,7 @@ class ObligationService:
             )
         ) or 0
 
-        compliance_rate = round((completed / total * 100), 1) if total > 0 else 0.0
+        compliance_rate = round(min(completed / total * 100, 100.0), 1) if total > 0 else 0.0
 
         return ObligationKpiResponse(
             total_obligations=total,

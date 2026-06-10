@@ -127,13 +127,20 @@ export function ContractsHeader({
         </div>
 
         {/* Export */}
-        <button className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+        <button
+          onClick={() => {
+            // Trigger a CSV download of the current filtered set
+            const ev = new CustomEvent("contracts:export-csv", { detail: { search, filters: (window as any).__contractsPageFilters } });
+            window.dispatchEvent(ev);
+          }}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+        >
           <Download className="w-3.5 h-3.5" />
           Export
         </button>
 
         {/* Result count */}
-        <span className="text-[11px] text-gray-400 tabular-nums whitespace-nowrap">{resultCount} results</span>
+        <span data-testid="result-count" className="text-[11px] text-gray-400 tabular-nums whitespace-nowrap">{resultCount} results</span>
       </div>
     </div>
   );

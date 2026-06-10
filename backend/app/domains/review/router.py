@@ -21,6 +21,7 @@ from app.domains.review.schemas import (
     CommentItem, CommentCreate, AssignRequest, RedlineAssignRequest, EscalateRequest,
     ApproveRequest, FindingResolveRequest, RedlineUpdateRequest,
     GenerateMitigationRedlineRequest, GenerateMitigationRedlineResponse,
+    RegenerateRedlineRequest,
     ReviewDashboardResponse, DashboardStats, FindingsBySeverity,
     FindingsByClauseType, ReviewsByStatus, RecentActivity,
     ReviewStatusResponse, ReAnalysisRequest, ReAnalysisResponse,
@@ -31,7 +32,7 @@ from app.domains.review.schemas import (
     FindingFeedbackRequest, FindingFeedbackResponse,
 )
 from app.domains.review.service import ReviewService
-from app.domains.review.utils import enum_value as _enum_value, redline_to_item
+from app.domains.review.utils import build_source_location, enum_value as _enum_value, redline_to_item
 from app.domains.review.repository import ReviewRepository
 from app.domains.review.workflow import ImmutableReviewError
 from app.domains.ai.repository import AIRepository
@@ -375,9 +376,10 @@ async def hydrate_workspace(
     from app.domains.review.repository import ReviewRepository
     from app.domains.ingestion.repository import IngestionRepository
     from app.domains.ai.repository import AIRepository
-    from app.domains.review.utils import enum_value as _enum_value
+    from app.domains.review.utils import build_source_location, enum_value as _enum_value
     from sqlalchemy import text as sa_text, select
     from app.domains.review.models import ContractReview
+    from app.domains.vectors.models import Chunk
 
     review_repo = ReviewRepository(db, tenant_id=tenant_id)
     ingest_repo = IngestionRepository(db, tenant_id=tenant_id)
@@ -442,6 +444,18 @@ async def hydrate_workspace(
 
     # ── 3. Get findings (first page) ─────────────────────────────
     findings_data, _ = await review_repo.get_findings(review_id, tenant_id)
+    chunk_ids = [cid for f in (findings_data or []) for cid in (f.chunk_ids or [])]
+    chunks_by_id = {}
+    if chunk_ids:
+        chunk_result = await db.execute(
+            select(Chunk).where(Chunk.chunk_id.in_(chunk_ids), Chunk.tenant_id == tenant_id)
+        )
+        chunks_by_id = {str(c.chunk_id): c for c in chunk_result.scalars().all()}
+
+    def _source_payload(f):
+        source = build_source_location(f, chunk=chunks_by_id.get(str((f.chunk_ids or [None])[0])))
+        return source.model_dump() if source else None
+
     findings = [
         {
             "finding_id": str(f.finding_id),
@@ -453,6 +467,14 @@ async def hydrate_workspace(
             "confidence": f.confidence,
             "risk_score": f.risk_score,
             "page_numbers": f.page_numbers or [],
+            "page_number": f.page_number,
+            "section_heading": f.section_heading,
+            "paragraph_index": f.paragraph_index,
+            "source_text": f.source_text,
+            "source_start_offset": f.source_start_offset,
+            "source_end_offset": f.source_end_offset,
+            "confidence_score": f.confidence_score,
+            "source_location": _source_payload(f),
             "resolution": f.resolution.value if hasattr(f.resolution, 'value') else f.resolution,
             "resolution_note": f.resolution_note,
             "resolved_by": f.resolved_by,
@@ -909,7 +931,54 @@ async def list_findings(
     _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
 ):
     """List AI findings for a review with filtering."""
+    from sqlalchemy import select
+    from app.domains.vectors.models import Chunk
+
     items, total = await service.get_findings(review_id, severity, resolution, page, page_size)
+
+    playbook_names: dict[str, str] = {}
+    rule_names: dict[str, str] = {}
+    version_labels: dict[str, str] = {}
+    pb_ids = {str(f.playbook_id) for f in items if getattr(f, "playbook_id", None)}
+    rule_ids = {str(f.rule_id) for f in items if getattr(f, "rule_id", None)}
+    if pb_ids or rule_ids:
+        from sqlalchemy import text as sa_text
+        if pb_ids:
+            r = await service.review_repo.session.execute(
+                sa_text("""
+                    SELECT lp.playbook_id, lp.name, pv.version_label
+                    FROM legal_playbooks lp
+                    LEFT JOIN playbook_versions pv ON pv.version_id = lp.active_version_id
+                    WHERE lp.tenant_id = :tenant_id AND lp.playbook_id = ANY(CAST(:ids AS uuid[]))
+                """),
+                {"tenant_id": service.tenant_id, "ids": list(pb_ids)},
+            )
+            for row in r.fetchall():
+                playbook_names[str(row.playbook_id)] = row.name
+                if row.version_label:
+                    version_labels[str(row.playbook_id)] = row.version_label
+        if rule_ids:
+            r = await service.review_repo.session.execute(
+                sa_text("""
+                    SELECT rule_id, name FROM policy_rules
+                    WHERE tenant_id = :tenant_id AND rule_id = ANY(CAST(:ids AS uuid[]))
+                """),
+                {"tenant_id": service.tenant_id, "ids": list(rule_ids)},
+            )
+            for row in r.fetchall():
+                rule_names[str(row.rule_id)] = row.name
+
+    chunk_ids = [cid for f in items for cid in (f.chunk_ids or [])]
+    chunks_by_id = {}
+    if chunk_ids:
+        result = await service.review_repo.session.execute(
+            select(Chunk).where(
+                Chunk.chunk_id.in_(chunk_ids),
+                Chunk.tenant_id == service.tenant_id,
+            )
+        )
+        chunks_by_id = {str(c.chunk_id): c for c in result.scalars().all()}
+
     data = [
         FindingItem(
             finding_id=str(f.finding_id), clause_type=f.clause_type,
@@ -917,6 +986,17 @@ async def list_findings(
             recommendation=f.recommendation, confidence=f.confidence,
             risk_score=f.risk_score,
             page_numbers=f.page_numbers,
+            page_number=f.page_number,
+            section_heading=f.section_heading,
+            paragraph_index=f.paragraph_index,
+            source_text=f.source_text,
+            source_start_offset=f.source_start_offset,
+            source_end_offset=f.source_end_offset,
+            confidence_score=f.confidence_score,
+            source_location=build_source_location(
+                f,
+                chunk=chunks_by_id.get(str((f.chunk_ids or [None])[0])),
+            ),
             resolution=_enum_value(f.resolution),
             resolution_note=f.resolution_note,
             resolved_by=f.resolved_by,
@@ -925,6 +1005,14 @@ async def list_findings(
             feedback_type=f.feedback_type,
             feedback_note=f.feedback_note,
             feedback_at=f.feedback_at.isoformat() if f.feedback_at else None,
+            playbook_id=str(f.playbook_id) if getattr(f, "playbook_id", None) else None,
+            rule_id=str(f.rule_id) if getattr(f, "rule_id", None) else None,
+            evaluation_id=str(f.evaluation_id) if getattr(f, "evaluation_id", None) else None,
+            clause_standard_id=str(f.clause_standard_id) if getattr(f, "clause_standard_id", None) else None,
+            policy_owner=getattr(f, "policy_owner", None),
+            policy_name=playbook_names.get(str(f.playbook_id)) if getattr(f, "playbook_id", None) else None,
+            policy_rule_name=rule_names.get(str(f.rule_id)) if getattr(f, "rule_id", None) else None,
+            policy_version=version_labels.get(str(f.playbook_id)) if getattr(f, "playbook_id", None) else None,
         )
         for f in items
     ]
@@ -1092,6 +1180,8 @@ async def list_redlines(
     """List redline suggestions for a review."""
     from sqlalchemy import select
     from app.domains.ai.models import AIRedline
+    from app.domains.review.models import ReviewFinding
+    from app.domains.vectors.models import Chunk
 
     redlines = await service.get_redlines(review_id, status)
     ai_ids = [r.ai_redline_id for r in redlines if r.ai_redline_id]
@@ -1106,6 +1196,27 @@ async def list_redlines(
         for rid, cids in result.all():
             chunk_map[str(rid)] = [str(c) for c in (cids or [])]
 
+    linked_finding_ids = [r.finding_id for r in redlines if r.finding_id]
+    findings_by_id = {}
+    chunks_by_id = {}
+    if linked_finding_ids:
+        finding_result = await service.review_repo.session.execute(
+            select(ReviewFinding).where(
+                ReviewFinding.finding_id.in_(linked_finding_ids),
+                ReviewFinding.tenant_id == service.tenant_id,
+            )
+        )
+        findings_by_id = {str(f.finding_id): f for f in finding_result.scalars().all()}
+        finding_chunk_ids = [cid for f in findings_by_id.values() for cid in (f.chunk_ids or [])]
+        if finding_chunk_ids:
+            chunk_result = await service.review_repo.session.execute(
+                select(Chunk).where(
+                    Chunk.chunk_id.in_(finding_chunk_ids),
+                    Chunk.tenant_id == service.tenant_id,
+                )
+            )
+            chunks_by_id = {str(c.chunk_id): c for c in chunk_result.scalars().all()}
+
     # Compute locator for each redline using structural section parser.
     # Wrapped in try/except — locator failure must never suppress the redlines themselves.
     try:
@@ -1118,15 +1229,70 @@ async def list_redlines(
         )
         locator_results = {}
 
+    from app.domains.review.mapping_validation import validate_redline_finding_mapping
+    from app.domains.review.models import RedlineStatus
+
     # Build response: strip synthetic numbering from INSERT_NEW proposed_text
     items = []
     for r in redlines:
         rid = str(r.redline_id)
         loc = locator_results.get(rid, {})
+        linked_finding = findings_by_id.get(str(r.finding_id)) if r.finding_id else None
+        source_location = None
+        if linked_finding:
+            source_location = build_source_location(
+                linked_finding,
+                chunk=chunks_by_id.get(str((linked_finding.chunk_ids or [None])[0])),
+            )
+        mapping = validate_redline_finding_mapping(
+            r,
+            linked_finding,
+            locator_result=loc,
+            displayed_finding_id=str(r.finding_id) if r.finding_id else None,
+        )
+        current_status = (
+            r.status.value if hasattr(r.status, "value") else str(r.status)
+        )
+        if not mapping.valid:
+            if current_status in (RedlineStatus.PROPOSED.value, RedlineStatus.INVALID_MAPPING.value):
+                if current_status != RedlineStatus.INVALID_MAPPING.value:
+                    await service.review_repo.update_redline(
+                        rid,
+                        service.tenant_id,
+                        RedlineStatus.INVALID_MAPPING,
+                        None,
+                        service.user.id,
+                        None,
+                    )
+                    await service.audit_trail.record_mapping_validation_failed(
+                        redline_id=rid,
+                        review_id=review_id,
+                        actor_id=service.user.id,
+                        mapping_warning=mapping.warning or "Invalid redline-to-finding mapping",
+                        finding_id=mapping.finding_id,
+                        finding_title=mapping.finding_title,
+                        redline_title=mapping.redline_title,
+                        finding_category=mapping.finding_category,
+                        redline_category=mapping.redline_category,
+                    )
+        elif current_status == RedlineStatus.INVALID_MAPPING.value:
+            await service.review_repo.update_redline(
+                rid,
+                service.tenant_id,
+                RedlineStatus.PROPOSED,
+                None,
+                service.user.id,
+                None,
+            )
         item = redline_to_item(
             r,
             chunk_ids=chunk_map.get(str(r.ai_redline_id), []),
             locator_result=loc,
+            source_location=source_location,
+            finding_clause_type=linked_finding.clause_type if linked_finding else None,
+            finding_title=linked_finding.title if linked_finding else None,
+            finding_recommendation=linked_finding.recommendation if linked_finding else None,
+            mapping=mapping,
         )
         # For INSERT_NEW: strip AI-generated section numbers from display text
         if loc.get("recommendation_type") == "insert" or loc.get("anchor_type") in (
@@ -1256,7 +1422,12 @@ async def update_redline(
     _: None = Depends(require_permission(Permissions.WORKFLOWS_WRITE)),
 ):
     """Accept, reject, or modify a redline suggestion."""
-    result = await service.update_redline(redline_id, body.status, body.modified_text, body.review_notes)
+    try:
+        result = await service.update_redline(
+            redline_id, body.status, body.modified_text, body.review_notes
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not result:
         raise HTTPException(status_code=404, detail="Redline not found")
     return result
@@ -1323,6 +1494,156 @@ async def generate_mitigation_redline(
             detail=f"Failed to generate redline for mitigation '{body.mitigation_type}' in category '{body.clause_category}'. Verify the mitigation type is valid.",
         )
     return result
+
+
+@router.post("/{review_id}/regenerate-redline")
+async def regenerate_redline(
+    review_id: str,
+    body: RegenerateRedlineRequest,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.WORKFLOWS_WRITE)),
+):
+    """Regenerate a redline using the finding's category as a mandatory filter.
+
+    When a redline has an invalid mapping (finding category != redline category),
+    this endpoint:
+    1. Marks the existing invalid redline as 'superseded'
+    2. Generates a new redline using the finding's category as the clause_type
+    3. Records audit events for both the superseded and new redline
+
+    This ensures the regenerated redline always matches the finding category.
+    """
+    from app.domains.review.models import ReviewFinding, ReviewRedline as RRModel
+    from sqlalchemy import select
+
+    # 1. Fetch the finding to get its authoritative clause_type
+    finding_result = await service.review_repo.session.execute(
+        select(ReviewFinding).where(
+            ReviewFinding.finding_id == body.finding_id,
+            ReviewFinding.tenant_id == service.tenant_id,
+        )
+    )
+    finding = finding_result.scalar_one_or_none()
+    if not finding:
+        raise HTTPException(status_code=404, detail=f"Finding {body.finding_id} not found")
+
+    # 2. Fetch the existing invalid redline
+    redline_result = await service.review_repo.session.execute(
+        select(RRModel).where(
+            RRModel.redline_id == body.redline_id,
+            RRModel.tenant_id == service.tenant_id,
+        )
+    )
+    existing_redline = redline_result.scalar_one_or_none()
+
+    # 3. Supersede the existing redline if it exists
+    if existing_redline:
+        from app.domains.review.models import RedlineStatus
+        await service.review_repo.update_redline(
+            body.redline_id,
+            service.tenant_id,
+            RedlineStatus.SUPERSEDED,
+            reviewed_by=service.user.id,
+        )
+        await service.audit_trail.record_redline_action(
+            redline_id=body.redline_id,
+            review_id=review_id,
+            actor_id=service.user.id,
+            action="superseded",
+            before_status=str(existing_redline.status),
+            after_status="superseded",
+            description=f"Redline superseded by regeneration — finding category: {body.finding_category}",
+        )
+
+    # 4. Generate a new redline using the finding's clause_type
+    # Use a generic mitigation approach to create a properly-categorized redline
+    from app.domains.review.mitigation_effectiveness import get_mitigation_effectiveness
+
+    effects = get_mitigation_effectiveness(body.finding_category, "general")
+    if not effects:
+        # Fallback: create a basic redline with the correct category
+        proposed_text = f"[Regenerated clause for {body.finding_category.replace('_', ' ').title()} — please review and customize.]"
+        rationale = f"Regenerated redline for finding: {finding.title}"
+        traceability = {
+            "detected_risk": finding.description or f"Risk in {body.finding_category}",
+            "business_impact": finding.recommendation or "See finding for details",
+            "mitigation_strategy": f"Regenerated from finding category: {body.finding_category}",
+            "generated_from": "regeneration",
+        }
+    else:
+        effect = effects[0]
+        clause_templates = {
+            "adding_indemnification": "The [Counterparty] shall indemnify, defend, and hold harmless [Company] from and against any and all losses...",
+            "adding_liability_cap": "Notwithstanding anything to the contrary, [Counterparty]'s aggregate liability... shall not exceed [amount].",
+            "adding_ip_ownership": "All intellectual property rights in and to the deliverables... shall be owned exclusively by [Company].",
+            "adding_data_breach_protocol": "In the event of a data breach... [Counterparty] shall (a) notify [Company] within 24 hours...",
+            "adding_compliance_language": "[Counterparty] shall comply with all applicable data protection laws...",
+            "adding_security_requirements": "[Counterparty] shall maintain industry-standard security controls...",
+            "adding_for_cause_termination": "Either party may terminate this agreement immediately upon written notice if...",
+            "adding_dispute_resolution": "Any dispute arising out of or related to this agreement shall first be submitted to mediation...",
+            "adding_audit_rights": "[Company] shall have the right... to audit [Counterparty]'s facilities...",
+            "clarifying_governing_law": "This agreement shall be governed by and construed in accordance with the laws of...",
+        }
+        proposed_text = clause_templates.get(
+            effect.get("mitigation_type", ""),
+            f"[Regenerated clause for {body.finding_category.replace('_', ' ').title()} — please review and customize.]"
+        )
+        rationale = effect.get("description", f"Regenerated for finding: {finding.title}")
+        traceability = {
+            "detected_risk": f"Exposure in {body.finding_category} category",
+            "business_impact": effect.get("description", ""),
+            "mitigation_strategy": effect.get("label", ""),
+            "generated_from": "regeneration",
+        }
+
+    redline_metadata = {
+        "traceability": traceability,
+        "legal_domain": body.finding_category,
+        "risk_type": "regenerated",
+        "generated_by": service.user.id,
+        "regenerated_from": body.redline_id,
+        "finding_category": body.finding_category,
+    }
+
+    new_redline = await service.review_repo.create_redline(
+        review_id=review_id,
+        tenant_id=service.tenant_id,
+        upload_id=str(finding.upload_id),
+        clause_type=body.finding_category,  # ← CRITICAL: uses finding's category, NOT caller's
+        original_text="",
+        proposed_text=proposed_text,
+        operation="insert",
+        rationale=rationale,
+        risk_level=finding.severity or "medium",
+        finding_id=body.finding_id,
+        redline_metadata=redline_metadata,
+    )
+
+    # Record audit trail for the new redline
+    await service.audit_trail.record_redline_action(
+        redline_id=str(new_redline.redline_id),
+        review_id=review_id,
+        actor_id=service.user.id,
+        action="regenerated",
+        before_status="none",
+        after_status="proposed",
+        description=f"Redline regenerated for finding '{finding.title}' with category '{body.finding_category}'",
+    )
+
+    await service.review_repo.session.commit()
+
+    return {
+        "redline_id": str(new_redline.redline_id),
+        "clause_type": new_redline.clause_type,
+        "proposed_text": new_redline.proposed_text,
+        "rationale": new_redline.rationale,
+        "risk_level": new_redline.risk_level,
+        "status": "proposed",
+        "finding_id": body.finding_id,
+        "finding_category": body.finding_category,
+        "finding_title": finding.title,
+        "message": f"Redline regenerated with category '{body.finding_category}' matching finding '{finding.title}'",
+    }
 
 
 @router.get("/{review_id}/comments")
@@ -1465,6 +1786,97 @@ async def get_status_history(
     ]}
 
 
+@router.get("/{review_id}/workflow-timeline")
+async def get_workflow_timeline(
+    review_id: str,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.AUDIT_READ)),
+):
+    """Get a unified audit-grade timeline of all workflow events for a review.
+
+    Combines:
+      - Status history (transitions)
+      - Reviewer assignments / reassignments
+      - Escalations (level, reason, resolution)
+      - Approvals / rejections (approver, conditions)
+
+    Each event includes: id, type, timestamp, actor, role, previous_value,
+    new_value, reason. The timeline is sorted newest-first and is suitable
+    for the contract-detail Workflow tab.
+    """
+    events: list[dict] = []
+
+    # 1) Status history
+    for h in await service.get_status_history(review_id):
+        events.append({
+            "id": f"status-{h.history_id}",
+            "type": "stage_changed",
+            "timestamp": h.created_at.isoformat(),
+            "actor": h.changed_by,
+            "role": None,
+            "previous_value": h.from_status,
+            "new_value": h.to_status,
+            "reason": h.reason,
+        })
+
+    # 2) Assignments — each row represents an assignment or reassignment
+    try:
+        assignments = await service.get_assignments(review_id)
+        for a in assignments:
+            events.append({
+                "id": f"assign-{a.assignment_id}",
+                "type": "assigned",
+                "timestamp": a.created_at.isoformat() if a.created_at else None,
+                "actor": a.assigned_by,
+                "role": a.role,
+                "previous_value": None,
+                "new_value": a.assignee_id,
+                "reason": a.notes,
+            })
+    except Exception:
+        # If assignments aren't available, skip silently — the timeline
+        # is best-effort.
+        pass
+
+    # 3) Escalations
+    try:
+        escalations = await service.get_escalations(review_id)
+        for e in escalations:
+            events.append({
+                "id": f"esc-{e.escalation_id}",
+                "type": "escalated",
+                "timestamp": e.created_at.isoformat() if e.created_at else None,
+                "actor": e.escalated_by,
+                "role": None,
+                "previous_value": None,
+                "new_value": f"level {e.level} → {e.escalated_to or 'auto'}",
+                "reason": e.reason,
+            })
+    except Exception:
+        pass
+
+    # 4) Approvals / rejections
+    try:
+        approvals = await service.get_approvals(review_id)
+        for a in approvals:
+            events.append({
+                "id": f"approval-{a.approval_id}",
+                "type": a.decision,  # 'approved' / 'rejected' / 'conditionally_approved'
+                "timestamp": a.decided_at.isoformat() if a.decided_at else None,
+                "actor": a.approver_id,
+                "role": None,
+                "previous_value": None,
+                "new_value": a.decision,
+                "reason": a.comments,
+            })
+    except Exception:
+        pass
+
+    # Sort newest-first
+    events.sort(key=lambda x: x.get("timestamp") or "", reverse=True)
+    return {"events": events, "total": len(events)}
+
+
 # ── Workload Metrics ──────────────────────────────────────────────
 
 
@@ -1479,6 +1891,40 @@ async def get_workload_metrics(
     escalated, critical, sla_at_risk, completed_today.
     """
     return await service.get_workload_metrics()
+
+
+@router.get("/reviewers/workload", summary="Per-reviewer workload snapshot")
+async def get_reviewers_workload(
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Return active workload for every reviewer in the current tenant.
+
+    Response shape::
+
+        {
+          "reviewers": [
+            {
+              "user_id": "...",
+              "name": "...",
+              "email": "...",
+              "role": "reviewer",
+              "active_reviews": 4,
+              "completed_today": 1,
+              "overdue_reviews": 0,
+              "avg_review_time_hours": 6.4,
+              "workload_pct": 80,
+              "sla_breaches": 0
+            },
+            ...
+          ]
+        }
+
+    Used by the assign-reviewer modal to surface each user's current load
+    and by the AI Workspace's reviewer-workload widget.
+    """
+    reviewers = await service.get_reviewer_workloads()
+    return {"reviewers": reviewers}
 
 
 # ── Routing Rules ─────────────────────────────────────────────────
@@ -2587,7 +3033,18 @@ async def advance_workflow(
             except Exception:
                 pass  # If assign fails, still try the transition
 
-        # Skip transition if already in the target status
+        # Skip transition if already in the target status.
+        # Re-read current status after potential auto-assign above.
+        review_row = await service.review_repo.session.execute(
+            select(ContractReview).where(
+                ContractReview.review_id == review_id,
+                ContractReview.tenant_id == service.tenant_id,
+            )
+        )
+        review = review_row.scalar_one_or_none()
+        if review:
+            raw = review.status
+            current_status_str = raw.value if hasattr(raw, 'value') else str(raw)
         if current_status_str == target_status:
             # Still return the current state
             result = await service.get_review(review_id)
@@ -2693,10 +3150,12 @@ async def get_my_work(
     for r in reviews:
         metadata = getattr(r, "document_metadata", None) or {}
         risk_score = metadata.get("risk_score") if isinstance(metadata, dict) else None
+        contract_number = metadata.get("contract_number") if isinstance(metadata, dict) else None
         sla_deadline = r.sla_deadline.isoformat() if r.sla_deadline else None
         items.append({
             "review_id": str(r.review_id),
             "contract_name": getattr(r, "_document_filename", None),
+            "contract_number": contract_number,
             "status": r.status.value if hasattr(r.status, "value") else str(r.status),
             "risk_score": risk_score,
             "sla_deadline": sla_deadline,

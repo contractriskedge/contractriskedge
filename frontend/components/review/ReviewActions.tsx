@@ -19,6 +19,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence } from "framer-motion";
 import {
   UserPlus, AlertTriangle, CheckCircle2, XCircle, Lock,
@@ -35,6 +36,7 @@ import {
 import { api } from "@/services/api/client";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { EscalationModal } from "./EscalationModal";
+import { UserPicker } from "@/components/shared/UserPicker";
 import { getAllowedActions, isImmutable, WORKFLOW_STATES } from "@/lib/workflow";
 
 interface ReviewActionsProps {
@@ -66,6 +68,19 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
   const approveMutation = useApproveReview(reviewId);
   const commentMutation = useAddComment(reviewId);
   const deleteMutation = useDeleteReview();
+
+  // Fetch reviewer workload for the assign modal
+  const { data: workloadData } = useQuery({
+    queryKey: ["reviews", "reviewers", "workload"],
+    queryFn: () => reviewService.getReviewersWorkload(),
+    staleTime: 30_000,
+    enabled: activeModal === "assign",
+  });
+  const reviewerWorkloads = workloadData?.reviewers?.map((r) => ({
+    user_id: r.user_id,
+    active_reviews: r.active_reviews,
+    workload_pct: r.workload_pct,
+  })) ?? [];
 
   // Form state
   const [assigneeId, setAssigneeId] = useState("");
@@ -375,14 +390,20 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
         <Modal onClose={closeModal} title="Assign Reviewer">
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Assignee ID</label>
-              <input
-                type="text"
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Reviewer</label>
+              <UserPicker
                 value={assigneeId}
-                onChange={(e) => setAssigneeId(e.target.value)}
-                placeholder="User ID or email"
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300"
+                onChange={setAssigneeId}
+                allowedRoles={["tenant_admin", "reviewer", "legal_ops", "compliance", "executive", "admin"]}
+                placeholder="Search by name, email, or role…"
+                size="md"
+                allowNone
+                noneLabel="— Unassigned —"
+                reviewerWorkloads={reviewerWorkloads}
               />
+              <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                Pick a user from your tenant directory.
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Role</label>
@@ -420,6 +441,7 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
             }
             currentPriority={review.priority}
             currentStage={review.workflow_stage}
+            currentStatus={review.status}
             onEscalate={async (reason, escalatedTo, raisePriority, targetStage) => {
               await escalateMutation.mutateAsync({
                 reason,

@@ -35,6 +35,7 @@ export interface ObligationRecord {
   name: string;
   contractId: string;
   contractName: string;
+  contractNumber: string;
   vendor: string;
   type: ObligationType;
   owner: string;

@@ -13,6 +13,16 @@ export interface LinkedFindingInput {
   category?: string | null;
 }
 
+export type MappingStatus = "valid" | "invalid_mapping";
+
+export interface RedlineMappingDetails {
+  finding_title?: string | null;
+  redline_title?: string | null;
+  category?: string | null;
+  finding_category?: string | null;
+  redline_category?: string | null;
+}
+
 export interface RedlineIntegrityResult {
   clause_type: string;
   section: string;
@@ -25,6 +35,12 @@ export interface RedlineIntegrityResult {
   source_category: string | null;
   proposed_category: string | null;
   finding_category: string | null;
+  mapping_valid: boolean;
+  mapping_status: MappingStatus;
+  mapping_warning: string | null;
+  redline_title: string | null;
+  redline_category: string | null;
+  mapping_details: RedlineMappingDetails | null;
 }
 
 const CATEGORY_ALIASES: Record<string, string[]> = {
@@ -40,8 +56,8 @@ const CATEGORY_ALIASES: Record<string, string[]> = {
 
 const TEXT_CATEGORY_PATTERNS: [string, RegExp][] = [
   ["indemnification", /\bindemnif/i],
+  ["liability", /\b(liabilit|limitation of liability|aggregate liability|liability cap)\b/i],
   ["fees", /\b(fees?|payment terms?|pricing|invoice|payable|exhibit\s+[a-z]?\s*fees)\b/i],
-  ["liability", /\b(liabilit|limitation of liability|aggregate liability)\b/i],
   ["termination", /\b(terminat|renewal|non-?renewal)\b/i],
   ["confidentiality", /\b(confidential|non-?disclosure)\b/i],
   ["sla", /\b(service level|uptime|availability|sla)\b/i],
@@ -76,8 +92,17 @@ export function normalizeCategory(input: string | null | undefined): string | nu
 export function inferCategoryFromText(text: string): string | null {
   const t = pickString(text);
   if (!t) return null;
+  const matches: string[] = [];
   for (const [canonical, pattern] of TEXT_CATEGORY_PATTERNS) {
-    if (pattern.test(t)) return canonical;
+    if (pattern.test(t)) matches.push(canonical);
+  }
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    const priority = ["liability", "indemnification", "ip", "data_protection", "termination", "confidentiality", "sla", "fees"];
+    for (const cat of priority) {
+      if (matches.includes(cat)) return cat;
+    }
+    return matches[0];
   }
   return normalizeCategory(t);
 }
@@ -244,10 +269,24 @@ export function reconcileRedlineAssociations(
     }
   }
 
+  const mapping_invalid =
+    !findingId ||
+    !findingTitle ||
+    !findingCat ||
+    (proposedCat && findingCat && !categoriesCompatible(findingCat, proposedCat)) ||
+    (sourceCat && findingCat && !categoriesCompatible(sourceCat, findingCat));
+
   const mismatch_warning =
     warnings.length > 0
       ? `${warnings.join(" ")} Possible mapping error — verify before accepting.`
       : null;
+
+  const mapping_warning = mapping_invalid
+    ? mismatch_warning ||
+      "Redline-to-finding mapping is invalid. Cross-category mappings are not allowed — re-link before accepting."
+    : null;
+
+  const redlineTitle = clauseType.replace(/_/g, " ");
 
   return {
     clause_type: clauseType,
@@ -261,5 +300,55 @@ export function reconcileRedlineAssociations(
     source_category: sourceCat,
     proposed_category: proposedCat,
     finding_category: findingCat,
+    mapping_valid: !mapping_invalid,
+    mapping_status: mapping_invalid ? "invalid_mapping" : "valid",
+    mapping_warning,
+    redline_title: redlineTitle,
+    redline_category: sourceCat || proposedCat,
+    mapping_details: {
+      finding_title: findingTitle,
+      redline_title: redlineTitle,
+      category: findingCat || sourceCat || proposedCat,
+      finding_category: findingCat,
+      redline_category: sourceCat || proposedCat,
+    },
+  };
+}
+
+/** Merge API mapping validation with client-side reconciliation. */
+export function applyApiMappingValidation(
+  reconciled: RedlineIntegrityResult,
+  api: {
+    mapping_valid?: boolean;
+    mapping_status?: string;
+    mapping_warning?: string | null;
+    redline_title?: string | null;
+    redline_category?: string | null;
+    finding_title?: string | null;
+    finding_category?: string | null;
+    mapping_details?: RedlineMappingDetails | null;
+  },
+): RedlineIntegrityResult {
+  const apiInvalid =
+    api.mapping_valid === false || api.mapping_status === "invalid_mapping";
+  const clientInvalid = !reconciled.mapping_valid;
+  const invalid = apiInvalid || clientInvalid;
+  const warning = api.mapping_warning || reconciled.mapping_warning || reconciled.mismatch_warning;
+
+  return {
+    ...reconciled,
+    mapping_valid: !invalid,
+    mapping_status: invalid ? "invalid_mapping" : "valid",
+    mapping_warning: invalid ? warning : null,
+    mismatch_warning: invalid ? warning : reconciled.mismatch_warning,
+    finding_title: api.finding_title ?? reconciled.finding_title,
+    finding_category: api.finding_category
+      ? normalizeCategory(api.finding_category)
+      : reconciled.finding_category,
+    redline_title: api.redline_title ?? reconciled.redline_title,
+    redline_category: api.redline_category
+      ? normalizeCategory(api.redline_category)
+      : reconciled.redline_category,
+    mapping_details: api.mapping_details ?? reconciled.mapping_details,
   };
 }

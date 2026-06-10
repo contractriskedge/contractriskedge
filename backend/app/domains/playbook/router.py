@@ -13,9 +13,10 @@ Endpoints:
 
 from __future__ import annotations
 
+import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Path, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db, get_current_user, get_tenant_id
@@ -29,7 +30,8 @@ from app.domains.playbook.schemas import (
     PlaybookVersionCreate, PlaybookVersionSummary,
     ClauseStandardCreate, ClauseStandardUpdate, ClauseStandardItem,
     FallbackRecommendation, FallbackRecommendationResponse,
-    PolicyRuleCreate, PolicyRuleUpdate, PolicyRuleItem,
+    PolicyRuleCreate, PolicyRuleUpdate, PolicyRuleItem, PolicyRuleWithPlaybook,
+    TraceabilityResponse,
     ApprovalThresholdCreate, ApprovalThresholdUpdate, ApprovalThresholdItem,
     PolicyEvaluationSummary, PolicyEvaluationDetail,
     OverrideRequest, OverrideReview, OverrideItem,
@@ -164,6 +166,45 @@ async def evaluate_contract(
         upload_id=upload_id,
         simulation_mode=simulation_mode,
     )
+
+
+@router.get("/rules", response_model=PaginatedResponse[PolicyRuleWithPlaybook])
+async def list_tenant_rules(
+    rule_type: Optional[str] = Query(None),
+    effect: Optional[str] = Query(None),
+    is_active: Optional[bool] = Query(None),
+    is_mandatory: Optional[bool] = Query(None),
+    search: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=200),
+    sort_by: str = Query("priority"),
+    sort_order: str = Query("asc", pattern="^(asc|desc)$"),
+    service: PlaybookService = Depends(get_playbook_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """List all policy rules across playbooks for the tenant."""
+    filters = RuleFilterParams(
+        rule_type=rule_type, effect=effect, is_active=is_active,
+        is_mandatory=is_mandatory, search=search,
+        page=page, page_size=page_size, sort_by=sort_by, sort_order=sort_order,
+    )
+    items, total = await service.list_all_rules(filters)
+    return PaginatedResponse(
+        data=items,
+        pagination=PaginationMeta(
+            page=page, page_size=page_size, total=total,
+            total_pages=max(1, (total + page_size - 1) // page_size),
+        ),
+    )
+
+
+@router.get("/traceability", response_model=TraceabilityResponse)
+async def get_policy_traceability(
+    service: PlaybookService = Depends(get_playbook_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Policy → Rule → Clause → Finding → Redline traceability aggregates."""
+    return await service.get_traceability()
 
 
 @router.get("/evaluations", response_model=PaginatedResponse[PolicyEvaluationSummary]
@@ -312,13 +353,13 @@ async def build_ai_context(
 @router.get("/{playbook_id}", response_model=PlaybookDetail
 )
 async def get_playbook(
-    playbook_id: str,
+    playbook_id: uuid.UUID,
     service: PlaybookService = Depends(get_playbook_service)
 ,
     _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
 ):
     """Get playbook details by ID."""
-    result = await service.get_playbook(playbook_id
+    result = await service.get_playbook(str(playbook_id)
 )
     if not result:
         raise NotFoundError(f"Playbook {playbook_id} not found"
@@ -329,14 +370,14 @@ async def get_playbook(
 @router.patch("/{playbook_id}", response_model=PlaybookDetail
 )
 async def update_playbook(
-    playbook_id: str,
+    playbook_id: uuid.UUID,
     data: PlaybookUpdate,
     service: PlaybookService = Depends(get_playbook_service)
 ,
     _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
 ):
     """Update playbook metadata."""
-    result = await service.update_playbook(playbook_id, data
+    result = await service.update_playbook(str(playbook_id), data
 )
     if not result:
         raise NotFoundError(f"Playbook {playbook_id} not found"

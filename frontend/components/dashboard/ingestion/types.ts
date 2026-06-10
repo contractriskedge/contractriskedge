@@ -66,6 +66,7 @@ export interface ImportJob {
   duplicateScore?: number;
   isDuplicate: boolean;
   duplicateOf?: string;
+  contractNumber?: string;
   metadata: ExtractedMetadata;
   validation: ValidationResult[];
   error?: string;

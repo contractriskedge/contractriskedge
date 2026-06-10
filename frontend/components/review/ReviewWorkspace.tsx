@@ -12,8 +12,9 @@
 
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
-import { ArrowLeft, RefreshCw, PanelLeft, PanelRight, FileText, BookOpen, Lock, CheckCircle, XCircle, Edit3 } from "lucide-react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { ArrowLeft, RefreshCw, FileText, BookOpen, Lock, CheckCircle, XCircle, Edit3 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -37,8 +38,12 @@ import { ReviewActions } from "./ReviewActions";
 import { ImmutableBanner } from "./ImmutableBanner";
 import { isImmutable, getStatusLabel } from "@/lib/workflow";
 import { locateRedline, findTextInChunk } from "@/lib/locateRedline";
-import type { RedlineItem } from "@/services/api/client";
+import type { RedlineItem, SourceLocation } from "@/services/api/client";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { HybridSidePanel } from "./HybridSidePanel";
+import { FocusModeToggle } from "./FocusModeToggle";
+import { useReviewShortcuts } from "./useReviewShortcuts";
+import { usePanelState, panelStore, setPanelStoreUser } from "./panel-store";
 
 interface ReviewWorkspaceProps {
   reviewId: string;
@@ -46,9 +51,18 @@ interface ReviewWorkspaceProps {
 }
 
 export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
+  const { user } = useAuth();
+  const splitPaneRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<"findings" | "redlines" | "evidence" | "activity" | "versions">("findings");
-  const [showLeftPane, setShowLeftPane] = useState(true);
   const [selectedChunkId, setSelectedChunkId] = useState<string | null>(null);
+  const panelState = usePanelState();
+
+  useEffect(() => {
+    setPanelStoreUser(user?.tenant_id, user?.sub);
+  }, [user?.tenant_id, user?.sub]);
+
+  // Activate keyboard shortcuts
+  useReviewShortcuts();
   const [highlightText, setHighlightText] = useState<string | null>(null);
   const [highlightNeedle, setHighlightNeedle] = useState<string | null>(null);
   const [locateTick, setLocateTick] = useState(0);
@@ -113,14 +127,6 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
     });
   };
 
-  // When a finding is selected from FindingsTable, highlight its chunk
-  const handleFindingSelect = useCallback((chunkId: string | null) => {
-    setSelectedChunkId(chunkId);
-    if (chunkId) {
-      setActiveTab("evidence");
-    }
-  }, []);
-
   // Listen for mitigation:filter-findings events from the Top Actions Widget
   useEffect(() => {
     const handler = (event: Event) => {
@@ -159,20 +165,87 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
         const el = document.getElementById(`chunk-${chunkId}`);
         if (el) {
           el.scrollIntoView({ behavior: "smooth", block: "center" });
-          el.classList.add("ring-2", "ring-yellow-400", "bg-yellow-50", "transition-all", "duration-1000");
+          // Flash effect: add highlight ring and background
+          el.classList.add(
+            "ring-2", "ring-yellow-400", "ring-offset-2",
+            "bg-yellow-50", "dark:bg-yellow-900/20",
+            "transition-all", "duration-1500", "ease-out"
+          );
+          // Flash the highlighted text with an animation
+          const markEl = el.querySelector('mark');
+          if (markEl) {
+            markEl.classList.add(
+              "animate-pulse", "bg-yellow-300", "dark:bg-yellow-600",
+              "rounded", "px-0.5", "font-bold"
+            );
+            // Select the text for easy copying
+            const range = document.createRange();
+            range.selectNodeContents(markEl);
+            const selection = window.getSelection();
+            if (selection) {
+              selection.removeAllRanges();
+              selection.addRange(range);
+            }
+          }
           setTimeout(() => {
-            el.classList.remove("ring-2", "ring-yellow-400", "bg-yellow-50");
+            el.classList.remove("ring-2", "ring-yellow-400", "ring-offset-2", "bg-yellow-50", "dark:bg-yellow-900/20");
+            if (markEl) {
+              markEl.classList.remove("animate-pulse", "bg-yellow-300", "dark:bg-yellow-600", "font-bold");
+            }
+            // Clear selection after flash
+            setTimeout(() => window.getSelection()?.removeAllRanges(), 500);
           }, 3000);
         }
       }, 50);
     });
   }, []);
 
+  // When a finding source is selected, highlight the exact source clause in the document panel.
+  const handleFindingSelect = useCallback((sourceLocation: SourceLocation | null | undefined) => {
+    const st = panelStore.get();
+    if (!st.leftVisible) panelStore.setLeftVisible(true);
+    if (st.left === "auto_hide" && !st.leftVisible) panelStore.setLeftVisible(true);
+
+    if (!sourceLocation?.source_text && !sourceLocation?.chunk_id) {
+      setSelectedChunkId(null);
+      setHighlightText(null);
+      setHighlightNeedle(null);
+      setLocateNotice("Source location unavailable. Finding generated from document-level analysis.");
+      return;
+    }
+
+    const targetChunk = sourceLocation.chunk_id
+      ? chunks.find((chunk) => chunk.chunk_id === sourceLocation.chunk_id)
+      : chunks.find((chunk) => sourceLocation.source_text && findTextInChunk(chunk.text, sourceLocation.source_text));
+
+    if (!targetChunk) {
+      setSelectedChunkId(null);
+      setHighlightText(null);
+      setHighlightNeedle(null);
+      setLocateNotice("Source location unavailable. Finding generated from document-level analysis.");
+      return;
+    }
+
+    setLocateNotice(null);
+    scrollToChunk(
+      targetChunk.chunk_id,
+      sourceLocation.source_text || targetChunk.text,
+      sourceLocation.source_text || targetChunk.text,
+    );
+  }, [chunks, scrollToChunk]);
+
   // When a redline Locate is clicked, find the best matching chunk + phrase
   const handleRedlineSelect = useCallback(
     (redline: RedlineItem & { locator?: any }) => {
-      if (!showLeftPane) setShowLeftPane(true);
+      // Ensure left panel is visible when locating a redline
+      const st = panelStore.get();
+      if (!st.leftVisible) panelStore.setLeftVisible(true);
+      if (st.left === "auto_hide" && !st.leftVisible) panelStore.setLeftVisible(true);
       const located = locateRedline(redline, chunks);
+      if ((!located || !located.chunk_id) && redline.source_location) {
+        handleFindingSelect(redline.source_location);
+        return;
+      }
       if (located) {
         setLocateNotice(located.notice ?? null);
         if (located.chunk_id && located.highlightText) {
@@ -192,7 +265,7 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
         );
       }
     },
-    [chunks, scrollToChunk, showLeftPane],
+    [chunks, handleFindingSelect, scrollToChunk],
   );
 
   const tabs = [
@@ -222,17 +295,10 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
             description="Analyze findings, policy violations, redlines, and approval decisions in the AI Review Workspace."
             className="!block"
           />
-          {/* Toggle left pane */}
-          <button
-            onClick={() => setShowLeftPane(!showLeftPane)}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-navy-700"
-            title={showLeftPane ? "Hide contract viewer" : "Show contract viewer"}
-          >
-            {showLeftPane ? <PanelLeft className="w-4 h-4" /> : <PanelRight className="w-4 h-4" />}
-          </button>
         </div>
 
         <div className="flex items-center gap-2">
+          <FocusModeToggle />
           <button
             onClick={handleReAnalyze}
             disabled={reAnalyzeMutation.isPending || (review ? isImmutable(review.status) : false)}
@@ -245,130 +311,134 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
         </div>
       </div>
 
-      {/* ── Split Pane Content ── */}
-      <div className="flex-1 flex min-h-0">
-        {/* LEFT PANE: Contract Viewer / Evidence Browser */}
-        {showLeftPane && (
-          <div className="w-1/2 min-w-0 border-r border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 overflow-y-auto">
-            <div className="p-4">
-              <div className="flex items-center gap-2 mb-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                <BookOpen className="w-3.5 h-3.5" />
-                Contract Text
-                <span className="text-gray-400 font-normal normal-case">({chunks.length} chunks)</span>
+      {/* ── Split Pane Content with Hybrid Side Panels ── */}
+      <div ref={splitPaneRef} className="relative flex-1 flex min-h-0">
+        {/* LEFT: Contract Viewer / Evidence Browser */}
+        <HybridSidePanel
+          side="left"
+          width={480}
+          minWidth={320}
+          label="Document panel"
+          className="overflow-y-auto"
+          edgeContainerRef={splitPaneRef}
+        >
+          <div className="p-4">
+            <div className="flex items-center gap-2 mb-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+              <BookOpen className="w-3.5 h-3.5" />
+              Contract Text
+              <span className="text-gray-400 font-normal normal-case">({chunks.length} chunks)</span>
+            </div>
+            {locateNotice && (
+              <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                {locateNotice}
+              </p>
+            )}
+            {chunksQuery.isLoading ? (
+              <CardSkeleton count={5} />
+            ) : chunks.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <FileText className="w-10 h-10 text-gray-300 mb-3" />
+                <p className="text-sm text-gray-500">No contract text available</p>
+                <p className="text-xs text-gray-400 mt-1">Upload a document to view its extracted content here.</p>
               </div>
-              {locateNotice && (
-                <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
-                  {locateNotice}
-                </p>
-              )}
-              {chunksQuery.isLoading ? (
-                <CardSkeleton count={5} />
-              ) : chunks.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <FileText className="w-10 h-10 text-gray-300 mb-3" />
-                  <p className="text-sm text-gray-500">No contract text available</p>
-                  <p className="text-xs text-gray-400 mt-1">Upload a document to view its extracted content here.</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {chunks.map((chunk) => {
-                    const isHighlighted = selectedChunkId === chunk.chunk_id;
-                    // Sentence-level highlight: find the exact text within the chunk
-                    let displayText = chunk.text;
-                    let beforeHighlight = "";
-                    let highlightedPhrase = "";
-                    let afterHighlight = "";
+            ) : (
+              <div className="space-y-3">
+                {chunks.map((chunk) => {
+                  const isHighlighted = selectedChunkId === chunk.chunk_id;
+                  let displayText = chunk.text;
+                  let beforeHighlight = "";
+                  let highlightedPhrase = "";
+                  let afterHighlight = "";
 
-                    if (isHighlighted && chunk.text) {
-                      const searchNeedle = highlightNeedle || highlightText || "";
-                      if (searchNeedle) {
-                        const hit =
-                          findTextInChunk(chunk.text, searchNeedle) ||
-                          findTextInChunk(chunk.text, searchNeedle);
-                        if (hit) {
-                          const phrase = hit.phrase;
-                          const idx = chunk.text.toLowerCase().indexOf(phrase.toLowerCase());
-                          if (idx >= 0) {
-                            const endIdx = Math.min(
-                              idx + (highlightText?.length ?? phrase.length),
-                              chunk.text.length,
-                            );
-                            beforeHighlight = chunk.text.slice(0, idx);
-                            highlightedPhrase = chunk.text.slice(idx, endIdx);
-                            afterHighlight = chunk.text.slice(endIdx);
-                            displayText = "";
-                          }
+                  if (isHighlighted && chunk.text) {
+                    const searchNeedle = highlightNeedle || highlightText || "";
+                    if (searchNeedle) {
+                      const hit =
+                        findTextInChunk(chunk.text, searchNeedle) ||
+                        findTextInChunk(chunk.text, searchNeedle);
+                      if (hit) {
+                        const phrase = hit.phrase;
+                        const idx = chunk.text.toLowerCase().indexOf(phrase.toLowerCase());
+                        if (idx >= 0) {
+                          const endIdx = Math.min(
+                            idx + (highlightText?.length ?? phrase.length),
+                            chunk.text.length,
+                          );
+                          beforeHighlight = chunk.text.slice(0, idx);
+                          highlightedPhrase = chunk.text.slice(idx, endIdx);
+                          afterHighlight = chunk.text.slice(endIdx);
+                          displayText = "";
                         }
                       }
                     }
+                  }
 
-                    const showFullChunk =
-                      expandedChunkId === chunk.chunk_id || !displayText;
+                  const showFullChunk =
+                    expandedChunkId === chunk.chunk_id || !displayText;
 
-                    return (
-                      <div
-                        key={`${chunk.chunk_id}-${isHighlighted ? locateTick : 0}`}
-                        id={`chunk-${chunk.chunk_id}`}
-                        className={`rounded-lg border p-3 transition-all duration-500 ${
-                          isHighlighted
-                            ? "border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/20 shadow-md"
-                            : "border-gray-200 hover:border-gray-300 dark:border-navy-700 dark:hover:border-gray-600"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 mb-1.5 text-[10px] text-gray-400">
-                          <span>Chunk {chunk.chunk_index + 1}</span>
-                          {chunk.page_numbers.length > 0 && (
-                            <>
-                              <span>|</span>
-                              <span>Page {chunk.page_numbers.join(", ")}</span>
-                            </>
-                          )}
-                          {chunk.section_heading && (
-                            <>
-                              <span>|</span>
-                              <span className="font-medium text-gray-500">{chunk.section_heading}</span>
-                            </>
-                          )}
-                          {chunk.clause_type && (
-                            <span className="ml-auto rounded-full bg-gray-100 px-1.5 py-0.5 dark:bg-navy-700">
-                              {chunk.clause_type.replace(/_/g, " ")}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs leading-relaxed text-gray-700 dark:text-gray-200">
-                          {displayText ? (
-                            !showFullChunk && chunk.text.length > 500
-                              ? `${chunk.text.slice(0, 500)}...`
-                              : chunk.text
-                          ) : (
-                            <>
-                              {beforeHighlight}
-                              <mark className="bg-yellow-200 text-yellow-900 rounded px-0.5 animate-pulse">
-                                {highlightedPhrase}
-                              </mark>
-                              {afterHighlight}
-                            </>
-                          )}
-                        </p>
-                        {chunk.text && chunk.text.length > 500 && !showFullChunk && (
-                          <button
-                            onClick={() => setExpandedChunkId(chunk.chunk_id)}
-                            className="mt-1 text-[10px] text-blue-600 hover:text-blue-800"
-                          >
-                            Show full chunk
-                          </button>
+                  return (
+                    <div
+                      key={`${chunk.chunk_id}-${isHighlighted ? locateTick : 0}`}
+                      id={`chunk-${chunk.chunk_id}`}
+                      className={`rounded-lg border p-3 transition-all duration-500 ${
+                        isHighlighted
+                          ? "border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/20 shadow-md"
+                          : "border-gray-200 hover:border-gray-300 dark:border-navy-700 dark:hover:border-gray-600"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1.5 text-[10px] text-gray-400">
+                        <span>Chunk {chunk.chunk_index + 1}</span>
+                        {chunk.page_numbers.length > 0 && (
+                          <>
+                            <span>|</span>
+                            <span>Page {chunk.page_numbers.join(", ")}</span>
+                          </>
+                        )}
+                        {chunk.section_heading && (
+                          <>
+                            <span>|</span>
+                            <span className="font-medium text-gray-500">{chunk.section_heading}</span>
+                          </>
+                        )}
+                        {chunk.clause_type && (
+                          <span className="ml-auto rounded-full bg-gray-100 px-1.5 py-0.5 dark:bg-navy-700">
+                            {chunk.clause_type.replace(/_/g, " ")}
+                          </span>
                         )}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+                      <p className="text-xs leading-relaxed text-gray-700 dark:text-gray-200">
+                        {displayText ? (
+                          !showFullChunk && chunk.text.length > 500
+                            ? `${chunk.text.slice(0, 500)}...`
+                            : chunk.text
+                        ) : (
+                          <>
+                            {beforeHighlight}
+                            <mark className="bg-yellow-200 text-yellow-900 rounded px-0.5 animate-pulse">
+                              {highlightedPhrase}
+                            </mark>
+                            {afterHighlight}
+                          </>
+                        )}
+                      </p>
+                      {chunk.text && chunk.text.length > 500 && !showFullChunk && (
+                        <button
+                          onClick={() => setExpandedChunkId(chunk.chunk_id)}
+                          className="mt-1 text-[10px] text-blue-600 hover:text-blue-800"
+                        >
+                          Show full chunk
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        )}
+        </HybridSidePanel>
 
-        {/* RIGHT PANE: Review Detail */}
-        <div className={`flex-1 min-w-0 overflow-y-auto ${showLeftPane ? "" : ""}`}>
+        {/* CENTRE: Review Detail (expands when panels hidden) */}
+        <div className={`flex-1 min-w-0 overflow-y-auto ${panelState.focusMode ? "max-w-full" : ""}`}>
           <div className="p-6 space-y-6">
             {/* Contract Summary */}
             <AsyncBoundary
@@ -436,9 +506,6 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
                       storage_key: finalizedVersion.storage_key,
                     } : null}
                   />
-
-                  {/* Risk Breakdown — explainability panel */}
-                  <RiskBreakdownPanel reviewId={reviewId} />
 
                   {/* Review Actions Bar */}
                   <ReviewActions reviewId={reviewId} review={review} />
@@ -514,6 +581,24 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
             </AsyncBoundary>
           </div>
         </div>
+
+        {/* RIGHT: Summary Panel — risk breakdown, contract summary */}
+        <HybridSidePanel
+          side="right"
+          width={420}
+          minWidth={300}
+          label="Summary panel"
+          className="overflow-y-auto"
+          edgeContainerRef={splitPaneRef}
+        >
+          <div className="p-4 space-y-4">
+            <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+              <BookOpen className="w-3.5 h-3.5" />
+              Risk Summary
+            </div>
+            <RiskBreakdownPanel reviewId={reviewId} />
+          </div>
+        </HybridSidePanel>
       </div>
     </div>
   );

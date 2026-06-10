@@ -46,10 +46,17 @@ function IssueItem({ issue, isActive, onClick }: { issue: NegotiationIssue; isAc
           </div>
           <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">{issue.sectionNumber} &middot; {issue.category}</p>
           <div className="flex items-center gap-2 mt-1">
-            <div className="flex items-center gap-1 text-[10px] text-gray-400">
-              <User className="w-2.5 h-2.5" />
-              <span>{issue.assignee.split(" ").pop()}</span>
-            </div>
+            {issue.assignee ? (
+              <div className="flex items-center gap-1 text-[10px] text-gray-400">
+                <User className="w-2.5 h-2.5" />
+                <span>{issue.assignee.split(" ").pop()}</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1 text-[10px] italic text-gray-400 dark:text-gray-500">
+                <User className="w-2.5 h-2.5" />
+                <span>Unassigned</span>
+              </div>
+            )}
             {issue.comments.length > 0 && (
               <div className="flex items-center gap-1 text-[10px] text-gray-400">
                 <MessageSquare className="w-2.5 h-2.5" />

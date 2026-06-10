@@ -218,7 +218,7 @@ export function MetadataPanel({
    * panel header so the user knows at a glance how much metadata is
    * still pending.
    */
-  const completionFields: Array<[string, unknown]> = [
+  const completionFields: Array<[string, string]> = [
     ["vendor", contract.vendor],
     ["counterparty", contract.counterparty],
     ["type", contract.contract_type],
@@ -228,7 +228,6 @@ export function MetadataPanel({
   ];
   const completionDone = completionFields.filter(([, v]) => !isEmpty(v)).length;
   const completionTotal = completionFields.length;
-  );
 
   return (
     <div className="divide-y divide-gray-100 dark:divide-navy-700">

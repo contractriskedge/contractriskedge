@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Search, ChevronLeft, ChevronRight, ArrowUpDown, FileText,
@@ -57,6 +58,7 @@ function daysRemaining(dueDate: string | null | undefined): number | null {
 export function ObligationTable({
   obligations, onSelect, onComplete, onCancel, onArchive, onDelete, onViewAudit, isAdmin,
 }: ObligationTableProps) {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("dueDate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -150,10 +152,15 @@ export function ObligationTable({
                   <td className="py-2.5 px-2.5">
                     <span className="font-medium text-gray-800 text-[11px]">{o.name}</span>
                     <div className="flex items-center gap-1.5 mt-0.5">
-                      {o.contractName && (
-                        <span className="text-[9px] text-gray-400 flex items-center gap-0.5">
-                          <ExternalLink className="w-2.5 h-2.5" />{o.contractName}
-                        </span>
+                      {o.contractId && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); router.push(`/contracts/${o.contractId}`); }}
+                          className="text-[9px] text-blue-600 hover:text-blue-800 dark:text-blue-400 flex items-center gap-0.5 hover:underline"
+                        >
+                          <ExternalLink className="w-2.5 h-2.5" />
+                          {o.contractNumber ? <span className="font-mono">{o.contractNumber} </span> : ""}
+                          {o.contractName || o.contractId.slice(0, 8)}
+                        </button>
                       )}
                       {o.sourceClause && (
                         <span className="text-[9px] text-gray-400">· {o.sourceClause}</span>
@@ -189,7 +196,7 @@ export function ObligationTable({
                     ) : <span className="text-gray-300">—</span>}
                   </td>
                   <td className="py-2.5 px-2.5">
-                    <span className="font-medium tabular-nums text-[11px]">${o.financialImpact}M</span>
+                    <span className="font-medium tabular-nums text-[11px]">${o.financialImpact.toLocaleString()}</span>
                   </td>
                   <td className="py-2.5 px-2.5">
                     <div className="flex items-center gap-1.5">

@@ -122,6 +122,8 @@ class NegotiationSession(Base):
         String(30), nullable=False, default=NegotiationStage.DRAFTING.value, index=True,
     )
     health_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    current_round: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    max_rounds: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     metadata_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True, default=dict)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False,
