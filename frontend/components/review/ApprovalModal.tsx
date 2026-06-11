@@ -19,6 +19,7 @@ interface ApprovalModalProps {
   reviewId: string;
   reviewTitle: string;
   riskScore?: number;
+  openCriticalFindings?: number;
   onApprove: (decision: string, comment: string, conditions?: Record<string, unknown>) => Promise<void>;
   onReject: (comment: string, category?: string, severity?: string) => Promise<void>;
   onClose: () => void;
@@ -45,6 +46,7 @@ export function ApprovalModal({
   reviewId,
   reviewTitle,
   riskScore,
+  openCriticalFindings = 0,
   onApprove,
   onReject,
   onClose,
@@ -66,6 +68,17 @@ export function ApprovalModal({
     if (!riskAck) {
       setError("You must acknowledge the risk assessment");
       return;
+    }
+
+    // Critical findings guard: block unless override is provided
+    if (openCriticalFindings > 0) {
+      if (!comment.toLowerCase().includes("override:")) {
+        setError(
+          `${openCriticalFindings} critical/high finding(s) are still open. ` +
+          "Add 'override:' at the start of your comments to acknowledge and bypass."
+        );
+        return;
+      }
     }
 
     try {
@@ -206,6 +219,24 @@ export function ApprovalModal({
           {/* Decision-Specific Content */}
           {decision === "approve" && (
             <div className="space-y-4">
+              {/* Critical Findings Warning */}
+              {openCriticalFindings > 0 && (
+                <div className="p-3 bg-red-50 rounded-lg border border-red-200">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium text-red-900">
+                        {openCriticalFindings} Critical/High Finding(s) Open
+                      </p>
+                      <p className="text-xs text-red-700 mt-0.5">
+                        These findings must be resolved before approval, or you must include
+                        {' '}<strong>"override:"</strong> at the start of your approval comment to bypass.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Approval Comment */}
               <div>
                 <label className="block text-sm font-medium text-gray-900 mb-2">
@@ -366,7 +397,7 @@ export function ApprovalModal({
           {decision === "approve" && (
             <button
               onClick={handleApprove}
-              disabled={isLoading || !comment.trim() || !riskAck}
+              disabled={isLoading || !comment.trim() || !riskAck || (openCriticalFindings > 0 && !comment.toLowerCase().includes("override:"))}
               className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors inline-flex items-center gap-2"
             >
               {isLoading ? (
@@ -385,7 +416,7 @@ export function ApprovalModal({
           {decision === "reject" && (
             <button
               onClick={handleReject}
-              disabled={isLoading || !comment.trim()}
+              disabled={isLoading || !comment.trim() || !rejectionCategory || !rejectionSeverity}
               className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors inline-flex items-center gap-2"
             >
               {isLoading ? (

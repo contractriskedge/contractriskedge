@@ -340,6 +340,10 @@ export const reviewService = {
       { idempotencyKey },
     ),
 
+  /** Finalize an approved review */
+  finalize: (reviewId: string) =>
+    api.post<Record<string, unknown>>(`/reviews/${reviewId}/finalize`),
+
   /** Get status change history */
   getHistory: (reviewId: string) =>
     api.get<{ history: Array<{ from_status: string; to_status: string; changed_by: string; reason: string | null; created_at: string }> }>(

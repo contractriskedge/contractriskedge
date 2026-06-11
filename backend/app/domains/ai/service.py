@@ -633,22 +633,62 @@ class AIService:
         ai_redlines = (await self.ai_repo.session.execute(stmt_redlines)).scalars().all()
 
         def _link_redline_to_review_finding(ar: AIRedline) -> Optional[str]:
-            """Map AI redline → review_finding via chunk overlap, else unique clause_type."""
+            """Map AI redline → review_finding by clause category, then chunk overlap.
+
+            Chunk-only linking caused NDA reviews to attach every insert redline to the
+            first overlapping finding (often the info-level confidentiality row) even when
+            clause_type was intellectual_property / liability / etc.
+            """
+            from app.domains.review.mapping_validation import (
+                categories_compatible,
+                normalize_category,
+            )
+
+            ct = ar.clause_type or "other"
+            redline_cat = normalize_category(ct)
             ar_chunks = {str(c) for c in (ar.chunk_ids or [])}
-            best_af: Optional[AIFinding] = None
+
+            def _review_finding_id(af: AIFinding) -> Optional[str]:
+                return ai_finding_to_review.get(str(af.finding_id))
+
+            # 1. Exact clause_type string match
+            same_type = [af for af in ai_findings if (af.clause_type or "other") == ct]
+            if len(same_type) == 1:
+                return _review_finding_id(same_type[0])
+
+            # 2. Canonical category match (handles ip ↔ intellectual_property, etc.)
+            if redline_cat:
+                cat_matches = [
+                    af for af in ai_findings
+                    if categories_compatible(redline_cat, normalize_category(af.clause_type))
+                ]
+                if len(cat_matches) == 1:
+                    return _review_finding_id(cat_matches[0])
+                if len(cat_matches) > 1 and ar_chunks:
+                    best_af: Optional[AIFinding] = None
+                    best_overlap = 0
+                    for af in cat_matches:
+                        overlap = len(ar_chunks & {str(c) for c in (af.chunk_ids or [])})
+                        if overlap > best_overlap:
+                            best_overlap = overlap
+                            best_af = af
+                    if best_af and best_overlap > 0:
+                        return _review_finding_id(best_af)
+
+            # 3. Chunk overlap — only when categories are compatible
+            best_af = None
             best_overlap = 0
             for af in ai_findings:
+                finding_cat = normalize_category(af.clause_type)
+                if redline_cat and finding_cat and not categories_compatible(redline_cat, finding_cat):
+                    continue
                 overlap = len(ar_chunks & {str(c) for c in (af.chunk_ids or [])})
                 if overlap > best_overlap:
                     best_overlap = overlap
                     best_af = af
             if best_af and best_overlap > 0:
-                return ai_finding_to_review.get(str(best_af.finding_id))
+                return _review_finding_id(best_af)
 
-            ct = ar.clause_type or "other"
-            same_type = [af for af in ai_findings if (af.clause_type or "other") == ct]
-            if len(same_type) == 1:
-                return ai_finding_to_review.get(str(same_type[0].finding_id))
             return None
 
         for ar in ai_redlines:
@@ -705,6 +745,37 @@ class AIService:
             "Review %s populated: %d findings, %d redlines, risk_score=%.4f",
             review.review_id, review.finding_count, review.redline_count, risk_score,
         )
+
+        # Backfill mitigation redlines for findings the AI redline pass skipped
+        # (unmapped NDA clause types, empty chunk text, severity cap, etc.)
+        try:
+            from app.domains.review.repository import ReviewRepository
+            from app.domains.review.service import ReviewService
+            from app.kernel.events.bus import EventBus
+
+            review_svc = ReviewService(
+                review_repo=ReviewRepository(self.ai_repo.session, tenant_id=self.tenant_id),
+                ai_repo=self.ai_repo,
+                event_bus=EventBus(),
+                user=self.user,
+                tenant_id=self.tenant_id,
+            )
+            backfill = await review_svc.backfill_mitigation_redlines_for_gaps(str(review.review_id))
+            if backfill.get("backfilled"):
+                review.redline_count = backfill["coverage_after"]["redlines"]
+                await self.ai_repo.session.flush()
+                logger.info(
+                    "Review %s redline backfill: +%d redlines (coverage %.1f%%)",
+                    review.review_id,
+                    backfill["backfilled"],
+                    backfill["coverage_after"]["coverage_pct"],
+                )
+        except Exception as backfill_exc:
+            logger.warning(
+                "Mitigation redline backfill failed for review %s: %s",
+                review.review_id, backfill_exc,
+            )
+
         return review
 
     async def _execute_risk_analysis(self, chunks: list, provider: OpenAIProvider) -> LLMResponse:

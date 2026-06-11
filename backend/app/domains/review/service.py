@@ -157,6 +157,28 @@ class ReviewService:
         Uses the WorkflowState machine to validate transitions.
         Records audit trail for every transition.
         """
+        # Guard: rejection requires a reason
+        if new_status.lower() == "rejected" and not (reason and reason.strip()):
+            raise ValueError("Rejection reason is required when rejecting a review.")
+
+        # Guard: closing/archiving requires no open obligations
+        if new_status.lower() in ("closed", "archived"):
+            from app.domains.obligations.models import Obligation
+            from sqlalchemy import select as sa_select, func as sa_func
+            open_obl = await self.review_repo.session.execute(
+                sa_select(sa_func.count()).select_from(Obligation).where(
+                    Obligation.contract_uuid_id == review_id,
+                    Obligation.tenant_id == self.tenant_id,
+                    ~Obligation.status.in_(["completed", "closed", "waived"]),
+                )
+            )
+            open_count = open_obl.scalar() or 0
+            if open_count > 0:
+                raise ValueError(
+                    f"Cannot close: {open_count} obligation(s) are still open. "
+                    "Complete or close all obligations before closing the contract."
+                )
+
         target_state = map_legacy_status(new_status)
         review = await self.review_repo.get_review(review_id, self.tenant_id)
         if not review:
@@ -416,8 +438,16 @@ class ReviewService:
         # Get the mitigation effectiveness entry for clause text generation
         effects = get_mitigation_effectiveness(clause_category, mitigation_type)
         if not effects:
-            logger.warning("No mitigation effectiveness found for %s / %s", clause_category, mitigation_type)
-            return None
+            logger.warning("No mitigation effectiveness found for %s / %s, using fallback", clause_category, mitigation_type)
+            # Use a generic fallback effect so redline generation still works
+            effects = [{
+                "effectiveness_pct": 0,
+                "confidence": 0,
+                "source": "fallback",
+                "label": f"Mitigation for {mitigation_type.replace('_', ' ').title()}",
+                "description": f"Automated recommendation for {clause_category} category.",
+                "mitigation_type": mitigation_type,
+            }]
         effect = effects[0]
 
         # Build proposed clause text from the mitigation template
@@ -429,6 +459,7 @@ class ReviewService:
             "restricting_derivative_works": "[Counterparty] shall not use [Company]'s data, materials, or deliverables to train, develop, or improve any machine learning model, artificial intelligence system, or similar technology, unless expressly authorized in writing.",
             "adding_ip_ownership": "All intellectual property rights in and to the deliverables, including all modifications, enhancements, and derivative works, shall be owned exclusively by [Company]. [Counterparty] hereby assigns all such rights to [Company].",
             "narrowing_ip_license": "The license granted under this Section is limited to the specific purpose set forth in the Statement of Work and shall not extend to [Counterparty]'s other products, services, or internal operations.",
+            "clarifying_no_license": "Nothing in this Agreement grants Recipient any license, right, title, or interest in or to Disclosing Party's Confidential Information or intellectual property, except the limited right to use such information solely for the Purpose defined herein.",
             "restricting_data_use": "[Counterparty] shall not collect, use, store, or disclose [Company]'s data for any purpose other than performing the specific services described in this agreement. Upon termination, all data shall be returned or destroyed.",
             "adding_compliance_language": "[Counterparty] shall comply with all applicable data protection laws, including but not limited to GDPR, CCPA, and PIPL, in its processing of [Company]'s data. [Counterparty] shall notify [Company] within 48 hours of any data breach.",
             "adding_data_breach_protocol": "In the event of a data breach involving [Company]'s data, [Counterparty] shall (a) notify [Company] within 24 hours, (b) provide a detailed incident report, (c) take immediate remedial action, and (d) cooperate with all regulatory notifications.",
@@ -445,12 +476,25 @@ class ReviewService:
             "adding_incident_response": "[Counterparty] shall maintain a written incident response plan that includes (a) identification and containment procedures, (b) escalation protocols, (c) forensic investigation, (d) notification timelines, and (e) post-incident remediation.",
             "adding_regulatory_compliance": "[Counterparty] represents and warrants that it holds all licenses, permits, and authorizations required to perform the services under this agreement and shall maintain them in good standing throughout the term.",
             "adding_anti_corruption": "[Counterparty] represents and warrants that it has not and will not make any payment or transfer anything of value, directly or indirectly, to any government official or other person for the purpose of obtaining or retaining business.",
+            "adding_dpa": "[Counterparty] shall process [Company]'s data only in accordance with the terms of the Data Processing Agreement attached hereto as Exhibit A. [Counterparty] shall implement appropriate technical and organizational measures to ensure a level of security appropriate to the risk.",
+            "broadening_confidentiality": "Confidential Information shall include all information disclosed by [Company] to [Counterparty], whether orally, in writing, or in any other form, including but not limited to business plans, customer data, financial information, technical data, and trade secrets. [Counterparty] shall protect such information with the same degree of care used to protect its own confidential information, but in no event less than reasonable care.",
+            "adding_return_of_information": "Upon termination or expiration of this Agreement, Recipient shall promptly return to Disclosing Party or destroy all Confidential Information and all copies thereof, and certify such return or destruction in writing upon request.",
+            "adding_remedies_clause": "Recipient acknowledges that unauthorized use or disclosure of Confidential Information may cause irreparable harm. Disclosing Party shall be entitled to seek injunctive relief and any other remedies available at law or in equity, in addition to any other rights and remedies under this Agreement.",
+            "clarifying_exclusions": "The obligations of confidentiality shall not apply to information that: (a) is or becomes publicly available through no fault of Recipient; (b) was rightfully known to Recipient without restriction prior to disclosure; (c) is independently developed by Recipient without use of Confidential Information; or (d) is rightfully received from a third party without restriction on disclosure.",
+            "extending_notice_period": "Either party may terminate this agreement without cause by providing not less than [90] days' prior written notice to the other party. During the notice period, both parties shall continue to perform their respective obligations under this agreement.",
+            "adding_sla_guarantees": "[Counterparty] guarantees that the services will meet the following service levels: (a) [99.9]% platform uptime, measured monthly; (b) [4] hour response time for critical incidents; (c) [24] hour resolution time for critical incidents. For each [1]% below the uptime commitment, [Counterparty] shall issue a service credit equal to [5]% of monthly fees.",
+            "adding_change_of_control": "In the event of a change of control of [Counterparty], [Company] shall have the right to terminate this agreement upon [30] days' written notice. [Counterparty] shall provide [Company] with written notice of any change of control at least [30] days prior to the effective date.",
+            "adding_ip_ownership_clause": "All intellectual property rights in and to the deliverables, including all modifications, enhancements, and derivative works, shall be owned exclusively by [Company]. [Counterparty] hereby assigns all such rights to [Company].",
         }
 
         proposed_text = clause_templates.get(
             mitigation_type,
             f"[Proposed clause for {effect.get('label', mitigation_type)} — please review and customize.]"
         )
+        if linked_findings and linked_findings[0].recommendation:
+            rec = (linked_findings[0].recommendation or "").strip()
+            if rec and mitigation_type.startswith("generic_"):
+                proposed_text = rec
 
         # Get linked findings for context
         linked_findings = []
@@ -596,6 +640,159 @@ class ReviewService:
         except Exception as exc:
             logger.exception("Failed to generate mitigation redline for review %s", review_id)
             return None
+
+    async def backfill_mitigation_redlines_for_gaps(self, review_id: str) -> dict:
+        """Generate fallback mitigation redlines for findings that have no linked redline.
+
+        Called after AI analysis imports findings so NDA / unmapped clause types
+        still receive recommended language instead of an empty redlines panel.
+        """
+        from app.domains.review.clause_category import resolve_mitigation_plan
+        from app.domains.review.redline_coverage import audit_finding_redline_coverage
+
+        findings = await self.review_repo.get_findings(review_id, self.tenant_id)
+        redlines = await self.review_repo.get_redlines(review_id, self.tenant_id)
+
+        before = audit_finding_redline_coverage(findings, redlines)
+        if before["findings_without_redline"] == 0:
+            return {"backfilled": 0, "skipped": [], "coverage_before": before, "coverage_after": before}
+
+        linked_ids = {str(r.finding_id) for r in redlines if r.finding_id}
+        backfilled = 0
+        skipped: list[dict] = []
+
+        for finding in findings:
+            fid = str(finding.finding_id)
+            if fid in linked_ids:
+                continue
+
+            severity = (finding.severity or "").lower()
+            has_rec = bool((finding.recommendation or "").strip())
+            if severity == "info" and not has_rec:
+                skipped.append({"finding_id": fid, "clause_type": finding.clause_type, "reason": "info_without_recommendation"})
+                continue
+
+            plan = resolve_mitigation_plan(
+                finding.clause_type,
+                title=finding.title,
+                description=finding.description,
+                recommendation=finding.recommendation,
+            )
+
+            result = await self.generate_mitigation_redline(
+                review_id=review_id,
+                mitigation_type=plan.mitigation_type,
+                clause_category=plan.clause_category,
+                finding_ids=[fid],
+            )
+            if result and not result.get("duplicate"):
+                backfilled += 1
+                linked_ids.add(fid)
+            elif result and result.get("duplicate"):
+                linked_ids.add(fid)
+            else:
+                skipped.append({
+                    "finding_id": fid,
+                    "clause_type": finding.clause_type,
+                    "reason": "generation_failed",
+                    "planned_mitigation": plan.mitigation_type,
+                })
+
+        # Refresh counts
+        redlines_after = await self.review_repo.get_redlines(review_id, self.tenant_id)
+        review = await self.review_repo.get_review(review_id, self.tenant_id)
+        if review:
+            review.redline_count = len(redlines_after)
+            await self.review_repo.session.flush()
+
+        after = audit_finding_redline_coverage(findings, redlines_after)
+        logger.info(
+            "Redline backfill for review %s: %d generated, %d skipped, coverage %.1f%% → %.1f%%",
+            review_id,
+            backfilled,
+            len(skipped),
+            before["coverage_pct"],
+            after["coverage_pct"],
+        )
+        return {
+            "backfilled": backfilled,
+            "skipped": skipped,
+            "coverage_before": before,
+            "coverage_after": after,
+        }
+
+    async def repair_redline_finding_links(self, review_id: str) -> dict:
+        """Re-link redlines to findings by clause category and clear invalid_mapping status."""
+        from app.domains.review.mapping_validation import (
+            categories_compatible,
+            normalize_category,
+            validate_redline_finding_mapping,
+        )
+        from app.domains.review.models import ReviewRedline as RRModel, RedlineStatus
+
+        findings = await self.review_repo.get_findings(review_id, self.tenant_id)
+        redlines = await self.review_repo.get_redlines(review_id, self.tenant_id)
+        findings_by_id = {str(f.finding_id): f for f in findings}
+
+        repaired = 0
+        still_invalid = 0
+        details: list[dict] = []
+
+        for redline in redlines:
+            old_fid = str(redline.finding_id) if redline.finding_id else None
+            redline_cat = normalize_category(redline.clause_type)
+            new_fid: Optional[str] = None
+
+            same_type = [f for f in findings if (f.clause_type or "other") == (redline.clause_type or "other")]
+            if len(same_type) == 1:
+                new_fid = str(same_type[0].finding_id)
+            elif redline_cat:
+                cat_matches = [
+                    f for f in findings
+                    if categories_compatible(redline_cat, normalize_category(f.clause_type))
+                ]
+                if len(cat_matches) == 1:
+                    new_fid = str(cat_matches[0].finding_id)
+
+            if new_fid and new_fid != old_fid:
+                redline.finding_id = new_fid
+                repaired += 1
+
+            linked = findings_by_id.get(str(redline.finding_id)) if redline.finding_id else None
+            mapping = validate_redline_finding_mapping(redline, linked)
+            old_status = (
+                redline.status.value if hasattr(redline.status, "value") else str(redline.status)
+            )
+            if mapping.valid and old_status == RedlineStatus.INVALID_MAPPING.value:
+                redline.status = RedlineStatus.PROPOSED
+            elif not mapping.valid:
+                redline.status = RedlineStatus.INVALID_MAPPING
+                still_invalid += 1
+
+            details.append({
+                "redline_id": str(redline.redline_id),
+                "clause_type": redline.clause_type,
+                "finding_id": str(redline.finding_id) if redline.finding_id else None,
+                "finding_title": linked.title if linked else None,
+                "finding_clause_type": linked.clause_type if linked else None,
+                "mapping_valid": mapping.valid,
+                "status": redline.status.value if hasattr(redline.status, "value") else str(redline.status),
+            })
+
+        await self.review_repo.session.flush()
+        return {
+            "repaired_links": repaired,
+            "still_invalid": still_invalid,
+            "redlines": details,
+        }
+
+    async def get_redline_coverage(self, review_id: str) -> dict:
+        """Return finding→redline coverage audit for a review."""
+        from app.domains.review.redline_coverage import audit_finding_redline_coverage
+
+        findings = await self.review_repo.get_findings(review_id, self.tenant_id)
+        redlines = await self.review_repo.get_redlines(review_id, self.tenant_id)
+        return audit_finding_redline_coverage(findings, redlines)
 
     async def update_redline(self, redline_id: str, status: str, modified_text: Optional[str] = None,
                               review_notes: Optional[str] = None) -> Optional[dict]:
@@ -1097,8 +1294,12 @@ class ReviewService:
         except ImmutableReviewError as e:
             raise ValueError(str(e))
 
+        # Guard: rejection requires a reason
+        if decision == "rejected" and not (comments and comments.strip()):
+            raise ValueError("Rejection reason (comments) is required when rejecting a review.")
+
         # Guard: if approving, check for unresolved critical/high findings
-        if decision == "approved":
+        if decision == "approved" or decision == "conditionally_approved":
             from app.domains.review.models import ReviewFinding
             from sqlalchemy import select, func as sa_func
             unresolved = await self.review_repo.session.execute(
@@ -1111,13 +1312,35 @@ class ReviewService:
             )
             count = unresolved.scalar() or 0
             if count > 0:
-                raise ConflictError(
-                    message=(
-                        f"Cannot approve: {count} critical/high finding(s) are still open. "
-                        "Resolve or dismiss them in Findings first."
-                    ),
-                    details={"unresolved_critical_high_count": count},
-                )
+                # Allow override if reason is provided (admin bypass)
+                if comments and "override:" in comments.lower():
+                    logger.info(
+                        "Approval override for review %s: %d unresolved findings overridden by %s",
+                        review_id, count, self.user.id,
+                    )
+                    # Store override metadata on the review
+                    from app.domains.review.models import ContractReview
+                    from sqlalchemy import update as sa_update
+                    from datetime import datetime, timezone
+                    stmt = (
+                        sa_update(ContractReview)
+                        .where(ContractReview.review_id == review_id)
+                        .values(
+                            approval_override_reason=comments,
+                            approval_override_by=self.user.id,
+                            approval_override_timestamp=datetime.now(timezone.utc),
+                        )
+                    )
+                    await self.review_repo.session.execute(stmt)
+                else:
+                    action_label = "approve" if decision == "approved" else "conditionally approve"
+                    raise ConflictError(
+                        message=(
+                            f"Cannot {action_label}: {count} critical/high finding(s) are still open. "
+                            "Resolve or dismiss them in Findings first, or add 'override:' to your comments to bypass."
+                        ),
+                        details={"unresolved_critical_high_count": count},
+                    )
 
         new_status = ReviewStatus.APPROVED if decision == "approved" else ReviewStatus.REJECTED
         if decision == "conditionally_approved":
@@ -2229,11 +2452,22 @@ class ReviewService:
         metadata = getattr(review, 'document_metadata', None) or {}
         risk_score = metadata.get("risk_score") if isinstance(metadata, dict) else None
         contract_number = metadata.get("contract_number") if isinstance(metadata, dict) else None
+        # Fallback: generate a display contract number from the review's created_at
+        if not contract_number and hasattr(review, 'created_at') and review.created_at:
+            try:
+                ts = review.created_at
+                month_year = ts.strftime("%m%Y")
+                short_id = str(review.review_id)[:4].upper() if hasattr(review, 'review_id') else "0000"
+                contract_number = f"C{month_year}-{short_id}"
+            except Exception:
+                contract_number = None
         # Extract status safely (could be enum or string)
         raw_status = review.status
         status_str = raw_status.value if hasattr(raw_status, 'value') else (raw_status if isinstance(raw_status, str) else str(raw_status))
         # Compute SLA
         sla = ReviewService._compute_sla(review)
+        # Resolve critical/high finding count from transient attribute (set by repository join or computed)
+        critical_finding_count = getattr(review, '_critical_finding_count', None)
         return {
             "review_id": str(review.review_id),
             "upload_id": str(review.upload_id),
@@ -2249,6 +2483,7 @@ class ReviewService:
             "workflow_stage": review.workflow_stage,
             "priority": ReviewService._normalize_priority(review.priority),
             "finding_count": review.finding_count,
+            "critical_finding_count": critical_finding_count or 0,
             "redline_count": review.redline_count,
             "comment_count": review.comment_count,
             "escalation_count": review.escalation_count,

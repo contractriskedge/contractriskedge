@@ -1,7 +1,7 @@
 // ── Enterprise Obligation Management Types ──────────────────────────────────
 
 export type ObligationType = "payment" | "deliverable" | "milestone" | "sla" | "renewal" | "compliance" | "reporting" | "insurance";
-export type ObligationStatus = "draft" | "pending" | "in_progress" | "active" | "completed" | "overdue" | "cancelled" | "archived" | "waived" | "escalated";
+export type ObligationStatus = "draft" | "pending" | "in_progress" | "pending_supplier" | "completed" | "overdue" | "cancelled" | "archived" | "waived" | "escalated";
 export type RiskLevel = "critical" | "high" | "medium" | "low" | "info";
 export type SlaStatus = "on_track" | "at_risk" | "breached" | "not_applicable";
 
@@ -69,6 +69,10 @@ export interface ObligationRecord {
   createdAt: string;
   lastModified: string;
   isFavorite?: boolean;
+  // Completion auditability fields (V1.1)
+  completionNotes?: string;
+  completedBy?: string;
+  evidenceAttachmentCount?: number;
 }
 
 export interface ObligationInsight {
@@ -214,7 +218,7 @@ export const STATUS_CONFIG: Record<string, { color: string; bg: string; label: s
   draft: { color: "text-gray-500", bg: "bg-gray-50", label: "Draft" },
   pending: { color: "text-yellow-700", bg: "bg-yellow-50", label: "Pending" },
   in_progress: { color: "text-blue-700", bg: "bg-blue-50", label: "In Progress" },
-  active: { color: "text-blue-700", bg: "bg-blue-50", label: "Active" },
+  pending_supplier: { color: "text-purple-700", bg: "bg-purple-50", label: "Pending Supplier" },
   completed: { color: "text-green-700", bg: "bg-green-50", label: "Completed" },
   overdue: { color: "text-red-700", bg: "bg-red-50", label: "Overdue" },
   cancelled: { color: "text-gray-600", bg: "bg-gray-100", label: "Cancelled" },

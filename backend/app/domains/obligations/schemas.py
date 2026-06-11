@@ -170,6 +170,16 @@ class AiReviewRequest(BaseModel):
     include_predictions: Optional[bool] = None
 
 
+# ── Completion Request (V1.1) ──────────────────────────────────────
+
+
+class ObligationCompleteRequest(BaseModel):
+    """Request payload for completing an obligation with audit evidence."""
+    completion_notes: str = Field(..., min_length=1, description="Required notes explaining how the obligation was satisfied")
+    completion_date: Optional[datetime] = None
+    evidence_attachment_ids: Optional[list[str]] = None
+
+
 # ── Response Schemas ────────────────────────────────────────────────
 
 
@@ -213,6 +223,11 @@ class ObligationResponse(BaseModel):
     is_favorite: bool
     tags: list[str] = []
     extra_metadata: Optional[dict] = None
+    # Completion auditability fields (V1.1)
+    completion_notes: Optional[str] = None
+    completion_date: Optional[datetime] = None
+    completed_by: Optional[str] = None
+    evidence_attachment_count: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

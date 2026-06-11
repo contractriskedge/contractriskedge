@@ -24,6 +24,7 @@
 import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiRequestError } from "@/services/api/client";
+import { reviewService } from "@/services/api/reviews";
 
 // ── Mock data control ───────────────────────────────────────────────────────
 // Set NEXT_PUBLIC_USE_MOCK_DATA=false to disable mock fallbacks in production.
@@ -103,6 +104,8 @@ export function mapApiReviewToSummary(raw: ApiRecord): ReviewSummary {
   return {
     review_id: reviewId,
     contract_name: contractName,
+    contract_number: raw.contract_number ? String(raw.contract_number) : null,
+    original_filename: raw.original_filename ? String(raw.original_filename) : null,
     vendor: String(raw.vendor ?? raw.counterparty ?? ""),
     document_type: friendlyDocumentType(String(raw.document_type ?? "")),
     status: String(raw.status ?? "draft") as ReviewSummary["status"],
@@ -502,12 +505,25 @@ function mapHistoryToActivity(raw: {
   created_at: string;
 }): ActivityEvent {
   const actor = raw.changed_by || "System";
+  const toStatus = raw.to_status.toLowerCase();
+  const type =
+    toStatus === "rejected"
+      ? "review_rejected"
+      : toStatus === "approved"
+        ? "review_approved"
+        : "status_changed";
+  const action =
+    toStatus === "rejected"
+      ? "Review rejected"
+      : toStatus === "approved"
+        ? "Review approved"
+        : `Status changed to ${raw.to_status.replace(/_/g, " ")}`;
   return {
     id: `hist-${raw.created_at}-${raw.to_status}`,
-    type: "status_changed",
+    type,
     actor,
     actor_initials: actor.charAt(0).toUpperCase() || "?",
-    action: `Status changed to ${raw.to_status.replace(/_/g, " ")}`,
+    action,
     details: raw.reason || `From ${raw.from_status} to ${raw.to_status}`,
     timestamp: raw.created_at,
     before_state: raw.from_status,
@@ -858,28 +874,62 @@ export function useAssignReview() {
   });
 }
 
-/** Approve a review. */
-export function useApproveReview() {
+function invalidateReviewDecisionQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+  reviewId: string,
+) {
+  queryClient.invalidateQueries({ queryKey: platformKeys.all });
+  queryClient.invalidateQueries({ queryKey: platformKeys.workflow(reviewId) });
+  queryClient.invalidateQueries({ queryKey: platformKeys.review(reviewId) });
+  queryClient.invalidateQueries({ queryKey: platformKeys.activity(reviewId) });
+  queryClient.invalidateQueries({ queryKey: [...platformKeys.all, "audit-history", reviewId] });
+  queryClient.invalidateQueries({ queryKey: ["ai-platform"] });
+  queryClient.invalidateQueries({ queryKey: ["reviews"] });
+}
+
+/** Approve, reject, or conditionally approve a review (persists reason + audit trail). */
+export function useSubmitReviewDecision() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ reviewId, comments }: { reviewId: string; comments?: string }) =>
-      api.post(`/reviews/${reviewId}/approve`, { comments }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: platformKeys.all });
+    mutationFn: ({
+      reviewId,
+      decision,
+      comments,
+      conditions,
+    }: {
+      reviewId: string;
+      decision: "approved" | "rejected" | "conditionally_approved";
+      comments?: string;
+      conditions?: Record<string, unknown>;
+    }) => reviewService.approve(reviewId, { decision, comments, conditions }),
+    onSuccess: (_data, variables) => {
+      invalidateReviewDecisionQueries(queryClient, variables.reviewId);
     },
   });
 }
 
-/** Reject a review. */
+/** @deprecated Use useSubmitReviewDecision */
+export function useApproveReview() {
+  const mutation = useSubmitReviewDecision();
+  return {
+    ...mutation,
+    mutateAsync: (vars: { reviewId: string; comments?: string }) =>
+      mutation.mutateAsync({ reviewId: vars.reviewId, decision: "approved", comments: vars.comments }),
+  };
+}
+
+/** Reject a review with a required reason (recorded in audit trail). */
 export function useRejectReview() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ reviewId, reason }: { reviewId: string; reason: string }) =>
-      api.post(`/reviews/${reviewId}/reject`, { reason }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: platformKeys.all });
-    },
-  });
+  const mutation = useSubmitReviewDecision();
+  return {
+    ...mutation,
+    mutateAsync: (vars: { reviewId: string; reason: string }) =>
+      mutation.mutateAsync({
+        reviewId: vars.reviewId,
+        decision: "rejected",
+        comments: vars.reason,
+      }),
+  };
 }
 
 /** Submit AI feedback for a finding. */
@@ -966,5 +1016,19 @@ export function useAdvanceWorkflow() {
       queryClient.invalidateQueries({ queryKey: platformKeys.review(variables.reviewId) });
       queryClient.invalidateQueries({ queryKey: platformKeys.reviews() });
     },
+  });
+}
+
+// ── Obligations by Contract ──────────────────────────────────────
+
+import { obligationsService } from "@/services/api/obligations";
+import type { ObligationsByContractResponse } from "@/services/api/obligations";
+
+export function useObligationsByContract(contractId: string | undefined) {
+  return useQuery({
+    queryKey: [...platformKeys.all, "obligations", contractId],
+    queryFn: () => obligationsService.getByContract(contractId!),
+    enabled: !!contractId,
+    staleTime: 15_000,
   });
 }

@@ -1,6 +1,6 @@
 /**
  * Contracts query hooks — TanStack Query wrappers for contracts API.
- * Replaces legacy mockData imports with live backend integration.
+ * Uses live backend data only (no mock fallback).
  */
 
 "use client";
@@ -12,8 +12,6 @@ import {
   fetchContractById,
   fetchSavedViews,
 } from "@/services/api/contracts";
-import type { ContractRecord } from "@/components/dashboard/contracts/types";
-import { contractRecords as mockContractRecords } from "@/components/dashboard/contracts/mockData";
 
 export const contractKeys = {
   all: ["contracts"] as const,
@@ -33,28 +31,7 @@ export function useContracts(params?: {
 }) {
   return useQuery({
     queryKey: contractKeys.list(params),
-    queryFn: async () => {
-      const res = await fetchContracts(params);
-      // If the API returns no rows (e.g. tenant without seeded reviews), fall
-      // back to a deterministic subset of mock data so the contracts page is
-      // never empty. This is a defense-in-depth measure — the API normally
-      // returns rows when seeded; we only want to ensure the table always
-      // has something to render.
-      if (!res?.data || res.data.length === 0) {
-        const mock: ContractRecord[] = mockContractRecords.slice(0, 25);
-        return {
-          ...res,
-          data: mock,
-          pagination: {
-            page: 1,
-            page_size: mock.length,
-            total: mock.length,
-            total_pages: 1,
-          },
-        };
-      }
-      return res;
-    },
+    queryFn: () => fetchContracts(params),
     staleTime: 30_000,
     gcTime: 5 * 60_000,
   });

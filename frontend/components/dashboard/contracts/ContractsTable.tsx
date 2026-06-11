@@ -6,9 +6,17 @@ import {
   Columns, Eye, AlertTriangle, CheckCircle, XCircle, Clock, Star, Filter as FilterIcon,
 } from "lucide-react";
 import type { ContractRecord, RiskLevel, AiFlag } from "./types";
-import { RISK_BG, RISK_TEXT, RISK_BG_LIGHT, RISK_DARK_BG, RISK_DARK_TEXT, AI_FLAG_CONFIG, STATUS_CONFIG, WORKFLOW_STAGES } from "./types";
+import { RISK_BG, RISK_TEXT, RISK_BG_LIGHT, RISK_DARK_BG, RISK_DARK_TEXT, AI_FLAG_CONFIG, WORKFLOW_STAGES } from "./types";
+import {
+  contractLifecycleFor,
+  CONTRACT_LIFECYCLE_CONFIG,
+  CONTRACT_LIFECYCLE_ORDER,
+  formatReviewStatusLabel,
+  type ContractLifecycleStage,
+} from "./contractLifecycle";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useFavorites } from "@/hooks/useFavorites";
+import { AnchoredMenu } from "@/components/shared/AnchoredMenu";
 
 // ── Money Formatter ────────────────────────────────────────────────────────
 
@@ -38,47 +46,52 @@ function AiFlagBadge({ flag }: { flag: AiFlag }) {
   return <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${cfg.bg} ${cfg.color} ${cfg.darkBg} ${cfg.darkColor} whitespace-nowrap`}>{cfg.label}</span>;
 }
 
-// ── Status Badge ────────────────────────────────────────────────────────────
+// ── Lifecycle Stage Badge (Draft → Review → Approved → Active → Expiring → Closed) ──
 
-function StatusBadge({ status }: { status: string }) {
-  const c = STATUS_CONFIG[status] || STATUS_CONFIG.draft;
-  return <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${c.bg} ${c.color} ${c.darkBg} ${c.darkColor}`}>{c.label}</span>;
+function LifecycleFlowLegend() {
+  return (
+    <div className="flex items-center gap-1 px-3 py-1.5 text-[10px] text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-navy-700 bg-gray-50/80 dark:bg-navy-900/40 overflow-x-auto">
+      <span className="font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap mr-1">Lifecycle:</span>
+      {CONTRACT_LIFECYCLE_ORDER.map((stage, i) => (
+        <React.Fragment key={stage}>
+          {i > 0 && <span className="text-gray-300 dark:text-gray-600">→</span>}
+          <LifecycleBadge stage={stage} />
+        </React.Fragment>
+      ))}
+    </div>
+  );
 }
 
-// ── Lifecycle Badge (Captured / Extracted / Available) ──────────────────────
-//
-// Lifecycle replaces the previously-empty Vendor / Counterparty / Business Unit
-// columns with the three signals that always have data:
-//   Captured  — uploaded, awaiting AI extraction
-//   Extracted — text + clauses extracted, AI analysis running
-//   Available — analyzed, ready for review or already in review
-//
-type LifecycleStage = "captured" | "extracted" | "available" | "analyzed" | "under_review" | "active" | "expired";
-
-const LIFECYCLE_CONFIG: Record<LifecycleStage, { label: string; color: string; bg: string }> = {
-  captured:    { label: "Captured",   color: "text-slate-700",   bg: "bg-slate-100" },
-  extracted:   { label: "Extracted",  color: "text-blue-700",    bg: "bg-blue-100" },
-  available:   { label: "Available",  color: "text-emerald-700", bg: "bg-emerald-100" },
-  analyzed:    { label: "Analyzed",   color: "text-violet-700",  bg: "bg-violet-100" },
-  under_review:{ label: "In Review",  color: "text-amber-700",   bg: "bg-amber-100" },
-  active:      { label: "Active",     color: "text-green-700",   bg: "bg-green-100" },
-  expired:     { label: "Expired",    color: "text-red-700",     bg: "bg-red-100" },
-};
-
-function lifecycleFor(c: ContractRecord): LifecycleStage {
-  const wf = (c.workflowStage || "").toLowerCase();
-  const st = (c.status || "").toLowerCase();
-  if (st === "expired" || wf === "archived") return "expired";
-  if (wf === "executed" || st === "active") return "active";
-  if (st === "under_review" || wf === "review" || wf === "approval" || wf === "negotiation") return "under_review";
-  if ((c.aiConfidence || 0) > 0 && wf !== "draft") return "analyzed";
-  if ((c.clauseCount || 0) > 0) return "extracted";
-  return "captured";
+function LifecycleBadge({ stage }: { stage: ContractLifecycleStage }) {
+  const c = CONTRACT_LIFECYCLE_CONFIG[stage] || CONTRACT_LIFECYCLE_CONFIG.draft;
+  return (
+    <span
+      className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${c.bg} ${c.color} ${c.darkBg} ${c.darkColor}`}
+      title={`Lifecycle: ${c.label}`}
+    >
+      {c.label}
+    </span>
+  );
 }
 
-function LifecycleBadge({ stage }: { stage: LifecycleStage }) {
-  const c = LIFECYCLE_CONFIG[stage] || LIFECYCLE_CONFIG.captured;
-  return <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${c.bg} ${c.color}`}>{c.label}</span>;
+function ReviewStatusBadge({ contract }: { contract: ContractRecord }) {
+  const label = formatReviewStatusLabel(contract);
+  const rs = (contract.reviewStatus || contract.status || "").toLowerCase();
+  const colors: Record<string, string> = {
+    executed: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300",
+    approved: "bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300",
+    archived: "bg-gray-100 text-gray-600 dark:bg-navy-700 dark:text-gray-400",
+    closed: "bg-gray-100 text-gray-600 dark:bg-navy-700 dark:text-gray-400",
+    rejected: "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-300",
+    in_review: "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300",
+    under_review: "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300",
+  };
+  const cls = colors[rs] || "bg-gray-100 text-gray-600 dark:bg-navy-700 dark:text-gray-300";
+  return (
+    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap ${cls}`}>
+      {label}
+    </span>
+  );
 }
 
 // ── Renewal Risk Indicator ──────────────────────────────────────────────────
@@ -167,22 +180,27 @@ const ACTION_LABELS: { key: ActionType; label: string }[] = [
   { key: "archive", label: "Archive" },
 ];
 
-function QuickActions({ contractId, onClose, onAction }: QuickActionsProps) {
+function QuickActions({
+  contractId,
+  anchorRect,
+  anchorEl,
+  onClose,
+  onAction,
+}: QuickActionsProps & { anchorRect: DOMRect; anchorEl: HTMLElement }) {
   return (
-    <>
-      <div className="fixed inset-0 z-30" onClick={onClose} />
-      <div className="absolute right-0 top-full mt-1 z-40 w-44 bg-white dark:bg-navy-800 rounded-lg border border-gray-200 dark:border-navy-700 shadow-lg py-1">
-        {ACTION_LABELS.map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={(e) => { e.stopPropagation(); onAction(contractId, key); onClose(); }}
-            className="w-full text-left px-3 py-1.5 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors"
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-    </>
+    <AnchoredMenu open anchorRect={anchorRect} anchorEl={anchorEl} onClose={onClose} width={176}>
+      {ACTION_LABELS.map(({ key, label }) => (
+        <button
+          key={key}
+          type="button"
+          role="menuitem"
+          onClick={(e) => { e.stopPropagation(); onAction(contractId, key); onClose(); }}
+          className="w-full text-left px-3 py-1.5 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors"
+        >
+          {label}
+        </button>
+      ))}
+    </AnchoredMenu>
   );
 }
 
@@ -190,7 +208,7 @@ function QuickActions({ contractId, onClose, onAction }: QuickActionsProps) {
 
 const ALL_COLUMNS = [
   { key: "name", label: "Contract Name", default: true },
-  { key: "lifecycle", label: "Lifecycle", default: true },
+  { key: "lifecycle", label: "Lifecycle Stage", default: true },
   { key: "contractType", label: "Agreement Type", default: true },
   { key: "vendor", label: "Vendor", default: true },
   { key: "owner", label: "Owner", default: true },
@@ -223,7 +241,7 @@ export function ContractsTable({ contracts, onSelectContract, onAction }: Contra
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [openActions, setOpenActions] = useState<string | null>(null);
+  const [openActions, setOpenActions] = useState<{ id: string; rect: DOMRect; el: HTMLElement } | null>(null);
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set(ALL_COLUMNS.filter(c => c.default).map(c => c.key)));
   const [showColumnChooser, setShowColumnChooser] = useState(false);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
@@ -392,6 +410,8 @@ export function ContractsTable({ contracts, onSelectContract, onAction }: Contra
         </span>
       </div>
 
+      <LifecycleFlowLegend />
+
       {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full">
@@ -490,11 +510,11 @@ export function ContractsTable({ contracts, onSelectContract, onAction }: Contra
                       </div>
                     </td>
                   )}
-                  {visibleColumns.has("vendor") && <td className="py-2 px-2 text-[11px] text-gray-700 dark:text-gray-200 font-medium">{c.vendor || '—'}</td>}
                   {visibleColumns.has("lifecycle") && (
-                    <td className="py-2 px-2"><LifecycleBadge stage={lifecycleFor(c)} /></td>
+                    <td className="py-2 px-2"><LifecycleBadge stage={contractLifecycleFor(c)} /></td>
                   )}
                   {visibleColumns.has("contractType") && <td className="py-2 px-2"><span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-navy-700 text-gray-600 dark:text-gray-300">{c.contractType || "—"}</span></td>}
+                  {visibleColumns.has("vendor") && <td className="py-2 px-2 text-[11px] text-gray-700 dark:text-gray-200 font-medium">{c.vendor || '—'}</td>}
                   {visibleColumns.has("owner") && (
                     <td className="py-2 px-2 text-[11px] text-gray-600 dark:text-gray-300">
                       {c.owner ? (
@@ -518,16 +538,27 @@ export function ContractsTable({ contracts, onSelectContract, onAction }: Contra
                   {visibleColumns.has("renewalRisk") && <td className="py-2 px-2"><RenewalRisk level={c.renewalRisk || 'low'} /></td>}
                   {visibleColumns.has("riskScore") && <td className="py-2 px-2"><RiskBadge score={c.riskScore} /></td>}
                   {visibleColumns.has("aiStatus") && <td className="py-2 px-2"><AiStatus confidence={c.aiConfidence} findings={c.aiFindingsCount || 0} /></td>}
-                  {visibleColumns.has("status") && <td className="py-2 px-2"><StatusBadge status={c.status} /></td>}
+                  {visibleColumns.has("status") && <td className="py-2 px-2"><ReviewStatusBadge contract={c} /></td>}
                   {visibleColumns.has("lastActivity") && <td className="py-2 px-2 text-[10px] text-gray-400 dark:text-gray-500 tabular-nums">{c.lastActivity || c.lastModified || '—'}</td>}
                   {visibleColumns.has("financialValue") && <td className="py-2 px-2"><span className="font-medium tabular-nums text-[11px] text-gray-800 dark:text-gray-200">${formatMoneyShort(c.financialValue, c.currency)}</span></td>}
                   {visibleColumns.has("workflowStage") && <td className="py-2 px-2"><span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-navy-700 text-gray-600 dark:text-gray-300">{(WORKFLOW_STAGES[c.workflowStage as keyof typeof WORKFLOW_STAGES] || WORKFLOW_STAGES.draft).label}</span></td>}
                   <td className="py-2 px-2 relative" onClick={(e) => e.stopPropagation()}>
-                    <button onClick={() => setOpenActions(openActions === c.id ? null : c.id)}
-                      className="p-0.5 rounded transition-colors text-gray-300 dark:text-navy-500 opacity-0 group-hover:opacity-100 hover:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-navy-700">
-                      <MoreHorizontal className="w-3 h-3" />
+                    <button
+                      type="button"
+                      aria-label="Contract actions"
+                      aria-expanded={openActions?.id === c.id}
+                      onClick={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setOpenActions(
+                          openActions?.id === c.id
+                            ? null
+                            : { id: c.id, rect, el: e.currentTarget },
+                        );
+                      }}
+                      className="p-0.5 rounded transition-colors text-gray-400 dark:text-navy-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-navy-700"
+                    >
+                      <MoreHorizontal className="w-3.5 h-3.5" />
                     </button>
-                    {openActions === c.id && <QuickActions contractId={c.id} onClose={() => setOpenActions(null)} onAction={(id, action) => onAction?.(id, action)} />}
                   </td>
                 </tr>
               );
@@ -535,6 +566,16 @@ export function ContractsTable({ contracts, onSelectContract, onAction }: Contra
           </tbody>
         </table>
       </div>
+
+      {openActions && (
+        <QuickActions
+          contractId={openActions.id}
+          anchorRect={openActions.rect}
+          anchorEl={openActions.el}
+          onClose={() => setOpenActions(null)}
+          onAction={(id, action) => onAction?.(id, action)}
+        />
+      )}
 
       {/* Empty state */}
       {sorted.length === 0 && (

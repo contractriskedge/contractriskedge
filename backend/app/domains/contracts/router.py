@@ -99,6 +99,7 @@ class ContractSummary:
         # Status / workflow
         status = _get('status', None)
         status_str = status.value if hasattr(status, 'value') else str(status or 'draft')
+        self.reviewStatus = status_str
         self.status = _map_status(status_str)
         self.expiryDate = (doc_md.get('expiration_date') or '')[:10]
         self.renewalDate = (doc_md.get('renewal_date') or '')[:10]

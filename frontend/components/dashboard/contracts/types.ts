@@ -34,6 +34,8 @@ export interface ContractRecord {
   financialValue: number;
   currency: string;
   status: ContractStatus;
+  /** Raw review workflow status from the backend (e.g. executed, approved, archived). */
+  reviewStatus?: string;
   effectiveDate: string;
   expirationDate: string;
   renewalDate: string;

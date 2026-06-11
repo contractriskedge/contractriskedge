@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState, useMemo, useCallback } from "react";
-import { motion } from "framer-motion";
-import { Loader2, AlertCircle, RefreshCw, Upload, Download, ExternalLink } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Loader2, AlertCircle, RefreshCw, Upload, Download, ExternalLink, X, Check } from "lucide-react";
 import { ContractKpiCards } from "./ContractKpiCards";
 import { ContractsHeader } from "./ContractsHeader";
 import { FilterBar } from "./FilterBar";
@@ -12,6 +12,8 @@ import { UploadFlow } from "./UploadFlow";
 import { useContracts, useContractKpis, useSavedViews } from "@/services/hooks/useContracts";
 import type { ContractRecord, ContractFilterState } from "./types";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { UserPicker } from "@/components/shared/UserPicker";
+import { reviewService } from "@/services/api/reviews";
 import { useRouter } from "next/navigation";
 
 const defaultFilters: ContractFilterState = {
@@ -67,6 +69,22 @@ export function ContractsPage() {
   }, [savedViews]);
 
   // Apply filters + search (client-side for responsive UX)
+  const [assignTarget, setAssignTarget] = useState<string | null>(null);
+  const [assignLoading, setAssignLoading] = useState(false);
+
+  const handleAssign = useCallback(async (assigneeId: string, _assigneeName: string) => {
+    if (!assignTarget) return;
+    setAssignLoading(true);
+    try {
+      await reviewService.assign(assignTarget, { assignee_id: assigneeId });
+      refetchContracts();
+    } catch {
+      // Silently fail — the review service handles errors
+    }
+    setAssignLoading(false);
+    setAssignTarget(null);
+  }, [assignTarget, refetchContracts]);
+
   const filteredContracts = useMemo(() => {
     return contractRecords.filter((c) => {
       if (search) {
@@ -196,10 +214,9 @@ export function ContractsPage() {
                   ids.forEach((id) => router.push(`/reviews/ai-workspace?contractId=${id}`));
                   break;
                 case "assign-reviewer":
-                  // Use the first selected contract's detail modal flow but for all
-                  alert(`Assign ${ids.length} contracts to a reviewer — open the first to use the picker.`);
-                  router.push(`/reviews/ai-workspace?contractId=${ids[0]}`);
-                  break;
+                // Use the first selected contract's detail modal flow but for all
+                setAssignTarget(ids[0]);
+                break;
                 case "export-pdf":
                   ids.forEach((id) => window.open(`/api/v1/export/reviews/${id}/pdf`, "_blank"));
                   break;

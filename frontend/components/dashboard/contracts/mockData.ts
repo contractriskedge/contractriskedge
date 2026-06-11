@@ -44,6 +44,17 @@ export const contractRecords: ContractRecord[] = Array.from({ length: 60 }, (_, 
   const vendor = pick(vendors);
   const ct = pick(contractTypes);
   const stage: WorkflowStage = status === "expired" ? "archived" : status === "pending_signature" ? "approval" : status === "under_review" ? "review" : pick(["executed", "renewal"]) as WorkflowStage;
+  const reviewStatus =
+    stage === "archived" ? "archived"
+    : stage === "approval" ? "approved"
+    : stage === "review" ? "in_review"
+    : stage === "executed" ? "executed"
+    : "draft";
+  const slaStatus =
+    reviewStatus === "archived" ? "on_track"
+    : status === "expired" ? "critical_overdue"
+    : status === "expiring_soon" ? "overdue"
+    : "on_track";
 
   return {
     id: `CON-${2026001 + i}`,
@@ -56,6 +67,7 @@ export const contractRecords: ContractRecord[] = Array.from({ length: 60 }, (_, 
     financialValue: value,
     currency: "USD",
     status,
+    reviewStatus,
     renewalDate: new Date(Date.now() + daysToRenewal * 86400000).toISOString().split("T")[0],
     aiConfidence: rand(72, 99),
     owner: pick(owners),
@@ -73,6 +85,8 @@ export const contractRecords: ContractRecord[] = Array.from({ length: 60 }, (_, 
     hasRedlines: Math.random() > 0.6,
     hasDpa: Math.random() > 0.3,
     autoRenew: Math.random() > 0.55,
+    slaStatus,
+    health: status === "expired" ? "expired" : status === "expiring_soon" ? "expiring_soon" : "healthy",
     totalPages: rand(3, 45),
     createdAt: new Date(Date.now() - rand(30, 730) * 86400000).toISOString().split("T")[0],
   };

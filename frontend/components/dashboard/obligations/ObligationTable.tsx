@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { ObligationRecord, ObligationType } from "./types";
 import { RISK_BG, RISK_TEXT, RISK_BG_LIGHT, STATUS_CONFIG, OBLIGATION_TYPES } from "./types";
+import { AnchoredMenu } from "@/components/shared/AnchoredMenu";
 
 type SortKey = "dueDate" | "riskScore" | "financialImpact" | "name" | "vendor" | "status" | "aiRiskPrediction" | "slaRemaining";
 
@@ -65,7 +66,7 @@ export function ObligationTable({
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(0);
-  const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState<{ id: string; rect: DOMRect; el: HTMLElement } | null>(null);
   const pageSize = 12;
 
   const handleSort = (k: SortKey) => {
@@ -95,6 +96,9 @@ export function ObligationTable({
 
   const totalPages = Math.ceil(filtered.length / pageSize);
   const pageData = filtered.slice(page * pageSize, (page + 1) * pageSize);
+  const menuObligation = menuOpen
+    ? obligations.find((o) => o.id === menuOpen.id) ?? pageData.find((o) => o.id === menuOpen.id)
+    : null;
 
   const SortHeader = ({ label, k }: { label: string; k: SortKey }) => (
     <th className="text-left py-2.5 px-2.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-navy-700 select-none" onClick={() => handleSort(k)}>
@@ -145,7 +149,11 @@ export function ObligationTable({
             {pageData.map((o, i) => {
               const sc = STATUS_CONFIG[o.status] ?? { color: "text-gray-600", bg: "bg-gray-100", label: o.status ?? "Unknown" };
               const dr = daysRemaining(o.dueDate);
-              const isMenuOpen = menuOpen === o.id;
+              const isMenuOpen = menuOpen?.id === o.id;
+              const openMenu = (e: React.MouseEvent<HTMLButtonElement>) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                setMenuOpen(isMenuOpen ? null : { id: o.id, rect, el: e.currentTarget });
+              };
               return (
                 <motion.tr key={o.id} initial={{ opacity: 0, y: 2 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
                   className="hover:bg-navy-50/40 transition-colors cursor-pointer relative" onClick={() => onSelect(o)}>
@@ -207,39 +215,16 @@ export function ObligationTable({
                       <span className="text-[9px] text-gray-500 tabular-nums">{o.aiRiskPrediction}%</span>
                     </div>
                   </td>
-                  <td className="py-2.5 px-2.5 relative" onClick={(e) => e.stopPropagation()}>
+                  <td className="py-2.5 px-2.5" onClick={(e) => e.stopPropagation()}>
                     <button
-                      onClick={() => setMenuOpen(isMenuOpen ? null : o.id)}
+                      type="button"
+                      onClick={openMenu}
                       className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-navy-700 transition-colors"
                       aria-label="Actions"
+                      aria-expanded={isMenuOpen}
                     >
                       <MoreHorizontal className="w-3.5 h-3.5" />
                     </button>
-                    {isMenuOpen && (
-                      <>
-                        <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(null)} />
-                        {/* Flip menu upward for last 2 rows to avoid overflow */}
-                        <div className={`absolute right-0 z-20 w-44 bg-white rounded-lg border border-gray-200 shadow-lg py-1 ${pageData.length - i <= 2 ? "bottom-full mb-1" : "top-8"}`}>
-                          <ActionItem icon={Eye} label="View" onClick={() => { setMenuOpen(null); onSelect(o); }} />
-                          <ActionItem icon={Edit3} label="Edit" onClick={() => { setMenuOpen(null); onSelect(o); }} />
-                          {!isTerminal(o.status) && (
-                            <>
-                              <ActionItem icon={CheckCircle2} label="Complete" onClick={() => { setMenuOpen(null); onComplete?.(o.id); }} />
-                              <ActionItem icon={XCircle} label="Cancel" onClick={() => { setMenuOpen(null); onCancel?.(o.id); }} />
-                            </>
-                          )}
-                          {o.status !== "archived" && (
-                            <ActionItem icon={Archive} label="Archive" onClick={() => { setMenuOpen(null); onArchive?.(o.id); }} />
-                          )}
-                          <ActionItem icon={History} label="Audit History" onClick={() => { setMenuOpen(null); onViewAudit?.(o.id); }} />
-                          {isAdmin && (
-                            <div className="border-t border-gray-100 mt-1 pt-1">
-                              <ActionItem icon={Trash2} label="Delete Permanently" onClick={() => { setMenuOpen(null); onDelete?.(o.id); }} danger />
-                            </div>
-                          )}
-                        </div>
-                      </>
-                    )}
                   </td>
                 </motion.tr>
               );
@@ -247,6 +232,35 @@ export function ObligationTable({
           </tbody>
         </table>
       </div>
+
+      {menuOpen && menuObligation && (
+        <AnchoredMenu
+          open
+          anchorRect={menuOpen.rect}
+          anchorEl={menuOpen.el}
+          onClose={() => setMenuOpen(null)}
+          width={176}
+        >
+          <ActionItem icon={Eye} label="View" onClick={() => { setMenuOpen(null); onSelect(menuObligation); }} />
+          <ActionItem icon={Edit3} label="Edit" onClick={() => { setMenuOpen(null); onSelect(menuObligation); }} />
+          {!isTerminal(menuObligation.status) && (
+            <>
+              <ActionItem icon={CheckCircle2} label="Complete" onClick={() => { setMenuOpen(null); onComplete?.(menuObligation.id); }} />
+              <ActionItem icon={XCircle} label="Cancel" onClick={() => { setMenuOpen(null); onCancel?.(menuObligation.id); }} />
+            </>
+          )}
+          {menuObligation.status !== "archived" && (
+            <ActionItem icon={Archive} label="Archive" onClick={() => { setMenuOpen(null); onArchive?.(menuObligation.id); }} />
+          )}
+          <ActionItem icon={History} label="Audit History" onClick={() => { setMenuOpen(null); onViewAudit?.(menuObligation.id); }} />
+          {isAdmin && (
+            <div className="border-t border-gray-100 dark:border-navy-700 mt-1 pt-1">
+              <ActionItem icon={Trash2} label="Delete Permanently" onClick={() => { setMenuOpen(null); onDelete?.(menuObligation.id); }} danger />
+            </div>
+          )}
+        </AnchoredMenu>
+      )}
+
       {filtered.length === 0 && <div className="text-center py-12 text-gray-400"><FileText className="w-8 h-8 mx-auto mb-2" /><p className="text-xs font-medium">No obligations match your filters</p></div>}
       {filtered.length > 0 && (
         <div className="px-4 py-2 border-t border-gray-100 flex items-center justify-between">

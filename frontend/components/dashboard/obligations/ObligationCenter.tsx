@@ -10,9 +10,10 @@ import { ObligationAiInsights } from "./AiInsights";
 import { SlaPerformanceChart, SlaVendorTable, FinancialExposurePanel, ObligationTimeline } from "./SlaCenter";
 import { ObligationDetailDrawer } from "./ObligationDetailDrawer";
 import { CreateObligationModal } from "./CreateObligationModal";
+import { CompleteObligationModal } from "./CompleteObligationModal";
 import { ObligationFilterBar } from "./ObligationFilterBar";
 import type { ObligationRecord, ObligationKpi, ObligationInsight, SlaMetric, FinancialExposure, TimelineEvent, AuditLogEntry } from "./types";
-import type { ObligationResponse, SlaMetricResponse, FinancialExposureResponse } from "@/services/api/obligations";
+import type { ObligationResponse, SlaMetricResponse, FinancialExposureResponse, ObligationAuditLogResponse } from "@/services/api/obligations";
 import {
   useObligations, useObligationKpis, useSlaPerformance, useSlaBreaches,
   useVendorRisk, useSlaPredictions, useOverdue, useUpcoming,
@@ -61,6 +62,10 @@ function toObligationRecord(o: ObligationResponse): ObligationRecord {
     createdAt: o.created_at ?? "",
     lastModified: o.updated_at ?? o.created_at ?? "",
     isFavorite: o.is_favorite ?? false,
+    // Completion auditability fields (V1.1)
+    completionNotes: o.completion_notes ?? undefined,
+    completedBy: o.completed_by ?? undefined,
+    evidenceAttachmentCount: o.evidence_attachment_count ?? 0,
   };
 }
 
@@ -135,6 +140,7 @@ export function ObligationCenter() {
   const [searchQuery, setSearchQuery] = useState("");
   const [auditObligationId, setAuditObligationId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [completeTarget, setCompleteTarget] = useState<ObligationRecord | null>(null);
 
   // ── Auto-select obligation from URL query param ──────────────
   const obligationIdParam = searchParams.get("obligationId");
@@ -201,6 +207,25 @@ export function ObligationCenter() {
     [obligationsData],
   );
 
+  // ── Audit-based lifecycle events for timeline ─────────────────
+  const { data: auditEventsData } = useQuery({
+    queryKey: [...obligationKeys.all, "audit-events", "recent"],
+    queryFn: async () => {
+      // Fetch audit history for the most recent obligations to populate timeline
+      const recentObligations = obligations.slice(0, 10);
+      const allEntries: ObligationAuditLogResponse[] = [];
+      for (const ob of recentObligations) {
+        try {
+          const entries = await obligationsService.getAuditHistory(ob.id);
+          if (Array.isArray(entries)) allEntries.push(...entries);
+        } catch { /* skip */ }
+      }
+      return allEntries;
+    },
+    enabled: obligations.length > 0,
+    staleTime: 30_000,
+  });
+
   // Auto-select obligation from URL query param once data is loaded
   React.useEffect(() => {
     if (obligationIdParam && obligations.length > 0) {
@@ -242,19 +267,35 @@ export function ObligationCenter() {
       description: `Level ${e.escalation_level} escalation to ${e.escalated_to}`,
       event_date: e.created_at ?? "", status: "escalated" as const, vendor: "", obligation_id: e.obligation_id ?? "",
     }));
+    // Lifecycle events from audit log
+    const lifecycle = (auditEventsData ?? []).map((a: ObligationAuditLogResponse) => ({
+      id: `lifecycle-${a.id}`,
+      title: a.action === "obligation.created" ? "Obligation Created"
+        : a.action === "obligation.completed" ? "Obligation Completed"
+        : a.action === "obligation.reopened" ? "Obligation Reopened"
+        : a.action === "obligation.archived" ? "Obligation Archived"
+        : a.action === "obligation.cancelled" ? "Obligation Cancelled"
+        : a.action === "obligation.updated" ? "Obligation Updated"
+        : (a.action?.replace(/_/g, " ") ?? "Event"),
+      description: a.comment || (a.action?.replace(/_/g, " ") ?? ""),
+      event_date: a.created_at ?? "",
+      status: "completed" as const,
+      vendor: "",
+      obligation_id: a.obligation_id ?? "",
+    }));
     // Combine, sort by date descending, limit to 20
-    const combined = [...overdue, ...upcoming, ...escalations].sort(
+    const combined = [...overdue, ...upcoming, ...escalations, ...lifecycle].sort(
       (a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime(),
     );
     return combined.slice(0, 20).map(toTimelineEvent);
-  }, [overdueData, upcomingData, escalationData]);
+  }, [overdueData, upcomingData, escalationData, auditEventsData]);
 
   // ── KPI Cards ─────────────────────────────────────────────────
   const clauseKpis: ObligationKpi[] = useMemo(() => {
     if (!kpisData) return [];
     return [
       { id: "total", label: "Total Obligations", value: kpisData.total_obligations.toString(), trend: 0, trendDirection: "neutral" as const, icon: "ClipboardCheck", color: "from-navy-600 to-navy-800", severity: "info" as const, sparklineData: [10, 20, 15, 25, 30, 28, kpisData.total_obligations], tooltip: "Total obligations in registry" },
-      { id: "active", label: "Active", value: kpisData.active_count.toString(), trend: 5, trendDirection: "up" as const, icon: "ArrowUpCircle", color: "from-blue-500 to-blue-700", severity: "info" as const, sparklineData: [5, 8, 6, 10, 12, 11, kpisData.active_count], tooltip: "Active obligations in progress" },
+      { id: "in_progress", label: "In Progress", value: kpisData.active_count.toString(), trend: 5, trendDirection: "up" as const, icon: "ArrowUpCircle", color: "from-blue-500 to-blue-700", severity: "info" as const, sparklineData: [5, 8, 6, 10, 12, 11, kpisData.active_count], tooltip: "Obligations in progress" },
       { id: "overdue", label: "Overdue", value: kpisData.overdue_count.toString(), trend: -8, trendDirection: "down" as const, icon: "AlertTriangle", color: "from-red-500 to-red-700", severity: "critical" as const, sparklineData: [8, 10, 7, 9, 6, 5, kpisData.overdue_count], tooltip: "Overdue obligations requiring attention" },
       { id: "escalated", label: "Escalated", value: kpisData.escalated_count.toString(), trend: 12, trendDirection: "up" as const, icon: "AlertOctagon", color: "from-purple-500 to-purple-700", severity: "warning" as const, sparklineData: [2, 3, 5, 4, 6, 7, kpisData.escalated_count], tooltip: "Escalated obligations" },
       { id: "completed", label: "Completed", value: kpisData.completed_count.toString(), trend: 15, trendDirection: "up" as const, icon: "CheckCircle", color: "from-emerald-500 to-emerald-700", severity: "success" as const, sparklineData: [5, 8, 10, 12, 15, 18, kpisData.completed_count], tooltip: "Completed obligations this period" },
@@ -440,7 +481,10 @@ export function ObligationCenter() {
         obligations={filteredObligations}
         onSelect={setSelectedObligation}
         onToggleFavorite={toggleFavorite}
-        onComplete={(id) => completeMutation.mutate(id)}
+        onComplete={(id) => {
+          const ob = obligations.find((o) => o.id === id);
+          if (ob) setCompleteTarget(ob);
+        }}
         onCancel={(id) => cancelMutation.mutate(id)}
         onArchive={(id) => archiveMutation.mutate(id)}
         onDelete={(id) => { if (confirm("Permanently delete this obligation? This cannot be undone.")) deleteMutation.mutate(id); }}
@@ -468,6 +512,23 @@ export function ObligationCenter() {
       {/* Detail Drawer */}
       <ObligationDetailDrawer obligation={selectedObligation} onClose={() => setSelectedObligation(null)} onToggleFavorite={toggleFavorite} />
       <CreateObligationModal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} onCreated={handleRefresh} />
+
+      {/* Complete Obligation Modal */}
+      {completeTarget && (
+        <CompleteObligationModal
+          obligationId={completeTarget.id}
+          obligationName={completeTarget.name}
+          currentUserName={completeTarget.assignee || "Current User"}
+          onComplete={() => {
+            queryClient.invalidateQueries({ queryKey: ["obligations"] });
+            queryClient.invalidateQueries({ queryKey: obligationKeys.kpis() });
+            queryClient.invalidateQueries({ queryKey: obligationKeys.overdue() });
+            queryClient.invalidateQueries({ queryKey: obligationKeys.upcoming() });
+            setCompleteTarget(null);
+          }}
+          onClose={() => setCompleteTarget(null)}
+        />
+      )}
 
       {/* Feedback toast */}
       {feedback && (

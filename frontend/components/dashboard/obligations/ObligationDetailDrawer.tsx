@@ -2,15 +2,16 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, ClipboardCheck, Clock, AlertTriangle, DollarSign, Activity, Shield, FileText, User, Calendar, Brain, Link, ExternalLink, Loader2 } from "lucide-react";
+import { X, ClipboardCheck, Clock, AlertTriangle, DollarSign, Activity, Shield, FileText, User, Calendar, Brain, Link, ExternalLink, Loader2, CheckCircle2, XCircle, RotateCcw, Archive, Paperclip } from "lucide-react";
 import type { ObligationRecord } from "./types";
 import type { ObligationAuditLogResponse } from "@/services/api/obligations";
 import { RISK_BG, RISK_TEXT, RISK_BG_LIGHT, STATUS_CONFIG, OBLIGATION_TYPES } from "./types";
 import { obligationsService } from "@/services/api/obligations";
+import { CompleteObligationModal } from "./CompleteObligationModal";
 
-type TabId = "overview" | "timeline" | "sla" | "financial" | "compliance" | "ai" | "activity" | "related";
+type TabId = "overview" | "sla" | "financial" | "compliance" | "ai" | "activity";
 
 function TabBtn({ label, icon, active, onClick }: { label: string; icon: React.ReactNode; active: boolean; onClick: () => void }) {
   return (
@@ -28,7 +29,54 @@ interface DrawerProps {
 
 export function ObligationDetailDrawer({ obligation, onClose, onToggleFavorite }: DrawerProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [tab, setTab] = useState<TabId>("overview");
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [showCompleteModal, setShowCompleteModal] = useState(false);
+
+  // ── Action Mutations ──────────────────────────────────────────
+  const completeMut = useMutation({
+    mutationFn: (id: string) => obligationsService.completeObligation(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["obligations"] });
+      setActionLoading(null);
+    },
+    onError: () => setActionLoading(null),
+  });
+  const cancelMut = useMutation({
+    mutationFn: (id: string) => obligationsService.cancelObligation(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["obligations"] });
+      setActionLoading(null);
+    },
+    onError: () => setActionLoading(null),
+  });
+  const reopenMut = useMutation({
+    mutationFn: (id: string) => obligationsService.reopenObligation(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["obligations"] });
+      setActionLoading(null);
+    },
+    onError: () => setActionLoading(null),
+  });
+  const archiveMut = useMutation({
+    mutationFn: (id: string) => obligationsService.archiveObligation(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["obligations"] });
+      setActionLoading(null);
+    },
+    onError: () => setActionLoading(null),
+  });
+
+  const handleAction = (action: string, id: string) => {
+    setActionLoading(action);
+    if (action === "complete") completeMut.mutate(id);
+    else if (action === "cancel") cancelMut.mutate(id);
+    else if (action === "reopen") reopenMut.mutate(id);
+    else if (action === "archive") archiveMut.mutate(id);
+  };
+
+  const isPending = (a: string) => actionLoading === a || completeMut.isPending || cancelMut.isPending || reopenMut.isPending || archiveMut.isPending;
 
   return (
     <AnimatePresence>
@@ -43,20 +91,53 @@ export function ObligationDetailDrawer({ obligation, onClose, onToggleFavorite }
                 <div className="w-8 h-8 rounded-lg bg-navy-700 flex items-center justify-center"><ClipboardCheck className="w-4 h-4 text-white" /></div>
                 <div className="min-w-0"><h3 className="text-sm font-semibold text-navy-900 truncate">{obligation.name}</h3><p className="text-[10px] text-gray-500">{obligation.id} • {obligation.vendor}</p></div>
               </div>
-              <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 text-gray-400"><X className="w-4 h-4" /></button>
+              <div className="flex items-center gap-1">
+                {/* Action Buttons */}
+                {obligation.status !== "completed" && obligation.status !== "cancelled" && obligation.status !== "archived" && (
+                  <button onClick={() => setShowCompleteModal(true)} disabled={isPending("complete")}
+                    className="flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded bg-green-100 text-green-700 hover:bg-green-200 disabled:opacity-50 transition-colors"
+                    title="Mark as completed with evidence">
+                    {isPending("complete") ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                    Complete
+                  </button>
+                )}
+                {obligation.status === "active" && (
+                  <button onClick={() => handleAction("cancel", obligation.id)} disabled={isPending("cancel")}
+                    className="flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50 transition-colors"
+                    title="Cancel obligation">
+                    {isPending("cancel") ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
+                    Cancel
+                  </button>
+                )}
+                {(obligation.status === "completed" || obligation.status === "cancelled" || obligation.status === "overdue") && (
+                  <button onClick={() => handleAction("reopen", obligation.id)} disabled={isPending("reopen")}
+                    className="flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50 transition-colors"
+                    title="Reopen obligation">
+                    {isPending("reopen") ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                    Reopen
+                  </button>
+                )}
+                {obligation.status !== "archived" && (
+                  <button onClick={() => handleAction("archive", obligation.id)} disabled={isPending("archive")}
+                    className="flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50 transition-colors"
+                    title="Archive obligation">
+                    {isPending("archive") ? <Loader2 className="w-3 h-3 animate-spin" /> : <Archive className="w-3 h-3" />}
+                    Archive
+                  </button>
+                )}
+                <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 text-gray-400"><X className="w-4 h-4" /></button>
+              </div>
             </div>
             <div className="px-4 py-2 border-b border-gray-100 flex gap-1 overflow-x-auto">
               <TabBtn label="Overview" icon={<ClipboardCheck className="w-3 h-3" />} active={tab === "overview"} onClick={() => setTab("overview")} />
-              <TabBtn label="Timeline" icon={<Clock className="w-3 h-3" />} active={tab === "timeline"} onClick={() => setTab("timeline")} />
               <TabBtn label="SLA" icon={<Activity className="w-3 h-3" />} active={tab === "sla"} onClick={() => setTab("sla")} />
               <TabBtn label="Financial" icon={<DollarSign className="w-3 h-3" />} active={tab === "financial"} onClick={() => setTab("financial")} />
               <TabBtn label="Compliance" icon={<Shield className="w-3 h-3" />} active={tab === "compliance"} onClick={() => setTab("compliance")} />
               <TabBtn label="AI" icon={<Brain className="w-3 h-3" />} active={tab === "ai"} onClick={() => setTab("ai")} />
-              <TabBtn label="Activity" icon={<Activity className="w-3 h-3" />} active={tab === "activity"} onClick={() => setTab("activity")} />
+              <TabBtn label="Activity" icon={<Clock className="w-3 h-3" />} active={tab === "activity"} onClick={() => setTab("activity")} />
             </div>
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               {tab === "overview" && <OverviewTab o={obligation} />}
-              {tab === "timeline" && <TimelineTab obligationId={obligation.id} />}
               {tab === "sla" && <SlaTab o={obligation} />}
               {tab === "financial" && <FinancialTab o={obligation} />}
               {tab === "compliance" && <ComplianceTab />}
@@ -65,9 +146,39 @@ export function ObligationDetailDrawer({ obligation, onClose, onToggleFavorite }
             </div>
           </motion.div>
         </>
+
+      )}
+
+      {/* Complete Obligation Modal */}
+      {showCompleteModal && (
+        <CompleteObligationModal
+          obligationId={obligation.id}
+          obligationName={obligation.name}
+          currentUserName={obligation.assignee || "Current User"}
+          onComplete={() => {
+            queryClient.invalidateQueries({ queryKey: ["obligations"] });
+            queryClient.invalidateQueries({ queryKey: ["obligations", "kpis"] });
+            queryClient.invalidateQueries({ queryKey: ["obligations", "overdue"] });
+            queryClient.invalidateQueries({ queryKey: ["obligations", "upcoming"] });
+            setShowCompleteModal(false);
+          }}
+          onClose={() => setShowCompleteModal(false)}
+        />
       )}
     </AnimatePresence>
   );
+}
+
+/** Format ISO timestamp to user-friendly date (e.g., "Jun 10, 2026"). */
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  } catch {
+    return "—";
+  }
 }
 
 function OverviewTab({ o }: { o: ObligationRecord }) {
@@ -121,8 +232,8 @@ function OverviewTab({ o }: { o: ObligationRecord }) {
         <MetaRow label="Vendor" value={o.vendor} />
         <MetaRow label="Owner" value={o.owner} icon={<User className="w-3 h-3" />} />
         <MetaRow label="Assignee" value={o.assignee} />
-        <MetaRow label="Due Date" value={o.dueDate} icon={<Calendar className="w-3 h-3" />} />
-        {o.completedDate && <MetaRow label="Completed" value={o.completedDate} icon={<Calendar className="w-3 h-3" />} />}
+        <MetaRow label="Due Date" value={fmtDate(o.dueDate)} icon={<Calendar className="w-3 h-3" />} />
+        {o.completedDate && <MetaRow label="Completed" value={fmtDate(o.completedDate)} icon={<Calendar className="w-3 h-3" />} />}
         <MetaRow label="Risk Score" value={<RiskBadge score={o.riskScore} />} />
         <MetaRow label="Financial Impact" value={`$${o.financialImpact.toLocaleString()}`} icon={<DollarSign className="w-3 h-3" />} />
         <MetaRow label="Clause Reference" value={
@@ -138,63 +249,103 @@ function OverviewTab({ o }: { o: ObligationRecord }) {
         <MetaRow label="Escalation Level" value={o.escalationLevel > 0 ? `Level ${o.escalationLevel}` : "None"} />
         <MetaRow label="Attachments" value={o.attachments.toString()} />
       </div>
+
+      {/* Completion Information — only shown when completed */}
+      {o.status === "completed" && (
+        <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-200">
+          <div className="flex items-center gap-2 mb-3">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            <span className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wider">Completion Information</span>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-gray-500 flex items-center gap-1"><User className="w-3 h-3" /> Completed By</span>
+              <span className="text-[10px] font-medium text-gray-800">{o.completedBy || "—"}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-gray-500 flex items-center gap-1"><Calendar className="w-3 h-3" /> Completion Date</span>
+              <span className="text-[10px] font-medium text-gray-800">{fmtDate(o.completedDate) || "—"}</span>
+            </div>
+            {o.completionNotes && (
+              <div className="pt-2 border-t border-emerald-200">
+                <span className="text-[10px] text-gray-500 block mb-1">Completion Notes</span>
+                <p className="text-[11px] text-gray-700 leading-relaxed bg-white rounded p-2 border border-emerald-100">
+                  {o.completionNotes}
+                </p>
+              </div>
+            )}
+            {(o.evidenceAttachmentCount ?? 0) > 0 && (
+              <EvidenceFilesList obligationId={o.id} />
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function TimelineTab({ obligationId }: { obligationId: string }) {
-  const { data: auditEntries, isLoading } = useQuery({
-    queryKey: ["obligation-timeline", obligationId],
-    queryFn: () => obligationsService.getAuditHistory(obligationId),
+/** Fetches and displays clickable evidence file list for a completed obligation. */
+function EvidenceFilesList({ obligationId }: { obligationId: string }) {
+  const { data: evidence, isLoading } = useQuery({
+    queryKey: ["obligation-evidence", obligationId],
+    queryFn: () => obligationsService.listEvidence(obligationId),
     enabled: !!obligationId,
   });
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-8">
-        <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
+      <div className="flex items-center gap-2 pt-2 border-t border-emerald-200">
+        <Loader2 className="w-3 h-3 text-gray-400 animate-spin" />
+        <span className="text-[10px] text-gray-400">Loading evidence...</span>
       </div>
     );
   }
 
-  const entries = Array.isArray(auditEntries) ? auditEntries : [];
+  const files = Array.isArray(evidence) ? evidence : [];
 
-  if (entries.length === 0) {
-    return (
-      <div className="flex flex-col items-center py-8 text-center">
-        <Clock className="w-8 h-8 text-gray-300 mb-2" />
-        <p className="text-xs text-gray-400">No timeline events yet</p>
-        <p className="text-[10px] text-gray-300 mt-1">Events will appear as the obligation progresses through its lifecycle</p>
-      </div>
-    );
-  }
+  if (files.length === 0) return null;
 
   return (
-    <div className="space-y-2">
-      <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">Obligation Timeline</p>
-      {entries.map((a: ObligationAuditLogResponse, i: number) => (
-        <div key={i} className="flex items-start gap-2.5">
-          <div className="flex flex-col items-center">
-            <div className={`w-2 h-2 rounded-full ${
-              a.action.includes("created") ? "bg-green-500" :
-              a.action.includes("completed") ? "bg-blue-500" :
-              a.action.includes("overdue") ? "bg-red-500" :
-              a.action.includes("assigned") || a.action.includes("reassigned") ? "bg-purple-500" :
-              a.action.includes("reminder") ? "bg-amber-500" :
-              a.action.includes("cancelled") || a.action.includes("archived") ? "bg-gray-500" :
-              "bg-navy-500"
-            }`} />
-            {i < entries.length - 1 && <div className="w-px h-5 bg-gray-200" />}
+    <div className="pt-2 border-t border-emerald-200">
+      <span className="text-[10px] text-gray-500 flex items-center gap-1 mb-1.5">
+        <Paperclip className="w-3 h-3" /> Evidence Attachments ({files.length})
+      </span>
+      <div className="space-y-1">
+        {files.map((f) => (
+          <div key={f.id} className="flex items-center justify-between px-2 py-1.5 bg-white rounded border border-emerald-100">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <FileText className="w-3 h-3 text-emerald-500 shrink-0" />
+              {f.file_url ? (
+                <a
+                  href={f.file_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10px] text-blue-600 hover:text-blue-800 hover:underline truncate"
+                  title={f.file_name}
+                >
+                  {f.file_name}
+                </a>
+              ) : (
+                <span className="text-[10px] text-gray-700 truncate" title={f.file_name}>
+                  {f.file_name}
+                </span>
+              )}
+              <span className="text-[8px] text-gray-400 uppercase shrink-0">({f.file_type})</span>
+            </div>
+            {f.file_url && (
+              <a
+                href={f.file_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0 text-gray-400 hover:text-blue-600"
+                title="Download"
+              >
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
           </div>
-          <div className="pb-1">
-            <p className="text-[11px] font-medium text-gray-800">
-              {a.action.replace(/^obligation\./, "").replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
-            </p>
-            <p className="text-[9px] text-gray-400">{a.actor || "System"} • {(a.created_at || "").slice(0, 10)}</p>
-            {a.comment && <p className="text-[9px] text-gray-500 mt-0.5 italic">{a.comment}</p>}
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

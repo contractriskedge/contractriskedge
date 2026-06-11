@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, File, Form, Query, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.obligations.schemas import (
@@ -17,6 +17,7 @@ from app.domains.obligations.schemas import (
     AiReviewRequest, ObligationReminderCreate, ObligationReminderResponse,
     ObligationEscalationCreate, NotificationHistoryResponse,
     SlaMetricResponse, SlaBreachResponse, VendorRiskResponse, SlaPredictionResponse,
+    ObligationCompleteRequest,
 )
 from app.domains.obligations.service import ObligationService
 from app.dependencies import get_db, get_tenant_id, get_current_user
@@ -506,11 +507,58 @@ async def delete_obligation(
 @router.post("/{obligation_id}/complete", response_model=None)
 async def complete_obligation(
     obligation_id: str,
+    body: ObligationCompleteRequest,
     service: ObligationService = Depends(get_obligation_service),
+    user: UserContext = Depends(get_current_user),
     _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
 ):
-    """Mark an obligation as completed."""
-    return (await service.complete_obligation(obligation_id)).model_dump()
+    """Mark an obligation as completed with audit evidence.
+
+    Requires completion notes explaining how the obligation was satisfied.
+    Records completion metadata, links evidence attachments, and emits
+    OBLIGATION_COMPLETED audit event and contract timeline entry.
+    """
+    return (await service.complete_obligation(
+        obligation_id=obligation_id,
+        completion_notes=body.completion_notes,
+        completion_date=body.completion_date,
+        evidence_attachment_ids=body.evidence_attachment_ids,
+        completed_by_user_id=user.id,
+    )).model_dump()
+
+
+@router.get("/{obligation_id}/evidence", response_model=None)
+async def list_evidence(
+    obligation_id: str,
+    service: ObligationService = Depends(get_obligation_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """List evidence attachments for an obligation with download URLs."""
+    return await service.list_evidence(obligation_id)
+
+
+@router.post("/{obligation_id}/evidence", response_model=None)
+async def upload_evidence(
+    obligation_id: str,
+    file: UploadFile = File(...),
+    description: Optional[str] = Form(None),
+    service: ObligationService = Depends(get_obligation_service),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Upload an evidence file for an obligation.
+
+    Stores the file reference in the obligation_evidence table.
+    The file is saved to the local uploads directory.
+    Returns the created evidence record with its ID for later use
+    in the completion flow.
+    """
+    return await service.upload_evidence(
+        obligation_id=obligation_id,
+        file=file,
+        description=description,
+        uploaded_by=user.id,
+    )
 
 
 @router.post("/{obligation_id}/cancel", response_model=None)

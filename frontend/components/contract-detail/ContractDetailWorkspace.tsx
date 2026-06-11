@@ -33,12 +33,13 @@
 
 import React, { useState, useMemo } from "react";
 import { useRouter, notFound } from "next/navigation";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, FileText, Brain, Shield, AlertTriangle, CheckCircle2,
   Clock, User, RefreshCw, Download, Share2, ExternalLink,
   Edit3, GitCompare, MessageSquare, Activity, Calendar,
   Building2, Globe, Loader2, ChevronDown, ChevronRight, ChevronUp,
-  BarChart3, BookOpen, XCircle, DollarSign, GitBranch,
+  BarChart3, BookOpen, XCircle, DollarSign, GitBranch, Lock,
 } from "lucide-react";
 import {
   useContractDetail,
@@ -51,6 +52,7 @@ import {
   useContractObligationActivity,
 } from "./hooks";
 import { useRiskBreakdown } from "@/services/hooks";
+import { reviewService } from "@/services/api/reviews";
 import type { GovernanceTraceability } from "@/services/api/client";
 import { RelatedReviewsPanel } from "./RelatedReviewsPanel";
 import { LifecycleHistoryPanel } from "./LifecycleHistoryPanel";
@@ -69,7 +71,26 @@ interface ContractDetailWorkspaceProps {
 
 export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"overview" | "insights" | "clauses" | "activity" | "versions" | "reviews" | "lifecycle" | "workflow">("overview");
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // ── Action Mutations ──────────────────────────────────────────
+  const approveMut = useMutation({
+    mutationFn: () => reviewService.approve(contractId, { decision: "approved", comments: "Approved from Contract 360" }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["contract-detail"] }); setActionLoading(null); },
+    onError: () => setActionLoading(null),
+  });
+  const rejectMut = useMutation({
+    mutationFn: () => reviewService.approve(contractId, { decision: "rejected", comments: "Rejected from Contract 360" }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["contract-detail"] }); setActionLoading(null); },
+    onError: () => setActionLoading(null),
+  });
+  const finalizeMut = useMutation({
+    mutationFn: () => reviewService.finalize(contractId),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["contract-detail"] }); setActionLoading(null); },
+    onError: () => setActionLoading(null),
+  });
 
   // ── Data Fetching (repository-only) ──────────────────────────────────
 
@@ -245,7 +266,23 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
           <div className="flex items-center gap-2">
             <FileText className="w-4 h-4 text-navy-600 dark:text-navy-300" />
             <div>
-              <h1 className="text-sm font-semibold text-navy-900 dark:text-white leading-tight">{contract.name}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-sm font-semibold text-navy-900 dark:text-white leading-tight">{contract.name}</h1>
+                {/* Lifecycle Status Badge */}
+                <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                  contract.status === "active" || contract.status === "executed" ? "bg-green-100 text-green-700" :
+                  contract.status === "expiring_soon" ? "bg-yellow-100 text-yellow-700" :
+                  contract.status === "expired" || contract.status === "critical_overdue" ? "bg-red-100 text-red-700" :
+                  contract.status === "archived" || contract.status === "closed" ? "bg-gray-100 text-gray-600" :
+                  contract.status === "approved" || contract.status === "finalized" ? "bg-blue-100 text-blue-700" :
+                  contract.status === "draft" || contract.status === "ai_analyzed" ? "bg-gray-100 text-gray-500" :
+                  "bg-gray-100 text-gray-600"
+                }`}>
+                  {contract.status === "expiring_soon" ? "Expiring" :
+                   contract.status === "critical_overdue" ? "Expired" :
+                   contract.status.replace(/_/g, " ")}
+                </span>
+              </div>
               <p className="text-[10px] text-gray-500 dark:text-gray-400">
                 {contract.contract_number ? `${contract.contract_number} · ` : ""}
                 {contract.filename} · {contract.total_pages} pages · v{versions.length > 0 ? versions[0].version_number : 1}
@@ -263,6 +300,56 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
           <button onClick={openNegotiation} className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-md bg-white dark:bg-navy-700 border border-gray-200 dark:border-navy-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-600 transition-colors">
             <GitCompare className="w-3.5 h-3.5" /> Negotiate
           </button>
+          <div className="w-px h-5 bg-gray-200 dark:bg-navy-700 mx-1" />
+          {/* Approve / Reject / Finalize actions — only show when review status allows */}
+          {contract.status && ["in_review", "legal_review", "security_review", "procurement_review", "negotiation", "escalated", "exec_approval"].includes(contract.status) && (
+            <>
+              <button
+                onClick={() => { setActionLoading("approve"); approveMut.mutate(); }}
+                disabled={actionLoading === "approve" || approveMut.isPending}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition-colors shadow-sm"
+                title="Approve review"
+              >
+                {approveMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                Approve
+              </button>
+              <button
+                onClick={() => { setActionLoading("reject"); rejectMut.mutate(); }}
+                disabled={actionLoading === "reject" || rejectMut.isPending}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-md bg-white border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                title="Reject review"
+              >
+                {rejectMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+                Reject
+              </button>
+            </>
+          )}
+          {contract.status === "approved" && (
+            <button
+              onClick={() => { setActionLoading("finalize"); finalizeMut.mutate(); }}
+              disabled={actionLoading === "finalize" || finalizeMut.isPending}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-md bg-navy-700 text-white hover:bg-navy-800 disabled:opacity-50 transition-colors shadow-sm"
+              title="Finalize approved review"
+            >
+              {finalizeMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Lock className="w-3.5 h-3.5" />}
+              Finalize
+            </button>
+          )}
+          {approveMut.isError && (
+            <span className="text-[9px] text-red-600 max-w-[180px]" title={approveMut.error instanceof Error ? approveMut.error.message : "Error"}>
+              {(approveMut.error instanceof Error ? approveMut.error.message : "Action failed").slice(0, 60)}…
+            </span>
+          )}
+          {rejectMut.isError && (
+            <span className="text-[9px] text-red-600 max-w-[180px]" title={rejectMut.error instanceof Error ? rejectMut.error.message : "Error"}>
+              {(rejectMut.error instanceof Error ? rejectMut.error.message : "Action failed").slice(0, 60)}…
+            </span>
+          )}
+          {finalizeMut.isError && (
+            <span className="text-[9px] text-red-600 max-w-[180px]" title={finalizeMut.error instanceof Error ? finalizeMut.error.message : "Error"}>
+              {(finalizeMut.error instanceof Error ? finalizeMut.error.message : "Action failed").slice(0, 60)}…
+            </span>
+          )}
           <div className="w-px h-5 bg-gray-200 dark:bg-navy-700 mx-1" />
           <button
             onClick={handleDownload}

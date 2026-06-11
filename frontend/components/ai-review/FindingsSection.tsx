@@ -44,11 +44,12 @@ export function FindingsSection() {
 
   // ── Map finding category → backend mitigation type ────────────────────
   const getMitigationParams = useCallback((finding: Finding) => {
-    // Map clause_type to canonical category key
+    // Map clause_type to canonical category key (must match backend MITIGATION_EFFECTIVENESS_REGISTRY)
     const categoryMap: Record<string, string> = {
       liability: "liability_indemnity",
       indemnification: "liability_indemnity",
       data_protection: "data_protection",
+      data_privacy: "data_protection",
       confidentiality: "confidentiality",
       ip: "intellectual_property",
       intellectual_property: "intellectual_property",
@@ -65,18 +66,31 @@ export function FindingsSection() {
       insurance: "insurance",
       non_compete: "non_compete_exclusivity",
       exclusivity: "non_compete_exclusivity",
+      other: "liability_indemnity",
     };
-    // Map clause_type to a default mitigation type
+    // Map clause_type to a default mitigation type (must match backend clause_templates keys)
     const mitMap: Record<string, string> = {
       liability: "adding_liability_cap",
       indemnification: "narrowing_indemnity_scope",
       data_protection: "adding_dpa",
+      data_privacy: "adding_dpa",
       confidentiality: "broadening_confidentiality",
       ip: "restricting_derivative_works",
       intellectual_property: "restricting_derivative_works",
       term: "extending_notice_period",
+      termination: "adding_for_cause_termination",
+      payment: "adding_price_protection",
+      audit: "adding_audit_rights",
       sla: "adding_sla_guarantees",
+      support: "adding_service_levels",
       assignment: "adding_change_of_control",
+      force_majeure: "clarifying_warranty_scope",
+      governing_law: "clarifying_governing_law",
+      jurisdiction: "clarifying_governing_law",
+      insurance: "adding_liability_cap",
+      non_compete: "narrowing_ip_license",
+      exclusivity: "narrowing_ip_license",
+      other: "adding_liability_cap",
     };
     const clauseType = (finding.clause_type || "").toLowerCase();
     return {

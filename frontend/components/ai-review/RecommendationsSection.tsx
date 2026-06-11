@@ -40,17 +40,33 @@ export function RecommendationsSection() {
       const finding = findings?.find(f => f.finding_id === rec.finding_id);
       const categoryMap: Record<string, string> = {
         liability: "liability_indemnity", indemnification: "liability_indemnity",
-        data_protection: "data_protection", confidentiality: "confidentiality",
+        data_protection: "data_protection", data_privacy: "data_protection",
+        confidentiality: "confidentiality",
         ip: "intellectual_property", intellectual_property: "intellectual_property",
-        term: "term_termination", sla: "sla_support",
+        term: "term_termination", termination: "term_termination",
+        payment: "payment_audit", audit: "payment_audit",
+        sla: "sla_support", support: "sla_support",
         assignment: "assignment_change_control",
+        force_majeure: "force_majeure",
+        governing_law: "governing_law_jurisdiction", jurisdiction: "governing_law_jurisdiction",
+        insurance: "insurance",
+        non_compete: "non_compete_exclusivity", exclusivity: "non_compete_exclusivity",
+        other: "liability_indemnity",
       };
       const mitMap: Record<string, string> = {
         liability: "adding_liability_cap", indemnification: "narrowing_indemnity_scope",
-        data_protection: "adding_dpa", confidentiality: "broadening_confidentiality",
+        data_protection: "adding_dpa", data_privacy: "adding_dpa",
+        confidentiality: "broadening_confidentiality",
         ip: "restricting_derivative_works", intellectual_property: "restricting_derivative_works",
-        term: "extending_notice_period", sla: "adding_sla_guarantees",
+        term: "extending_notice_period", termination: "adding_for_cause_termination",
+        payment: "adding_price_protection", audit: "adding_audit_rights",
+        sla: "adding_sla_guarantees", support: "adding_service_levels",
         assignment: "adding_change_of_control",
+        force_majeure: "clarifying_warranty_scope",
+        governing_law: "clarifying_governing_law", jurisdiction: "clarifying_governing_law",
+        insurance: "adding_liability_cap",
+        non_compete: "narrowing_ip_license", exclusivity: "narrowing_ip_license",
+        other: "adding_liability_cap",
       };
       const ct = (finding?.clause_type || "").toLowerCase();
       return api.post(`/reviews/${selectedReviewId}/generate-mitigation-redline`, {

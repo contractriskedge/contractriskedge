@@ -107,6 +107,8 @@ _CLAUSE_TYPE_CANONICALIZATION: dict[str, str] = {
     "derivative_works": "intellectual_property",
     "work_product": "intellectual_property",
     "ip_transfer": "intellectual_property",
+    "no_license": "intellectual_property",
+    "no_licence": "intellectual_property",
     # Liability
     "liability": "liability",
     "limitation_of_liability": "liability",
@@ -145,6 +147,13 @@ _CLAUSE_TYPE_CANONICALIZATION: dict[str, str] = {
     "non_disclosure": "confidentiality",
     "nda": "confidentiality",
     "confidential_information": "confidentiality",
+    "return_of_information": "confidentiality",
+    "return_of_materials": "confidentiality",
+    "return_of_confidential_information": "confidentiality",
+    "remedies": "confidentiality",
+    "exclusions": "confidentiality",
+    "residual_knowledge": "confidentiality",
+    "residuals": "confidentiality",
     # Insurance
     "insurance": "insurance",
     # Force Majeure

@@ -35,6 +35,8 @@ export function severityColor(severity: string): typeof SEMANTIC_COLORS[string] 
 export interface ReviewSummary {
   review_id: string;
   contract_name: string;
+  contract_number: string | null;
+  original_filename: string | null;
   vendor: string;
   document_type: string;
   status: ReviewStatus;
@@ -335,7 +337,7 @@ export interface ReviewContextState {
   error: string | null;
 }
 
-export type ReviewSection = "summary" | "overview" | "findings" | "redline" | "versions" | "policy" | "recommendations" | "risk_reduction" | "workflow" | "explainability" | "audit" | "governance" | "history";
+export type ReviewSection = "summary" | "overview" | "findings" | "redline" | "versions" | "policy" | "recommendations" | "risk_reduction" | "workflow" | "explainability" | "audit" | "governance" | "history" | "obligations";
 
 // ── Keyboard Shortcuts ──────────────────────────────────────────────────────
 

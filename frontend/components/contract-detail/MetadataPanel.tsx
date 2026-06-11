@@ -299,14 +299,39 @@ export function MetadataPanel({
         <MetaRow label="Owner" value={contract.owner} icon={<User className="w-3 h-3" />} placeholder="Unassigned" />
         <MetaRow label="Status" value={
           <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${
-            contract.status === "active" ? "bg-green-100 text-green-700" :
+            contract.status === "active" || contract.status === "executed" ? "bg-green-100 text-green-700" :
             contract.status === "expiring_soon" ? "bg-yellow-100 text-yellow-700" :
-            contract.status === "expired" ? "bg-red-100 text-red-700" :
+            contract.status === "expired" || contract.status === "critical_overdue" ? "bg-red-100 text-red-700" :
+            contract.status === "archived" || contract.status === "closed" ? "bg-gray-100 text-gray-600" :
+            contract.status === "approved" || contract.status === "finalized" ? "bg-blue-100 text-blue-700" :
+            contract.status === "draft" || contract.status === "ai_analyzed" ? "bg-gray-100 text-gray-500" :
             "bg-gray-100 text-gray-600"
           }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${
+              contract.status === "active" || contract.status === "executed" ? "bg-green-500" :
+              contract.status === "expiring_soon" ? "bg-yellow-500" :
+              contract.status === "expired" || contract.status === "critical_overdue" ? "bg-red-500" :
+              contract.status === "archived" || contract.status === "closed" ? "bg-gray-400" :
+              contract.status === "approved" || contract.status === "finalized" ? "bg-blue-500" :
+              "bg-gray-400"
+            }`} />
             {contract.status.replace(/_/g, " ")}
           </span>
         } />
+        {/* Next Action Hint */}
+        {contract.status && !["archived", "closed"].includes(contract.status) && (
+          <MetaRow label="Next Action" value={
+            <span className="text-[9px] text-gray-500">
+              {["draft", "ai_analyzed"].includes(contract.status) ? "Assign reviewer to start review" :
+               contract.status === "approved" ? "Finalize to execute contract" :
+               contract.status === "finalized" ? "Execute or close contract" :
+               contract.status === "executed" && contract.status !== "expired" ? "Monitor obligations until expiry" :
+               contract.status === "expired" || contract.status === "critical_overdue" ? "Review and close contract" :
+               contract.status === "expiring_soon" ? "Review renewal terms" :
+               "Continue workflow"}
+            </span>
+          } />
+        )}
         <MetaRow label="Workflow" value={
           <span className="text-[9px] font-medium capitalize">
             {contract.workflow_stage ? contract.workflow_stage.replace(/_/g, " ") : "—"}

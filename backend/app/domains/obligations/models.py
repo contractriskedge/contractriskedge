@@ -69,6 +69,11 @@ class Obligation(Base):
     is_favorite = Column(Boolean, nullable=False, default=False)
     tags = Column(ARRAY(String), nullable=False, default=list)
     extra_metadata = Column("metadata", JSONB, nullable=True)
+    # Completion auditability fields (V1.1)
+    completion_notes = Column(Text, nullable=True)
+    completion_date = Column(DateTime(timezone=True), nullable=True)
+    completed_by = Column(UUID, nullable=True)
+    evidence_attachment_count = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

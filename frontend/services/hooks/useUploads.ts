@@ -16,7 +16,6 @@ import { uploadService } from "@/services/api/uploads";
 import { reviewKeys } from "@/services/hooks/useReviews";
 import type { UploadStatusResponse, UploadResponse } from "@/services/api/client";
 import {
-  getGlobalConnectionState,
   processingInterval,
   usePollCounter,
 } from "@/services/hooks/useAdaptivePolling";
@@ -38,13 +37,20 @@ export const uploadKeys = {
 // ── List Uploads ──────────────────────────────────────────────────
 
 export function useUploads(params?: { page?: number; page_size?: number }) {
+  const terminalStates = ["review_ready", "failed", "cancelled", "quarantined"];
+
   return useQuery({
     queryKey: uploadKeys.list(params),
     queryFn: () => uploadService.list(params),
-    staleTime: 30_000,
+    staleTime: 0,
     gcTime: 5 * 60_000,
     refetchOnWindowFocus: true,
     retry: 2,
+    refetchInterval: (query) => {
+      const rows = query.state.data?.data ?? [];
+      const hasActive = rows.some((u) => !terminalStates.includes(u.ingestion_state));
+      return hasActive ? 3_000 : false;
+    },
   });
 }
 
@@ -85,11 +91,8 @@ export function useUploadStatus(
     enabled: !!uploadId && (options?.enabled ?? true),
     refetchInterval: (query) => {
       if (!query.state.data) {
-        // No data yet — use connection-aware initial interval
-        const connState = getGlobalConnectionState();
-        if (connState === "connected") return 120_000;
-        if (connState === "reconnecting") return 10_000;
-        return 5_000;
+        // Always poll quickly until the first status snapshot arrives.
+        return 2_000;
       }
 
       const terminalStates = [
@@ -100,18 +103,9 @@ export function useUploadStatus(
         return false; // Stop polling
       }
 
-      // Active processing — use exponential backoff
-      const isProcessing = !terminalStates.includes(query.state.data.ingestion_state);
-      if (isProcessing) {
-        incrementPollCount();
-        return processingInterval(pollCount);
-      }
-
-      // WebSocket-aware fallback
-      const connState = getGlobalConnectionState();
-      if (connState === "connected") return 120_000;
-      if (connState === "reconnecting") return 10_000;
-      return 5_000;
+      // Active processing — poll frequently (do not defer to WebSocket on ingestion UI).
+      incrementPollCount();
+      return processingInterval(pollCount, { base: 2_000, max: 5_000 });
     },
     staleTime: 0,
     gcTime: 30_000,

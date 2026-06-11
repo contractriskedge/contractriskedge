@@ -31,6 +31,7 @@ export {
   useAssignReview,
   useApproveReview,
   useRejectReview,
+  useSubmitReviewDecision,
   useSubmitFeedback,
   useResolveFinding,
   useApplyRecommendation,

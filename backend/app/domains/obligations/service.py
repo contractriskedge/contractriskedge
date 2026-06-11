@@ -78,6 +78,11 @@ class ObligationService:
             is_favorite=o.is_favorite,
             tags=o.tags or [],
             extra_metadata=o.extra_metadata,
+            # Completion auditability fields (V1.1)
+            completion_notes=o.completion_notes,
+            completion_date=o.completion_date,
+            completed_by=str(o.completed_by) if o.completed_by else None,
+            evidence_attachment_count=o.evidence_attachment_count or 0,
             created_at=o.created_at,
             updated_at=o.updated_at,
         )
@@ -149,7 +154,7 @@ class ObligationService:
         if search:
             q = f"%{search}%"
             query = query.where(
-                or_(Obligation.name.ilike(q), Obligation.description.ilike(q))
+                or_(Obligation.name.ilike(q), Obligation.description.ilike(q), Obligation.completion_notes.ilike(q))
             )
         count_q = select(func.count()).select_from(query.subquery())
         total = await self.session.scalar(count_q) or 0
@@ -357,19 +362,255 @@ class ObligationService:
 
     # ── Lifecycle Actions ────────────────────────────────────────────
 
-    async def complete_obligation(self, obligation_id: str) -> ObligationResponse:
-        """Mark an obligation as completed."""
+    async def complete_obligation(
+        self,
+        obligation_id: str,
+        completion_notes: str = "",
+        completion_date: Optional[datetime] = None,
+        evidence_attachment_ids: Optional[list[str]] = None,
+        completed_by_user_id: Optional[str] = None,
+    ) -> ObligationResponse:
+        """Mark an obligation as completed with audit evidence.
+
+        Args:
+            obligation_id: The obligation to complete.
+            completion_notes: Required notes explaining how the obligation was satisfied.
+            completion_date: When the obligation was completed (defaults to now).
+            evidence_attachment_ids: Optional list of existing evidence attachment IDs.
+            completed_by_user_id: The user completing the obligation.
+
+        Raises:
+            HTTPException: If obligation is in a terminal state or notes are empty.
+        """
+        if not completion_notes.strip():
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Completion notes are required.")
+
         o = await self._get_obligation_or_404(obligation_id)
         if o.status in ("completed", "archived", "cancelled"):
             from fastapi import HTTPException
             raise HTTPException(status_code=400, detail=f"Cannot complete obligation in '{o.status}' state")
+
+        now = datetime.now(timezone.utc)
         o.status = "completed"
-        o.completed_date = datetime.now(timezone.utc)
-        o.updated_at = datetime.now(timezone.utc)
+        o.completed_date = completion_date or now
+        o.completion_notes = completion_notes
+        o.completion_date = completion_date or now
+        # Store completed_by as string in the text field (UUID column accepts valid UUIDs, store raw string for non-UUID IDs)
+        try:
+            o.completed_by = uuid.UUID(completed_by_user_id) if completed_by_user_id else None
+        except (ValueError, AttributeError):
+            # Non-UUID user IDs (e.g. Auth0 IDs like 'auth0|123') stored as None
+            # The completed_by_name is captured in the audit log instead
+            o.completed_by = None
+        o.updated_at = now
+
+        # Link evidence attachments if provided
+        if evidence_attachment_ids:
+            attachment_count = 0
+            for eid in evidence_attachment_ids:
+                try:
+                    from app.domains.obligations.models import ObligationEvidence
+                    ev_result = await self.session.execute(
+                        select(ObligationEvidence).where(
+                            ObligationEvidence.id == uuid.UUID(eid),
+                            ObligationEvidence.tenant_id == uuid.UUID(self.tenant_id),
+                        )
+                    )
+                    ev = ev_result.scalar_one_or_none()
+                    if ev:
+                        ev.obligation_id = uuid.UUID(obligation_id)
+                        attachment_count += 1
+                except Exception:
+                    pass
+            o.evidence_attachment_count = attachment_count
+
         await self.session.flush()
         await self.session.refresh(o)
-        await self._log_audit(obligation_id, "obligation.completed")
+
+        # Audit: OBLIGATION_COMPLETED event
+        await self._log_audit(
+            obligation_id,
+            "obligation.completed",
+            actor=completed_by_user_id,
+            changes={
+                "completion_notes": completion_notes,
+                "completion_date": (completion_date or now).isoformat(),
+                "completed_by": completed_by_user_id,
+                "evidence_count": o.evidence_attachment_count or 0,
+            },
+            comment=f"Completed: {completion_notes[:200]}",
+        )
+
+        # Contract timeline integration: create activity event on the parent contract
+        await self._emit_contract_timeline_event(o, completed_by_user_id or "System", completion_notes)
+
         return self._to_response(o)
+
+    async def _emit_contract_timeline_event(
+        self, o: Obligation, completed_by: str, completion_notes: str,
+    ) -> None:
+        """Emit an OBLIGATION_COMPLETED event to the parent contract's activity timeline."""
+        try:
+            from app.domains.review.models import ContractReview
+            from app.domains.review.service import ReviewService
+            from app.kernel.database.session import async_session_factory
+
+            if not o.contract_uuid_id:
+                return
+
+            # Get the actor name from admin_users if possible
+            actor_name = completed_by
+            try:
+                from app.domains.admin.models import AdminUser
+                user_result = await self.session.execute(
+                    select(AdminUser.name).where(AdminUser.user_id == completed_by)
+                )
+                user_row = user_result.scalar_one_or_none()
+                if user_row:
+                    actor_name = user_row
+            except Exception:
+                pass
+
+            # Create a timeline-style audit event on the contract review
+            from app.domains.review.models import ReviewStatusHistory
+            timeline_entry = ReviewStatusHistory(
+                review_id=o.contract_uuid_id,
+                tenant_id=uuid.UUID(self.tenant_id) if self.tenant_id else None,
+                from_status=o.status,
+                to_status=o.status,
+                changed_by=completed_by,
+                reason=f"Obligation \"{o.name}\" completed by {actor_name} on {datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
+            )
+            self.session.add(timeline_entry)
+
+            # Also record in the general audit events table for Contract 360
+            from app.domains.audit.models import GovernanceAuditEvent
+            audit_event = GovernanceAuditEvent(
+                id=uuid.uuid4(),
+                tenant_id=uuid.UUID(self.tenant_id) if self.tenant_id else None,
+                event_type="OBLIGATION_COMPLETED",
+                resource_type="obligation",
+                resource_id=uuid.UUID(o.id),
+                actor_id=completed_by,
+                action="completed",
+                description=f"Obligation \"{o.name}\" completed by {actor_name}",
+                metadata={
+                    "obligation_id": str(o.id),
+                    "obligation_name": o.name,
+                    "contract_id": str(o.contract_uuid_id) if o.contract_uuid_id else None,
+                    "contract_name": o.contract_name,
+                    "completed_by": completed_by,
+                    "completed_by_name": actor_name,
+                    "completion_date": (o.completion_date or datetime.now(timezone.utc)).isoformat(),
+                    "completion_notes": completion_notes[:500] if completion_notes else None,
+                },
+            )
+            self.session.add(audit_event)
+        except Exception as exc:
+            logger.warning("Failed to emit contract timeline event for obligation %s: %s", o.id, exc)
+
+    async def list_evidence(self, obligation_id: str) -> list[dict]:
+        """List evidence attachments for an obligation with download URLs."""
+        try:
+            uid = uuid.UUID(obligation_id)
+        except ValueError:
+            return []
+        result = await self.session.execute(
+            select(ObligationEvidence).where(
+                ObligationEvidence.obligation_id == uid,
+                ObligationEvidence.tenant_id == uuid.UUID(self.tenant_id),
+            ).order_by(ObligationEvidence.created_at.desc())
+        )
+        items = result.scalars().all()
+        return [
+            {
+                "id": str(e.id),
+                "file_name": e.file_name,
+                "file_type": e.file_type,
+                "file_url": e.file_url,
+                "uploaded_by": e.uploaded_by,
+                "description": e.description,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in items
+        ]
+
+    async def upload_evidence(
+        self,
+        obligation_id: str,
+        file: "UploadFile",
+        description: Optional[str] = None,
+        uploaded_by: Optional[str] = None,
+    ) -> dict:
+        """Upload an evidence file for an obligation.
+
+        Saves the file to the local uploads directory and creates an
+        ObligationEvidence record. Returns the evidence record with its ID
+        so the caller can pass it to complete_obligation.
+        """
+        from fastapi import UploadFile as FastAPIUploadFile
+        import os
+
+        # Verify obligation exists
+        o = await self._get_obligation_or_404(obligation_id)
+
+        # Read file data
+        file_data = await file.read()
+        file_name = file.filename or "untitled"
+        file_type = file.content_type or "application/octet-stream"
+
+        # Store file to local uploads directory
+        upload_dir = os.path.join("uploads", "obligation_evidence", obligation_id)
+        os.makedirs(upload_dir, exist_ok=True)
+
+        # Generate unique filename to avoid collisions
+        import uuid as uuid_lib
+        unique_name = f"{uuid_lib.uuid4().hex}_{file_name}"
+        file_path = os.path.join(upload_dir, unique_name)
+
+        with open(file_path, "wb") as f:
+            f.write(file_data)
+
+        # Create evidence record
+        evidence = ObligationEvidence(
+            id=uuid_lib.uuid4(),
+            tenant_id=uuid.UUID(self.tenant_id),
+            obligation_id=uuid.UUID(obligation_id),
+            file_name=file_name,
+            file_type=file_type,
+            file_url=file_path,
+            uploaded_by=uploaded_by,
+            description=description,
+        )
+        self.session.add(evidence)
+
+        # Update attachment count on the obligation
+        from sqlalchemy import update as sa_update, func as sa_func
+        count_result = await self.session.execute(
+            select(sa_func.count()).select_from(ObligationEvidence).where(
+                ObligationEvidence.obligation_id == uuid.UUID(obligation_id),
+                ObligationEvidence.tenant_id == uuid.UUID(self.tenant_id),
+            )
+        )
+        new_count = count_result.scalar() or 0
+        await self.session.execute(
+            sa_update(Obligation)
+            .where(Obligation.id == uuid.UUID(obligation_id))
+            .values(evidence_attachment_count=new_count)
+        )
+
+        await self.session.flush()
+
+        return {
+            "id": str(evidence.id),
+            "file_name": evidence.file_name,
+            "file_type": evidence.file_type,
+            "file_url": evidence.file_url,
+            "uploaded_by": evidence.uploaded_by,
+            "description": evidence.description,
+            "created_at": evidence.created_at.isoformat() if evidence.created_at else None,
+        }
 
     async def cancel_obligation(self, obligation_id: str) -> ObligationResponse:
         """Cancel an obligation."""

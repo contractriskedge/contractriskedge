@@ -54,6 +54,95 @@ DEV_USER_IDS = [
     "user-ai-ops",
 ]
 
+# ── Lifecycle showcase (one contract per stage) ─────────────────────────────
+
+LIFECYCLE_SHOWCASE = [
+    {
+        "name": "Draft — Vendor Onboarding MSA",
+        "vendor": "Northwind Logistics",
+        "type": "MSA",
+        "value": 850_000,
+        "risk": 4.2,
+        "lifecycle": "draft",
+        "review_status": ReviewStatus.DRAFT,
+        "workflow_stage": "intake",
+        "contract_number": "C06202601",
+        "renewal": "+365d",
+        "sla_status": "on_track",
+        "sla_breached": False,
+    },
+    {
+        "name": "Review — SaaS Platform Agreement",
+        "vendor": "CloudPeak Systems",
+        "type": "SaaS",
+        "value": 1_920_000,
+        "risk": 7.1,
+        "lifecycle": "review",
+        "review_status": ReviewStatus.IN_REVIEW,
+        "workflow_stage": "reviewer",
+        "contract_number": "C06202602",
+        "renewal": "+180d",
+        "sla_status": "on_track",
+        "sla_breached": False,
+    },
+    {
+        "name": "Approved — Professional Services SOW",
+        "vendor": "Summit Consulting Group",
+        "type": "SOW",
+        "value": 640_000,
+        "risk": 4.5,
+        "lifecycle": "approved",
+        "review_status": ReviewStatus.APPROVED,
+        "workflow_stage": "executive",
+        "contract_number": "C06202603",
+        "renewal": "+270d",
+        "sla_status": "on_track",
+        "sla_breached": False,
+    },
+    {
+        "name": "Active — Enterprise Support MSA",
+        "vendor": "Atlas Infrastructure",
+        "type": "MSA",
+        "value": 3_100_000,
+        "risk": 3.2,
+        "lifecycle": "active",
+        "review_status": ReviewStatus.EXECUTED,
+        "workflow_stage": "executed",
+        "contract_number": "C06202604",
+        "renewal": "+540d",
+        "sla_status": "on_track",
+        "sla_breached": False,
+    },
+    {
+        "name": "Expiring — Data Processing Agreement",
+        "vendor": "Prism Analytics Co",
+        "type": "DPA",
+        "value": 0,
+        "risk": 6.4,
+        "lifecycle": "expiring",
+        "review_status": ReviewStatus.EXECUTED,
+        "workflow_stage": "executed",
+        "contract_number": "C06202605",
+        "renewal": "+45d",
+        "sla_status": "critical_overdue",
+        "sla_breached": True,
+    },
+    {
+        "name": "Closed — Legacy NDA (Archived)",
+        "vendor": "EuroLegal Partners",
+        "type": "NDA",
+        "value": 0,
+        "risk": 1.8,
+        "lifecycle": "closed",
+        "review_status": ReviewStatus.ARCHIVED,
+        "workflow_stage": "archived",
+        "contract_number": "C06202606",
+        "renewal": "-120d",
+        "sla_status": "on_track",
+        "sla_breached": False,
+    },
+]
+
 # ── Realistic enterprise contract fixtures ────────────────────────────
 # Each contract has a unique name, vendor, type, value, risk profile, and
 # lifecycle state designed to populate the repository without duplicates.
@@ -362,7 +451,7 @@ async def seed_dev_tenant(engine_url: str, reset: bool = False) -> int:
                     logger.warning("  %s: skipped (%s)", t, e.__class__.__name__)
         logger.info("Dev tenant data reset complete.")
 
-    contracts = _generate_contracts()
+    contracts = [dict(c) for c in LIFECYCLE_SHOWCASE] + _generate_contracts()
     logger.info("Seeding %d enterprise contracts for dev tenant %s", len(contracts), DEV_TENANT_ID)
 
     now = datetime.utcnow()
@@ -402,23 +491,56 @@ async def seed_dev_tenant(engine_url: str, reset: bool = False) -> int:
             sla_deadline = renewal_date
             overdue_hours = float(max(0, -days_to_renewal) * 24) if is_overdue else 0.0
 
-            # Map lifecycle to ReviewStatus
-            status_map = {
-                "under_review": ReviewStatus.IN_REVIEW,
-                "active": ReviewStatus.APPROVED,
-                "pending_renewal": ReviewStatus.APPROVED,
-                "expired": ReviewStatus.CLOSED,
-                "approved": ReviewStatus.APPROVED,
-            }
-            workflow_map = {
-                "under_review": "reviewer",
-                "active": "executed",
-                "pending_renewal": "executive",
-                "expired": "archived",
-                "approved": "executed",
-            }
-            review_status = status_map.get(c["status"], ReviewStatus.AI_ANALYZED)
-            workflow_stage = workflow_map.get(c["status"], "ai_review")
+            # Lifecycle showcase fixtures carry explicit review/workflow fields
+            if "review_status" in c:
+                review_status = c["review_status"]
+                workflow_stage = c["workflow_stage"]
+                if c.get("lifecycle") == "expiring":
+                    expiration_date = now + timedelta(days=45)
+                    renewal_date = expiration_date
+                    sla_deadline = now - timedelta(days=30)
+                    overdue_hours = 720.0
+                if c.get("lifecycle") == "closed":
+                    expiration_date = now - timedelta(days=120)
+                    renewal_date = expiration_date
+                if c.get("lifecycle") == "active":
+                    expiration_date = now + timedelta(days=540)
+                    renewal_date = expiration_date
+            else:
+                # Map legacy lifecycle labels to ReviewStatus
+                status_map = {
+                    "under_review": ReviewStatus.IN_REVIEW,
+                    "active": ReviewStatus.APPROVED,
+                    "pending_renewal": ReviewStatus.APPROVED,
+                    "expired": ReviewStatus.CLOSED,
+                    "approved": ReviewStatus.APPROVED,
+                }
+                workflow_map = {
+                    "under_review": "reviewer",
+                    "active": "executed",
+                    "pending_renewal": "executive",
+                    "expired": "archived",
+                    "approved": "executed",
+                }
+                review_status = status_map.get(c["status"], ReviewStatus.AI_ANALYZED)
+                workflow_stage = workflow_map.get(c["status"], "ai_review")
+
+            owner_name = c.get("owner_name") or "Development Admin"
+            owner_id = c.get("owner_id") or seed_user.user_id
+
+            finding_count = 0 if c.get("lifecycle") == "draft" else rng.randint(2, 18)
+            terminal_lifecycle = c.get("lifecycle") in ("approved", "active", "expiring", "closed")
+            legacy_terminal = c.get("status") in ("active", "expired", "approved")
+            completed_at = (
+                last_review_date + timedelta(days=2)
+                if ("review_status" in c and terminal_lifecycle) or legacy_terminal
+                else None
+            )
+
+            def _iso_date(dt) -> str:
+                if hasattr(dt, "date"):
+                    return dt.date().isoformat()
+                return str(dt)[:10]
 
             metadata = {
                 "name": c["name"],
@@ -428,18 +550,24 @@ async def seed_dev_tenant(engine_url: str, reset: bool = False) -> int:
                 "financial_value": c["value"],
                 "currency": "USD",
                 "effective_date": effective_date.isoformat(),
-                "expiration_date": expiration_date.isoformat(),
-                "renewal_date": renewal_date.isoformat(),
+                "expiration_date": _iso_date(expiration_date),
+                "renewal_date": _iso_date(renewal_date),
                 "last_review_date": last_review_date.isoformat(),
-                "owner": c["owner_name"],
-                "owner_id": c["owner_id"],
-                "geography": c["geography"],
+                "owner": owner_name,
+                "owner_id": owner_id,
+                "geography": c.get("geography") or random.choice(GEOGRAPHIES),
                 "risk_score": c["risk"] / 10.0,
                 "ai_confidence": 0.85 + rng.random() * 0.10,
-                "auto_renew": rng.random() > 0.5,
-                "description": f"{c['name']} with {c['vendor']} — governs {c['type'].lower()} engagement across {c['geography']}.",
-                "tags": [c["type"].lower(), c["priority"], c["geography"].lower().replace(" ", "-")],
+                "auto_renew": c.get("lifecycle") == "expiring" or rng.random() > 0.5,
+                "description": f"{c['name']} with {c['vendor']} — governs {c['type'].lower()} engagement.",
+                "tags": [c["type"].lower(), "lifecycle-showcase" if "review_status" in c else c.get("priority", "medium"), "demo"],
             }
+
+            sla_status = c.get("sla_status", "on_track")
+            sla_breached = c.get("sla_breached", is_overdue)
+            if c.get("lifecycle") == "expiring":
+                sla_status = "critical_overdue"
+                sla_breached = True
 
             session.add(UploadSession(
                 upload_id=upload_id,
@@ -462,26 +590,26 @@ async def seed_dev_tenant(engine_url: str, reset: bool = False) -> int:
                 upload_id=upload_id,
                 tenant_id=DEV_TENANT_ID,
                 status=review_status,
-                assigned_to=c["owner_id"] if rng.random() > 0.3 else None,
-                assigned_by=seed_user.user_id if rng.random() > 0.3 else None,
-                assigned_at=last_review_date if rng.random() > 0.3 else None,
-                started_at=last_review_date if rng.random() > 0.3 else None,
+                assigned_to=owner_id if c.get("lifecycle") == "review" or (rng.random() > 0.3 and "review_status" not in c) else None,
+                assigned_by=seed_user.user_id if c.get("lifecycle") == "review" or rng.random() > 0.3 else None,
+                assigned_at=last_review_date if c.get("lifecycle") == "review" or rng.random() > 0.3 else None,
+                started_at=last_review_date if review_status == ReviewStatus.IN_REVIEW else None,
                 workflow_stage=workflow_stage,
-                priority=c["priority"],
+                priority=c.get("priority") or ("high" if c["risk"] >= 6 else "medium"),
                 sla_deadline=sla_deadline,
-                sla_breached=is_overdue,
-                sla_status=c["sla_status"],
-                overdue_hours=overdue_hours,
-                finding_count=rng.randint(2, 18),
-                redline_count=rng.randint(0, 6),
-                comment_count=rng.randint(0, 4),
-                escalation_count=1 if (c["risk"] >= 8 and rng.random() > 0.5) else 0,
+                sla_breached=sla_breached,
+                sla_status=sla_status,
+                overdue_hours=overdue_hours if c.get("lifecycle") == "expiring" else overdue_hours,
+                finding_count=finding_count,
+                redline_count=0 if c.get("lifecycle") == "draft" else rng.randint(0, 6),
+                comment_count=0 if c.get("lifecycle") == "draft" else rng.randint(0, 4),
+                escalation_count=1 if (c["risk"] >= 8 and rng.random() > 0.5 and "review_status" not in c) else 0,
                 is_deleted=False,
                 document_metadata=metadata,
                 created_by=seed_user.user_id,
                 created_at=created_at,
                 updated_at=last_review_date,
-                completed_at=last_review_date + timedelta(days=2) if c["status"] in ("active", "expired", "approved") else None,
+                completed_at=completed_at,
             ))
 
         # Seed audit history: status transitions for a sample of contracts

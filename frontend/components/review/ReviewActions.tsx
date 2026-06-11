@@ -5,6 +5,8 @@
  * - Assign reviewer
  * - Escalate review
  * - Approve / Reject / Conditionally approve
+ * - Finalize (lock approved version)
+ * - Close / Archive (terminal lifecycle)
  * - Add comments
  * - Soft delete
  * - Send to Legal / Procurement / Security (workflow routing)
@@ -25,13 +27,14 @@ import {
   UserPlus, AlertTriangle, CheckCircle2, XCircle, Lock,
   MessageSquare, Trash2, ChevronDown, Send, Loader2,
   Scale, Briefcase, Shield, FileText, FileDown, RefreshCw,
+  Archive, CheckCheck,
 } from "lucide-react";
 import type { ReviewDetail } from "@/services/api/client";
 import { ApiRequestError } from "@/services/api/client";
 import { reviewService } from "@/services/api/reviews";
 import {
   useAssignReviewer, useEscalateReview, useApproveReview,
-  useAddComment, useDeleteReview,
+  useAddComment, useDeleteReview, useCloseReview, useFinalizeReview,
 } from "@/services/hooks";
 import { api } from "@/services/api/client";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -46,7 +49,8 @@ interface ReviewActionsProps {
 
 type ActionModal = "assign" | "escalate" | "approve" | "comment" | "delete"
   | "send_to_legal" | "send_to_procurement" | "send_to_security"
-  | "request_revision" | "generate_negotiation" | "export_memo" | null;
+  | "request_revision" | "generate_negotiation" | "export_memo"
+  | "close" | "finalize" | null;
 
 export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
   const [activeModal, setActiveModal] = useState<ActionModal>(null);
@@ -68,6 +72,8 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
   const approveMutation = useApproveReview(reviewId);
   const commentMutation = useAddComment(reviewId);
   const deleteMutation = useDeleteReview();
+  const closeMutation = useCloseReview();
+  const finalizeMutation = useFinalizeReview();
 
   // Fetch reviewer workload for the assign modal
   const { data: workloadData } = useQuery({
@@ -90,6 +96,24 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
   const [approveError, setApproveError] = useState("");
   const [commentBody, setCommentBody] = useState("");
   const [deleteReason, setDeleteReason] = useState("");
+  const [closeReason, setCloseReason] = useState("");
+
+  // Pre-flight check: fetch unresolved critical/high findings count for approval gate
+  const { data: openFindingsData, isFetching: openFindingsLoading } = useQuery({
+    queryKey: ["reviews", reviewId, "findings", "open-critical"],
+    queryFn: async () => {
+      const res = await reviewService.listFindings(reviewId);
+      const findings = Array.isArray(res) ? res : (res as Record<string, unknown>).findings ?? [];
+      const openCritical = (findings as Array<Record<string, unknown>>).filter(
+        (f) => (f.severity === "critical" || f.severity === "high") && !f.resolution
+      );
+      return { count: openCritical.length, items: openCritical.slice(0, 5) };
+    },
+    enabled: activeModal === "approve" && approveDecision === "approved",
+    staleTime: 0,
+    refetchOnMount: true,
+  });
+  const hasBlockingFindings = (openFindingsData?.count ?? 0) > 0;
 
   const closeModal = () => {
     setActiveModal(null);
@@ -98,6 +122,7 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
     setApproveError("");
     setCommentBody("");
     setDeleteReason("");
+    setCloseReason("");
   };
 
   const handleAssign = async () => {
@@ -111,6 +136,29 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
 
   const handleApprove = async () => {
     setApproveError("");
+    // Pre-flight check: require reason when rejecting
+    if (approveDecision === "rejected" && !approveComments.trim()) {
+      setApproveError("Rejection reason is required. Please explain why this contract is being rejected.");
+      return;
+    }
+    // Pre-flight check: block if critical findings are open
+    if (hasBlockingFindings && (approveDecision === "approved" || approveDecision === "conditionally_approved")) {
+      if (approveDecision === "approved") {
+        setApproveError(
+          `${openFindingsData?.count ?? 0} critical/high finding(s) are still open. ` +
+          "Resolve or dismiss them first, or switch to 'conditionally approve' and include 'override:' in your comments to bypass."
+        );
+        return;
+      }
+      // Conditional approval requires an override reason in comments
+      if (!approveComments.toLowerCase().includes("override:")) {
+        setApproveError(
+          `${openFindingsData?.count ?? 0} critical/high finding(s) are still open. ` +
+          "Add 'override:' at the start of your comments to acknowledge and bypass."
+        );
+        return;
+      }
+    }
     try {
       await approveMutation.mutateAsync({
         decision: approveDecision,
@@ -118,11 +166,26 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
       });
       closeModal();
     } catch (err) {
+      // Format user-friendly error message
+      let msg = "";
       if (err instanceof ApiRequestError) {
-        setApproveError(err.message);
+        msg = err.message;
+      } else if (err instanceof Error) {
+        msg = err.message;
       } else {
-        setApproveError(err instanceof Error ? err.message : "Approval failed");
+        msg = "An unexpected error occurred";
       }
+      // Clean up technical error messages for end users
+      if (msg.includes("Cannot approve:") || msg.includes("Cannot reject:") || msg.includes("Cannot conditionally approve:")) {
+        msg = msg.replace(/^Cannot (approve|reject|conditionally approve): /, "Unable to $1: ");
+      } else if (msg.includes("ConflictError") || msg.includes("HTTPException")) {
+        msg = "This action cannot be completed due to the current review state.";
+      } else if (msg.includes("409") || msg.includes("Conflict")) {
+        msg = "This action conflicts with the current review state.";
+      } else if (msg.includes("403") || msg.includes("forbidden")) {
+        msg = "You don't have permission to perform this action.";
+      }
+      setApproveError(msg);
     }
   };
 
@@ -334,6 +397,32 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
               <XCircle className="h-3.5 w-3.5" />
               Reject
             </button>
+
+            {/* Finalize — only when approved */}
+            {review.status === "approved" && (
+              <button
+                onClick={() => setActiveModal("finalize")}
+                disabled={finalizeMutation.isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-100 px-3 py-2 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-200 disabled:opacity-40 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:bg-emerald-800"
+                title="Finalize approved review — locks the version"
+              >
+                {finalizeMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCheck className="h-3.5 w-3.5" />}
+                Finalize
+              </button>
+            )}
+
+            {/* Close — available from finalized or executed (not approved) */}
+            {(review.status === "finalized" || review.status === "executed") && (
+              <button
+                onClick={() => setActiveModal("close")}
+                disabled={closeMutation.isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-gray-100 px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-200 disabled:opacity-40 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                title="Close contract — ends the lifecycle"
+              >
+                {closeMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
+                Close
+              </button>
+            )}
           </>
         )}
 
@@ -460,7 +549,24 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
       {/* Approve/Reject Modal */}
       {activeModal === "approve" && (
         <Modal onClose={closeModal} title={approveDecision === "approved" ? "Approve Review" : approveDecision === "rejected" ? "Reject Review" : "Conditionally Approve"}>
-          <div className="space-y-4">
+          <div className="space-y-4">            {/* Warning: open critical findings */}
+            {hasBlockingFindings && approveDecision === "approved" && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/50 dark:bg-red-900/20">
+                <div className="flex items-center gap-2 text-red-700 dark:text-red-400">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span className="text-sm font-semibold">Blocking Findings</span>
+                </div>
+                <p className="mt-1 text-xs text-red-600 dark:text-red-300">
+                  {openFindingsData?.count} critical/high finding(s) are still open.
+                  {openFindingsData?.items?.map((f: Record<string, unknown>) => (
+                    <span key={String(f.id)} className="block ml-4 mt-0.5">• {String(f.title)}</span>
+                  ))}
+                </p>
+                <p className="mt-1 text-xs text-red-500 dark:text-red-400">
+                  Resolve or dismiss findings before approving, or use "Conditionally Approve" to bypass.
+                </p>
+              </div>
+            )}
             <div className="flex gap-2">
               {(["approved", "rejected", "conditionally_approved"] as const).map((d) => (
                 <button
@@ -478,7 +584,10 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
               ))}
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Comments</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {approveDecision === "rejected" ? "Rejection Reason" : "Comments"}
+                {approveDecision === "rejected" && <span className="text-red-500"> *</span>}
+              </label>
               <textarea
                 value={approveComments}
                 onChange={(e) => {
@@ -486,7 +595,7 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
                   setApproveError("");
                 }}
                 rows={3}
-                placeholder="Optional comments..."
+                placeholder={approveDecision === "rejected" ? "Explain why this contract is being rejected (e.g., unacceptable liability limits, missing clauses, etc.)" : "Optional comments..."}
                 className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300"
               />
             </div>
@@ -497,7 +606,8 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
             )}
             <div className="flex justify-end gap-2">
               <button onClick={closeModal} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700">Cancel</button>
-              <button onClick={handleApprove} disabled={approveMutation.isPending}
+              <button onClick={handleApprove} disabled={approveMutation.isPending || openFindingsLoading || (hasBlockingFindings && (approveDecision === "approved" || (approveDecision === "conditionally_approved" && !approveComments.toLowerCase().includes("override:")))) || (approveDecision === "rejected" && !approveComments.trim())}
+                title={openFindingsLoading ? "Checking for blocking findings..." : hasBlockingFindings && approveDecision === "approved" ? `${openFindingsData?.count ?? 0} critical/high finding(s) unresolved` : hasBlockingFindings && approveDecision === "conditionally_approved" && !approveComments.toLowerCase().includes("override:") ? "Add 'override:' in comments to bypass" : approveDecision === "rejected" && !approveComments.trim() ? "Rejection reason is required" : "Submit decision"}
                 className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-50 ${
                   approveDecision === "approved" ? "bg-green-600 hover:bg-green-700"
                   : approveDecision === "rejected" ? "bg-red-600 hover:bg-red-700"
@@ -560,6 +670,56 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
                 className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50">
                 {deleteMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
                 Delete Review
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Finalize Modal */}
+      {activeModal === "finalize" && (
+        <Modal onClose={closeModal} title="Finalize Review">
+          <div className="space-y-4">
+            <div className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">
+              <p className="font-semibold">Finalize this approved review?</p>
+              <p className="mt-1 text-xs">This locks the current document version and sets the status to FINALIZED. The contract will move to the executed/active stage.</p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={closeModal} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700">Cancel</button>
+              <button onClick={() => finalizeMutation.mutate(reviewId, { onSuccess: () => closeModal() })} disabled={finalizeMutation.isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50">
+                {finalizeMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                Finalize
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Close Modal */}
+      {activeModal === "close" && (
+        <Modal onClose={closeModal} title="Close Contract">
+          <div className="space-y-4">
+            <div className="rounded-lg bg-gray-50 p-3 text-sm text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+              <p className="font-semibold">Close this contract?</p>
+              <p className="mt-1 text-xs">This will archive the contract and end its lifecycle. Open obligations will block this action.</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Closing Reason</label>
+              <textarea
+                value={closeReason}
+                onChange={(e) => setCloseReason(e.target.value)}
+                placeholder="e.g. Contract term completed, all obligations fulfilled"
+                rows={2}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={closeModal} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700">Cancel</button>
+              <button onClick={() => closeMutation.mutate({ reviewId, reason: closeReason || undefined }, { onSuccess: () => closeModal() })} disabled={closeMutation.isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50">
+                {closeMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                Close Contract
               </button>
             </div>
           </div>

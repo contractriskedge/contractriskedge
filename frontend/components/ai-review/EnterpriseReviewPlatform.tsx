@@ -22,14 +22,14 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   LayoutDashboard, FileText, Brain, Shield, Lightbulb, Workflow, Activity,
   PanelLeft, PanelRight, Search, CheckCircle2, XCircle, AlertTriangle,
   Clock, Zap, Target, MessageSquare, Edit3, GitCompare,
   ChevronDown, ChevronUp, ListChecks, Loader2,
-  TrendingUp, TrendingDown, Minus, BarChart3, Cpu,
+  TrendingUp, TrendingDown, Minus, BarChart3, Cpu, ClipboardCheck,
 } from "lucide-react";
 import { ReviewContextProvider, useReviewContext } from "./ReviewContext";
 import { DocumentViewer } from "./DocumentViewer";
@@ -43,8 +43,9 @@ import { ReviewSummarySection } from "./ReviewSummarySection";
 import { ExplainabilitySection } from "./ExplainabilitySection";
 import { VersionsSection } from "./VersionsSection";
 import { RiskReductionSection } from "./RiskReductionSection";
+import { ObligationsSection } from "./ObligationsSection";
 import { ReviewMoreActionsMenu } from "./ReviewMoreActionsMenu";
-import { useReviewRedlinesData, useVersions, useAuditTrailEvents, useAdvanceWorkflow } from "./hooks";
+import { useReviewRedlinesData, useVersions, useAuditTrailEvents, useAdvanceWorkflow, useSubmitReviewDecision } from "./hooks";
 import { reviewService } from "@/services/api/reviews";
 import type { ReviewSection, ReviewSummary } from "./types";
 import {
@@ -86,9 +87,13 @@ function EnterpriseReviewPlatformInner() {
   const [showReviewList, setShowReviewList] = useState(false);
   const [locateToast, setLocateToast] = useState<string | null>(null);
   const [approveError, setApproveError] = useState<string | null>(null);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [rejectError, setRejectError] = useState<string | null>(null);
 
-  // Approve/reject mutation
+  // Approve uses workflow advance; reject uses /approve so reason is required + audited
   const approveMutation = useAdvanceWorkflow();
+  const rejectMutation = useSubmitReviewDecision();
   const queryClient = useQueryClient();
 
   // Fetch redline count for the tab badge
@@ -99,9 +104,34 @@ function EnterpriseReviewPlatformInner() {
   const auditTrail = useAuditTrailEvents(selectedReviewId ?? "", findings);
   const auditBadgeCount = auditTrail.events.length;
 
+  // Pre-flight check: fetch unresolved critical/high findings
+  const { data: openFindingsData } = useQuery({
+    queryKey: ["reviews", selectedReviewId, "findings", "open-critical"],
+    queryFn: async () => {
+      if (!selectedReviewId) return { count: 0, items: [] };
+      const res = await reviewService.listFindings(selectedReviewId);
+      const findingsList = Array.isArray(res) ? res : (res as Record<string, unknown>).findings ?? [];
+      const openCritical = (findingsList as Array<Record<string, unknown>>).filter(
+        (f) => (f.severity === "critical" || f.severity === "high") && !f.resolution
+      );
+      return { count: openCritical.length, items: openCritical.slice(0, 5) };
+    },
+    enabled: !!selectedReviewId,
+    staleTime: 10_000,
+  });
+  const hasBlockingFindings = (openFindingsData?.count ?? 0) > 0;
+
   const handleApprove = useCallback(async () => {
     if (!selectedReviewId) return;
     setApproveError(null);
+    // Pre-flight: block if critical findings are open
+    if (hasBlockingFindings) {
+      setApproveError(
+        `${openFindingsData?.count ?? 0} critical/high finding(s) are still open. ` +
+        "Resolve or dismiss them first."
+      );
+      return;
+    }
     try {
       await approveMutation.mutateAsync({
         reviewId: selectedReviewId,
@@ -109,23 +139,63 @@ function EnterpriseReviewPlatformInner() {
       });
       queryClient.invalidateQueries({ queryKey: ["ai-platform"] });
     } catch (err) {
-      setApproveError(err instanceof Error ? err.message : "Approval failed");
+      const raw = err instanceof Error ? err.message : "Approval failed";
+      let msg = raw;
+      if (msg.includes("Cannot approve:") || msg.includes("Cannot reject:")) {
+        msg = msg.replace(/^Cannot (approve|reject): /, "Unable to $1: ");
+      } else if (msg.includes("ConflictError") || msg.includes("409")) {
+        msg = "This action cannot be completed due to the current review state.";
+      } else if (msg.includes("403") || msg.includes("forbidden")) {
+        msg = "You don't have permission to perform this action.";
+      }
+      setApproveError(msg);
     }
   }, [selectedReviewId, approveMutation, queryClient]);
 
+  const openRejectModal = useCallback(() => {
+    setApproveError(null);
+    setRejectError(null);
+    setRejectionReason("");
+    setShowRejectModal(true);
+  }, []);
+
+  const closeRejectModal = useCallback(() => {
+    setShowRejectModal(false);
+    setRejectionReason("");
+    setRejectError(null);
+  }, []);
+
   const handleReject = useCallback(async () => {
     if (!selectedReviewId) return;
-    setApproveError(null);
+    const reason = rejectionReason.trim();
+    if (!reason) {
+      setRejectError("Rejection reason is required. Explain why this contract is being rejected.");
+      return;
+    }
+    setRejectError(null);
     try {
-      await approveMutation.mutateAsync({
+      await rejectMutation.mutateAsync({
         reviewId: selectedReviewId,
-        action: "rejected",
+        decision: "rejected",
+        comments: reason,
       });
+      closeRejectModal();
       queryClient.invalidateQueries({ queryKey: ["ai-platform"] });
     } catch (err) {
-      setApproveError(err instanceof Error ? err.message : "Rejection failed");
+      const raw = err instanceof Error ? err.message : "Rejection failed";
+      let msg = raw;
+      if (msg.includes("Cannot reject:") || msg.includes("Cannot approve:")) {
+        msg = msg.replace(/^Cannot (approve|reject): /, "Unable to $1: ");
+      } else if (msg.includes("Rejection reason")) {
+        msg = "Rejection reason is required.";
+      } else if (msg.includes("ConflictError") || msg.includes("409")) {
+        msg = "This action cannot be completed due to the current review state.";
+      } else if (msg.includes("403") || msg.includes("forbidden")) {
+        msg = "You don't have permission to perform this action.";
+      }
+      setRejectError(msg);
     }
-  }, [selectedReviewId, approveMutation, queryClient]);
+  }, [selectedReviewId, rejectionReason, rejectMutation, closeRejectModal, queryClient]);
 
   useEffect(() => {
     const openDocPanel = () => setShowLeftPanel(true);
@@ -196,6 +266,9 @@ function EnterpriseReviewPlatformInner() {
     {
       id: "versions" as ReviewSection, label: "Versions", icon: FileText, shortcut: "V",
       badge: () => docVersions.length > 0 ? `(${docVersions.length})` : undefined,
+    },
+    {
+      id: "obligations" as ReviewSection, label: "Obligations", icon: ClipboardCheck, shortcut: "9",
     },
   ], [apiRedlines, docVersions, auditBadgeCount]);
 
@@ -346,7 +419,22 @@ function EnterpriseReviewPlatformInner() {
           {selectedReview && (
             <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-gray-100 dark:bg-navy-700 text-[9px] text-gray-600 dark:text-gray-300">
               <FileText className="w-3 h-3" />
-              <span className="font-medium truncate max-w-[120px]">{selectedReview.contract_name}</span>
+              {selectedReview.contract_number && (
+                <span className="text-[10px] font-mono font-semibold text-navy-700 dark:text-navy-200">{selectedReview.contract_number}</span>
+              )}
+              <a
+                href={`/contracts/${selectedReview.review_id}`}
+                onClick={(e) => { e.preventDefault(); window.open(`/contracts/${selectedReview.review_id}`, '_blank'); }}
+                className="font-medium truncate max-w-[180px] hover:text-blue-600 hover:underline cursor-pointer"
+                title={`${selectedReview.contract_number ? selectedReview.contract_number + ' — ' : ''}${selectedReview.contract_name}${selectedReview.original_filename ? ' (' + selectedReview.original_filename + ')' : ''}`}
+              >
+                {selectedReview.contract_name}
+              </a>
+              {selectedReview.original_filename && selectedReview.original_filename !== selectedReview.contract_name && (
+                <span className="text-gray-400 truncate max-w-[100px]" title={selectedReview.original_filename}>
+                  ({selectedReview.original_filename})
+                </span>
+              )}
               <span className="text-gray-400">·</span>
               <span>{selectedReview.vendor}</span>
               {criticalCount > 0 && (
@@ -398,25 +486,25 @@ function EnterpriseReviewPlatformInner() {
                 <>
                   <button
                     onClick={handleApprove}
-                    disabled={approveMutation.isPending}
+                    disabled={approveMutation.isPending || hasBlockingFindings}
                     className="flex items-center gap-1 px-1.5 py-1 text-[9px] font-medium rounded hover:bg-green-50 text-green-700 transition-colors disabled:opacity-40"
-                    title="Approve review"
+                    title={hasBlockingFindings ? `${openFindingsData?.count ?? 0} critical/high finding(s) unresolved — resolve or dismiss them first` : "Approve review"}
                   >
                     {approveMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
                     Approve
                   </button>
                   <button
-                    onClick={handleReject}
-                    disabled={approveMutation.isPending}
+                    onClick={openRejectModal}
+                    disabled={approveMutation.isPending || rejectMutation.isPending}
                     className="flex items-center gap-1 px-1.5 py-1 text-[9px] font-medium rounded hover:bg-red-50 text-red-600 transition-colors disabled:opacity-40"
-                    title="Reject review"
+                    title="Reject review (reason required)"
                   >
-                    {approveMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
+                    {rejectMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
                     Reject
                   </button>
                   {approveError && (
-                    <span className="text-[9px] text-red-600 max-w-[200px] truncate" title={approveError}>
-                      {approveError}
+                    <span className="text-[9px] text-red-600 max-w-[200px]" title={approveError}>
+                      {approveError.length > 80 ? approveError.slice(0, 80) + "…" : approveError}
                     </span>
                   )}
                 </>
@@ -454,6 +542,72 @@ function EnterpriseReviewPlatformInner() {
           {locateToast}
         </div>
       )}
+
+      {/* ── Reject modal (reason required → audit trail) ─────────────── */}
+      <AnimatePresence>
+        {showRejectModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4"
+            onClick={closeRejectModal}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-4 shadow-xl dark:border-navy-700 dark:bg-navy-800"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 flex items-center gap-2">
+                <XCircle className="h-5 w-5 text-red-600" />
+                <h3 className="text-sm font-semibold text-navy-900 dark:text-white">Reject Review</h3>
+              </div>
+              <p className="mb-3 text-[11px] text-gray-500 dark:text-gray-400">
+                Provide a reason for rejection. This note is saved to the audit trail and visible under the Audit tab.
+              </p>
+              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                Rejection Reason <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={rejectionReason}
+                onChange={(e) => {
+                  setRejectionReason(e.target.value);
+                  setRejectError(null);
+                }}
+                rows={4}
+                autoFocus
+                placeholder="e.g., Unacceptable liability caps, missing indemnification clause, vendor refuses required security terms…"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-red-400 focus:outline-none focus:ring-1 focus:ring-red-200 dark:border-navy-600 dark:bg-navy-700 dark:text-gray-100"
+              />
+              {rejectError && (
+                <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                  {rejectError}
+                </p>
+              )}
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeRejectModal}
+                  className="rounded-lg px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-navy-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReject}
+                  disabled={rejectMutation.isPending || !rejectionReason.trim()}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {rejectMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  Reject Review
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Section Tabs (compact) ────────────────────────────────────── */}
       <div className="flex items-center border-b border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 px-2 flex-shrink-0">
@@ -544,6 +698,7 @@ function EnterpriseReviewPlatformInner() {
               {activeSection === "audit" && <AuditTrailSection />}
               {/* Versions */}
               {activeSection === "versions" && <VersionsSection />}
+              {activeSection === "obligations" && <ObligationsSection />}
             </div>
           )}
         </div>

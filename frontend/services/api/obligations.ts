@@ -145,6 +145,11 @@ export interface ObligationResponse {
   is_favorite: boolean;
   tags: string[];
   extra_metadata: Record<string, unknown> | null;
+  // Completion auditability fields (V1.1)
+  completion_notes: string | null;
+  completion_date: string | null;
+  completed_by: string | null;
+  evidence_attachment_count: number;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -333,6 +338,26 @@ export interface ObligationEvidenceResponse {
   created_at: string | null;
 }
 
+// ── Evidence Item (from list endpoint) ──────────────────────────────
+
+export interface EvidenceItem {
+  id: string;
+  file_name: string;
+  file_type: string;
+  file_url: string | null;
+  uploaded_by: string | null;
+  description: string | null;
+  created_at: string | null;
+}
+
+// ── Completion Request (V1.1) ──────────────────────────────────────
+
+export interface ObligationCompleteRequest {
+  completionNotes: string;
+  completionDate?: string;
+  evidenceAttachmentIds?: string[];
+}
+
 export interface VendorPerformanceResponse {
   id: string;
   tenant_id: string | null;
@@ -511,9 +536,31 @@ export const obligationsService = {
 
   // ── Lifecycle Actions ────────────────────────────────────────
 
-  /** Complete an obligation */
+  /** Complete an obligation (requires completion notes) */
   completeObligation: (id: string) =>
-    api.post<ObligationResponse>(`${OBLIGATIONS_BASE}/${id}/complete`),
+    api.post<ObligationResponse>(`${OBLIGATIONS_BASE}/${id}/complete`, {
+      completion_notes: "Completed via quick action.",
+    }),
+
+  /** Complete an obligation with audit evidence (V1.1) */
+  completeObligationWithEvidence: (id: string, body: ObligationCompleteRequest) =>
+    api.post<ObligationResponse>(`${OBLIGATIONS_BASE}/${id}/complete`, {
+      completion_notes: body.completionNotes,
+      completion_date: body.completionDate,
+      evidence_attachment_ids: body.evidenceAttachmentIds,
+    }),
+
+  /** List evidence attachments for an obligation */
+  listEvidence: (id: string) =>
+    api.get<EvidenceItem[]>(`${OBLIGATIONS_BASE}/${id}/evidence`),
+
+  /** Upload an evidence file for an obligation (multipart) */
+  uploadEvidence: (id: string, file: File) => {
+    return api.uploadFile<{ id: string; file_name: string; file_type: string; file_url: string | null; description: string | null; created_at: string | null }>(
+      `${OBLIGATIONS_BASE}/${id}/evidence`,
+      file,
+    );
+  },
 
   /** Cancel an obligation */
   cancelObligation: (id: string) =>
@@ -522,6 +569,10 @@ export const obligationsService = {
   /** Archive an obligation (soft-delete) */
   archiveObligation: (id: string) =>
     api.post<ObligationResponse>(`${OBLIGATIONS_BASE}/${id}/archive`),
+
+  /** Reopen a completed or cancelled obligation */
+  reopenObligation: (id: string) =>
+    api.post<ObligationResponse>(`${OBLIGATIONS_BASE}/${id}/reopen`),
 
   /** Get audit history for an obligation */
   getAuditHistory: (id: string) =>

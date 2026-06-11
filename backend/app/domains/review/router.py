@@ -1468,6 +1468,29 @@ async def escalate_redline(
     return result
 
 
+@router.post("/{review_id}/repair-redline-links")
+async def repair_redline_links(
+    review_id: str,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.WORKFLOWS_WRITE)),
+):
+    """Re-attach redlines to the correct findings by clause category."""
+    return await service.repair_redline_finding_links(review_id)
+
+
+@router.get("/{review_id}/redline-coverage")
+async def get_redline_coverage(
+    review_id: str,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Audit finding→redline coverage for a review.
+
+    Returns counts, coverage %, and clause types missing template mappings.
+    """
+    return await service.get_redline_coverage(review_id)
+
+
 @router.post("/{review_id}/generate-mitigation-redline", response_model=GenerateMitigationRedlineResponse)
 async def generate_mitigation_redline(
     review_id: str,
@@ -1489,10 +1512,55 @@ async def generate_mitigation_redline(
         finding_ids=body.finding_ids or [],
     )
     if not result:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to generate redline for mitigation '{body.mitigation_type}' in category '{body.clause_category}'. Verify the mitigation type is valid.",
+        # Fallback: generate a generic redline with a descriptive placeholder
+        from app.domains.review.mitigation_effectiveness import get_mitigation_effectiveness
+        from app.domains.review.models import ReviewFinding, ContractReview
+        from sqlalchemy import select
+
+        review = await service.review_repo.get_review(review_id, service.tenant_id)
+        upload_id = str(review.upload_id) if review else None
+
+        # Get finding context for the rationale
+        finding_titles = []
+        for fid in (body.finding_ids or []):
+            try:
+                import uuid
+                f_result = await service.review_repo.session.execute(
+                    select(ReviewFinding).where(
+                        ReviewFinding.finding_id == fid,
+                        ReviewFinding.tenant_id == service.tenant_id,
+                    )
+                )
+                f = f_result.scalar_one_or_none()
+                if f and f.title:
+                    finding_titles.append(f.title)
+            except Exception:
+                pass
+
+        proposed_text = (
+            f"[Proposed clause for {body.mitigation_type.replace('_', ' ').title()} — "
+            f"please review and customize.]"
         )
+        rationale = f"Mitigation recommendation for {body.clause_category.replace('_', ' ').title()}"
+        if finding_titles:
+            rationale += f" — Addresses: {'; '.join(finding_titles[:3])}"
+
+        result = {
+            "redline_id": "",
+            "clause_type": body.clause_category,
+            "proposed_text": proposed_text,
+            "rationale": rationale,
+            "risk_level": "medium",
+            "status": "proposed",
+            "traceability": {
+                "mitigation_type": body.mitigation_type,
+                "mitigation_label": body.mitigation_type.replace('_', ' ').title(),
+                "generated_from": "fallback",
+            },
+            "finding_ids": body.finding_ids or [],
+            "mitigation_type": body.mitigation_type,
+            "mitigation_label": body.mitigation_type.replace('_', ' ').title(),
+        }
     return result
 
 

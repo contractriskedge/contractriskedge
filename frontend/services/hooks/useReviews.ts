@@ -628,6 +628,44 @@ export function useDeleteReview() {
   });
 }
 
+/** Close/archive a review (terminal lifecycle state) */
+export function useCloseReview() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      reviewId,
+      reason,
+    }: {
+      reviewId: string;
+      reason?: string;
+    }) => reviewService.updateStatus(reviewId, "closed", reason),
+
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: reviewKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: reviewKeys.dashboard() });
+      queryClient.invalidateQueries({ queryKey: reviewKeys.detail(variables.reviewId) });
+      queryClient.invalidateQueries({ queryKey: reviewKeys.status(variables.reviewId) });
+    },
+  });
+}
+
+/** Finalize an approved review */
+export function useFinalizeReview() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (reviewId: string) => reviewService.finalize(reviewId),
+
+    onSuccess: (_data, reviewId) => {
+      queryClient.invalidateQueries({ queryKey: reviewKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: reviewKeys.dashboard() });
+      queryClient.invalidateQueries({ queryKey: reviewKeys.detail(reviewId) });
+      queryClient.invalidateQueries({ queryKey: reviewKeys.status(reviewId) });
+    },
+  });
+}
+
 /** Generate a redline from a mitigation recommendation (closed-loop remediation) */
 export function useGenerateMitigationRedline(reviewId: string) {
   const queryClient = useQueryClient();

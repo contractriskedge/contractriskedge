@@ -115,7 +115,7 @@ class ReviewStatus(str, PyEnum):
             cls.IN_REVIEW: {
                 cls.CHANGES_REQUESTED, cls.PROCUREMENT_REVIEW,
                 cls.LEGAL_REVIEW, cls.SECURITY_REVIEW,
-                cls.APPROVED, cls.LEGAL_APPROVAL,
+                cls.APPROVED, cls.LEGAL_APPROVAL, cls.REJECTED,
                 cls.PENDING_APPROVAL,
                 cls.ESCALATED, cls.CLOSED,
             },
@@ -219,6 +219,11 @@ class ContractReview(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
     # Links to the ContractDocumentVersion that was approved
     approved_version_id = Column(UUID, ForeignKey("contract_document_versions.version_id", ondelete="SET NULL"), nullable=True)
+
+    # Approval override — when approving despite unresolved critical findings
+    approval_override_reason = Column(Text, nullable=True)
+    approval_override_by = Column(Text, nullable=True)
+    approval_override_timestamp = Column(DateTime(timezone=True), nullable=True)
 
 
 class ReviewFinding(Base):

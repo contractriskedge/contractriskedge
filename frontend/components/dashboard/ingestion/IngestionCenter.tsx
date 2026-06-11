@@ -1,13 +1,14 @@
 "use client";
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { PanelLeft, Loader2, AlertCircle, RefreshCw, Upload, FileText, Activity, Link2, RotateCcw } from "lucide-react";
 import type { ImportJob, IngestionSource, DocumentType, ImportJobStatus, CompactKpi, ProcessingQueue, SavedFilter } from "./types";
 import { IngestionKpiCards } from "./IngestionKpiCards";
 import { IngestionToolbar } from "./IngestionToolbar";
 import { IngestionLeftSidebar } from "./IngestionLeftSidebar";
 import { IngestionCenterPanel } from "./IngestionCenterPanel";
-import { useUploads, useUploadFile, useRetryUpload, useUploadStatus, useQueueStats } from "@/services/hooks/useUploads";
+import { useUploads, useUploadFile, useRetryUpload, useUploadStatus, useQueueStats, uploadKeys } from "@/services/hooks/useUploads";
 import type { UploadSummary, UploadStatusResponse } from "@/services/api/uploads";
 import { uploadService } from "@/services/api/uploads";
 import { applyUploadStatus, pipelineFromIngestionState, jobStatusFromIngestionState } from "./uploadBackend";
@@ -59,6 +60,17 @@ function summaryToImportJob(summary: UploadSummary): ImportJob {
     updatedAt: now,
     completedAt: status === "completed" ? now : undefined,
   };
+}
+
+/** Merge polled overrides without letting stale "running" mask a completed list row. */
+function mergeJobWithOverride(job: ImportJob, patch?: Partial<ImportJob>): ImportJob {
+  if (!patch) return job;
+  const backendTerminal = job.status === "completed" || job.status === "failed" || job.status === "cancelled";
+  if (backendTerminal) {
+    const { status: _s, pipeline: _p, completedAt: _c, confidence: _conf, ocrAccuracy: _ocr, classificationScore: _cls, extractionScore: _ext, ...rest } = patch;
+    return { ...job, ...rest };
+  }
+  return { ...job, ...patch };
 }
 
 function createPendingJob(file: File, tempId: string): ImportJob {
@@ -128,6 +140,7 @@ interface IngestionCenterProps {
 }
 
 export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {}) {
+  const queryClient = useQueryClient();
   const [showLeftSidebar, setShowLeftSidebar] = useState(true);
   const [showActivityFeed, setShowActivityFeed] = useState(false);
   const [compactMode, setCompactMode] = useState(false);
@@ -145,31 +158,53 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
   // ── React Query: list uploads ──────────────────────────────────────
   const { data: listResponse, isLoading, isError, error, refetch } = useUploads({ page_size: 100 });
   const uploads: UploadSummary[] = listResponse?.data ?? [];
-  const hasActiveUploads = useMemo(
-    () => uploads.some((u) => !["review_ready", "failed", "cancelled", "quarantined"].includes(u.ingestion_state)),
-    [uploads],
-  );
   const total: number = listResponse?.pagination?.total ?? uploads.length;
 
-  // Keep the list fresh while any upload is still processing.
+  // When uploads complete (review_ready), invalidate review/contract queries
+  // so the Review Queue and Contracts pages reflect the new data immediately.
+  const prevCompletedRef = useRef(0);
   useEffect(() => {
-    if (!hasActiveUploads) return;
-    const timer = setInterval(() => refetch(), 5_000);
-    return () => clearInterval(timer);
-  }, [hasActiveUploads, refetch]);
+    const completedCount = uploads.filter((u) => u.ingestion_state === "review_ready").length;
+    if (completedCount > prevCompletedRef.current) {
+      // New uploads have completed — invalidate review and contract queries
+      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["contracts"] });
+    }
+    prevCompletedRef.current = completedCount;
+  }, [uploads, queryClient]);
 
   // ── Optimistic local jobs ─────────────────────────────────────────
   const [localJobs, setLocalJobs] = useState<ImportJob[]>([]);
   const [jobOverrides, setJobOverrides] = useState<
     Record<string, Partial<ImportJob> & { queue?: string }>
   >({});
+
+  // Drop poll overrides once the list API reports a terminal ingestion state.
+  useEffect(() => {
+    const terminalIds = uploads
+      .filter((u) => ["review_ready", "failed", "cancelled", "quarantined"].includes(u.ingestion_state))
+      .map((u) => u.upload_id);
+    if (terminalIds.length === 0) return;
+    setJobOverrides((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const id of terminalIds) {
+        if (next[id]) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [uploads]);
+
   const backendJobs = useMemo(() => uploads.map(summaryToImportJob), [uploads]);
   const jobs = useMemo(() => {
     const backendIds = new Set(backendJobs.map((j) => j.id));
     const unresolvedLocals = localJobs.filter((lj) => !backendIds.has(lj.id));
     return [...unresolvedLocals, ...backendJobs].map((job) => {
       const patch = jobOverrides[job.id];
-      return patch ? { ...job, ...patch } : job;
+      return mergeJobWithOverride(job, patch);
     });
   }, [localJobs, backendJobs, jobOverrides]);
 
@@ -223,12 +258,20 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
   const status4 = useUploadStatus(polledIds[4]);
   const polledResults = useMemo(() => [status0.data, status1.data, status2.data, status3.data, status4.data].filter(Boolean) as UploadStatusResponse[], [status0.data, status1.data, status2.data, status3.data, status4.data]);
   const terminalStates = ["review_ready", "failed", "cancelled", "quarantined"];
-  const hasTerminal = useMemo(() => polledResults.some((s) => terminalStates.includes(s.ingestion_state)), [polledResults]);
-  const prevTerminal = useRef(false);
-  if (hasTerminal && !prevTerminal.current) { prevTerminal.current = true; setTimeout(() => refetch(), 0); }
-  if (!hasTerminal) prevTerminal.current = false;
 
-  // ── Merge polled results into job overrides for live updates ──────
+  // Refresh the upload list when any polled job newly reaches a terminal state.
+  const syncedTerminalRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const s of polledResults) {
+      if (!terminalStates.includes(s.ingestion_state)) continue;
+      if (syncedTerminalRef.current.has(s.upload_id)) continue;
+      syncedTerminalRef.current.add(s.upload_id);
+      refetch();
+      queryClient.invalidateQueries({ queryKey: uploadKeys.lists() });
+    }
+  }, [polledResults, refetch, queryClient]);
+
+  // ── Merge polled results into job overrides for live stage updates ──────
   useEffect(() => {
     if (polledResults.length === 0) return;
 

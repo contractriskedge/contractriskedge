@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from pydantic_core.core_schema import ValidationInfo
 
 
 class ReviewSummary(BaseModel):
@@ -55,6 +56,9 @@ class ReviewDetail(ReviewSummary):
     # Approved version reference
     approved_version_id: Optional[str] = None
     approved_version_number: Optional[int] = None
+    # Contract number from document metadata
+    contract_number: Optional[str] = None
+    critical_finding_count: int = 0
 
 
 class ReviewFilterParams(BaseModel):
@@ -302,6 +306,14 @@ class ApproveRequest(BaseModel):
     decision: str = Field(..., pattern="^(approved|rejected|conditionally_approved)$")
     comments: Optional[str] = None
     conditions: Optional[dict] = None
+    override_reason: Optional[str] = None
+
+    @field_validator("comments")
+    @classmethod
+    def require_comments_for_rejection(cls, v: Optional[str], info: ValidationInfo) -> Optional[str]:
+        if info.data.get("decision") == "rejected" and not (v and v.strip()):
+            raise ValueError("Rejection reason (comments) is required when decision is 'rejected'")
+        return v
 
 
 # ── Dashboard Schemas ──────────────────────────────────────────────

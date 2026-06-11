@@ -25,7 +25,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText, AlertTriangle, Clock, ArrowUpDown, Lock,
-  Search, Check, X, Loader2, UserPlus, ArrowUpRight,
+  Search, Check, X, Loader2, UserPlus, ArrowUpRight, Archive,
   CheckSquare, Square, ChevronDown, Eye, ThumbsUp, ThumbsDown, Download,
   ListChecks, Brain, Filter, Star,
 } from "lucide-react";
@@ -51,8 +51,9 @@ function useReviewsList(assignedTo?: string) {
   return useQuery({
     queryKey: ["reviews", "queue", assignedTo || "all"],
     queryFn: () => reviewService.list(params as any),
-    staleTime: 15_000,
-    refetchInterval: 30_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    notifyOnChangeProps: ["data"],
   });
 }
 
@@ -60,8 +61,9 @@ function useMyReviews() {
   return useQuery({
     queryKey: ["reviews", "my-work"],
     queryFn: () => reviewService.getMyWork(),
-    staleTime: 15_000,
-    refetchInterval: 30_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    notifyOnChangeProps: ["data"],
   });
 }
 
@@ -69,9 +71,9 @@ function useWorkloadMetrics() {
   return useQuery({
     queryKey: ["reviews", "workload"],
     queryFn: () => reviewService.getWorkloadMetrics(),
-    staleTime: 5_000,
-    refetchInterval: 15_000,
-    refetchOnWindowFocus: true,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    notifyOnChangeProps: ["data"],
   });
 }
 
@@ -226,7 +228,7 @@ function formatContractTitle(review: ReviewDetail): string {
 }
 
 function formatSLA(review: ReviewDetail): { label: string; status: string } {
-  if (review.status === "approved" || review.status === "closed" || review.status === "rejected") {
+  if (review.status === "approved" || review.status === "closed" || review.status === "rejected" || review.status === "archived") {
     return { label: "—", status: "done" };
   }
   if (review.sla_status === "overdue" || review.sla_status === "critical_overdue") {
@@ -283,7 +285,7 @@ function AssignModal({
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
-        className="bg-white rounded-xl shadow-xl border border-gray-200 w-96 overflow-hidden"
+        className="bg-white rounded-xl shadow-xl border border-gray-200 w-96 overflow-visible"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
@@ -292,10 +294,11 @@ function AssignModal({
             <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="p-3 space-y-2">
+        <div className="p-3 space-y-2 overflow-visible">
           <label className="block text-[10px] font-semibold uppercase tracking-wider text-gray-500">
             Reviewer
           </label>
+          <div className="relative z-[100] overflow-visible">
           <UserPicker
             value={selected?.id || ""}
             onChange={(id) => {
@@ -322,6 +325,7 @@ function AssignModal({
             noneLabel="— Unassigned —"
             size="sm"
           />
+          </div>
           <p className="text-[10px] text-gray-500 leading-relaxed pt-1">
             Pick a user from your tenant directory. The list shows each user's
             active-review workload to help balance assignments.
@@ -384,6 +388,7 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
   const [assigningRowIds, setAssigningRowIds] = useState<Set<string>>(new Set());
   const [approvalTarget, setApprovalTarget] = useState<ReviewDetail | null>(null);
   const [escalationTarget, setEscalationTarget] = useState<ReviewDetail | null>(null);
+  const [closeTarget, setCloseTarget] = useState<{ id: string; name: string } | null>(null);
   const [bulkAction, setBulkAction] = useState<string>("");
 
   const reviews = data?.data ?? [];
@@ -497,6 +502,22 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
       setApprovalTarget(null);
     },
   });
+
+  // ── Close Mutation ──
+
+  const closeMut = useMutation({
+    mutationFn: ({ reviewId, reason }: { reviewId: string; reason?: string }) =>
+      reviewService.updateStatus(reviewId, "closed", reason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["reviews", "workload"] });
+      setCloseTarget(null);
+    },
+  });
+
+  const handleCloseReview = (reviewId: string, name: string) => {
+    setCloseTarget({ id: reviewId, name });
+  };
 
   // ── Escalate Mutation ──
 
@@ -1238,7 +1259,9 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                     }
                   </button>
                 </th>
-                <th className="text-left px-3 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[28%]">Contract</th>
+                <th className="text-left px-3 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[28%]">
+                  <span title="Contract name and C-Number">Contract / C-Number</span>
+                </th>
                 <th className="text-left px-2 py-3 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-navy-700 dark:hover:text-gray-200 w-[7%]" onClick={() => toggleSort("risk_score")}>
                   <span className="inline-flex items-center gap-1">
                     Risk <ArrowUpDown className="w-3 h-3" />
@@ -1381,6 +1404,17 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                                 ? "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
                                 : "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-300"
                             }`}>{review.priority}</span>
+                          {/* Lifecycle Stage Badge */}
+                          {(() => {
+                            const isExpired = review.status === "executed" && (review.sla_status === "critical_overdue" || review.sla_status === "overdue");
+                            const isActive = review.status === "executed" && !isExpired;
+                            if (review.status === "archived") return <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 dark:bg-navy-700 dark:text-gray-400 flex-shrink-0">Closed</span>;
+                            if (isExpired) return <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-300 flex-shrink-0">Expired</span>;
+                            if (isActive) return <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-300 flex-shrink-0">Active</span>;
+                            if (review.status === "finalized") return <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300 flex-shrink-0">Finalized</span>;
+                            if (review.status === "approved") return <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300 flex-shrink-0">Approved</span>;
+                            return null;
+                          })()}
                           </div>
                           {/* Secondary: Metadata row — tight grouping */}
                           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
@@ -1419,6 +1453,11 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                                 {review.contract_number ? `${review.contract_number} ` : ""}{contractName}
                               </span>
                             </div>
+                            {rawFilename && rawFilename !== contractName && (
+                              <div className="text-[10px] text-gray-400 dark:text-gray-500 font-mono truncate" title={rawFilename}>
+                                {rawFilename}
+                              </div>
+                            )}
                             <div className="text-xs text-gray-500 dark:text-gray-400">
                               {review.status.replace(/_/g, " ")} • {review.risk_score != null ? `${(review.risk_score * 100).toFixed(0)}% Risk` : "—"} • {review.finding_count} Findings • {review.redline_count} Redlines
                             </div>
@@ -1572,6 +1611,16 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                                   <ArrowUpRight className="w-3 h-3" />
                                 </button>
                               )}
+                              {/* Close — for finalized or executed contracts (not approved) */}
+                              {(review.status === "finalized" || review.status === "executed") && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleCloseReview(review.review_id, review.contract_number || review.document_name || "Contract"); }}
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 transition-colors"
+                                  title="Close contract"
+                                >
+                                  <Archive className="w-3 h-3" />
+                                </button>
+                              )}
                               <button
                                 onClick={(e) => { e.stopPropagation(); onReviewSelect?.(review.review_id); }}
                                 className="inline-flex items-center gap-1 px-2.5 py-1 text-[9px] font-medium rounded-md bg-navy-600 text-white hover:bg-navy-700 dark:bg-navy-500 dark:hover:bg-navy-600 transition-colors shadow-sm"
@@ -1651,6 +1700,30 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
             onClose={() => setEscalationTarget(null)}
             isLoading={escalateMut.isPending}
           />
+        )}
+      </AnimatePresence>
+
+      {/* ── Close Confirmation Modal ── */}
+      <AnimatePresence>
+        {closeTarget && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setCloseTarget(null)}>
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
+              className="bg-white rounded-xl shadow-2xl border border-gray-200 w-full max-w-sm mx-4 p-5" onClick={e => e.stopPropagation()}>
+              <h3 className="text-sm font-semibold text-navy-900">Close Contract</h3>
+              <p className="text-[11px] text-gray-500 mt-1">Close "{closeTarget.name}"? This will archive the contract.</p>
+              <p className="text-[10px] text-amber-600 mt-1">Open obligations will block this action.</p>
+              <div className="mt-4 flex justify-end gap-2">
+                <button onClick={() => setCloseTarget(null)}
+                  className="px-3 py-1.5 text-[10px] font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50">Cancel</button>
+                <button onClick={() => closeMut.mutate({ reviewId: closeTarget.id })}
+                  disabled={closeMut.isPending}
+                  className="px-3 py-1.5 text-[10px] font-medium rounded-lg bg-gray-700 text-white hover:bg-gray-800 disabled:opacity-50">
+                  {closeMut.isPending ? "Closing..." : "Close Contract"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
