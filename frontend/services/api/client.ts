@@ -103,6 +103,7 @@ export interface ReviewDetail {
   review_id: string;
   upload_id: string;
   contract_id: string | null;
+  review_number: string;
   status: string;
   assigned_to: string | null;
   /** Friendly display name of the assignee, resolved server-side from admin_users. */
@@ -116,6 +117,7 @@ export interface ReviewDetail {
   redline_count: number;
   comment_count: number;
   escalation_count: number;
+  is_favorite: boolean;
   sla_deadline: string | null;
   sla_due_at: string | null;
   sla_breached: boolean;

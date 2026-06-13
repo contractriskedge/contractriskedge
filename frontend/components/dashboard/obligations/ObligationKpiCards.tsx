@@ -21,7 +21,7 @@ function MiniSparkline({ data, color }: { data: number[]; color: string }) {
 
 export function ObligationKpiCards({ metrics }: { metrics: ObligationKpi[] }) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
+    <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2">
       {metrics.map((m, i) => {
         const TrendIcon = m.trendDirection === "up" ? TrendingUp : m.trendDirection === "down" ? TrendingDown : Minus;
         const isBad = (m.trendDirection === "up" && (m.id === "active" || m.id === "exposure" || m.id === "escalated" || m.id === "milestones")) || (m.trendDirection === "down" && (m.id === "overdue" || m.id === "sla-breaches" || m.id === "completed"));
@@ -29,7 +29,7 @@ export function ObligationKpiCards({ metrics }: { metrics: ObligationKpi[] }) {
         const strokeColor = m.severity === "critical" ? "#EF4444" : m.severity === "warning" ? "#F97316" : m.severity === "success" ? "#22C55E" : "#3B82F6";
         return (
           <motion.div key={m.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
-            className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-all p-3 cursor-pointer group" whileHover={{ y: -1, scale: 1.02 }} title={m.tooltip}>
+            className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-all p-2.5 cursor-pointer group" whileHover={{ y: -1, scale: 1.01 }} title={m.tooltip}>
             <div className="flex items-center justify-between mb-2">
               <div className={`w-7 h-7 rounded-lg flex items-center justify-center bg-gradient-to-br ${m.color} text-white shadow-xs`}>{iconMap[m.icon] || <ClipboardCheck className="w-4 h-4" />}</div>
               <MiniSparkline data={m.sparklineData} color={strokeColor} />

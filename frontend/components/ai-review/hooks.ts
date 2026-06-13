@@ -885,6 +885,7 @@ function invalidateReviewDecisionQueries(
   queryClient.invalidateQueries({ queryKey: [...platformKeys.all, "audit-history", reviewId] });
   queryClient.invalidateQueries({ queryKey: ["ai-platform"] });
   queryClient.invalidateQueries({ queryKey: ["reviews"] });
+  queryClient.invalidateQueries({ queryKey: ["contracts"] });
 }
 
 /** Approve, reject, or conditionally approve a review (persists reason + audit trail). */

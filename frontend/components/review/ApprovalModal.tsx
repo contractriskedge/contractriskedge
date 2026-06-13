@@ -20,6 +20,7 @@ interface ApprovalModalProps {
   reviewTitle: string;
   riskScore?: number;
   openCriticalFindings?: number;
+  openObligations?: number;
   onApprove: (decision: string, comment: string, conditions?: Record<string, unknown>) => Promise<void>;
   onReject: (comment: string, category?: string, severity?: string) => Promise<void>;
   onClose: () => void;
@@ -47,6 +48,7 @@ export function ApprovalModal({
   reviewTitle,
   riskScore,
   openCriticalFindings = 0,
+  openObligations = 0,
   onApprove,
   onReject,
   onClose,
@@ -76,6 +78,17 @@ export function ApprovalModal({
         setError(
           `${openCriticalFindings} critical/high finding(s) are still open. ` +
           "Add 'override:' at the start of your comments to acknowledge and bypass."
+        );
+        return;
+      }
+    }
+
+    // Open obligations guard: block unless override is provided
+    if (openObligations > 0) {
+      if (!comment.toLowerCase().includes("override:")) {
+        setError(
+          `${openObligations} obligation(s) are still open. ` +
+          "Complete or close all obligations before approving, or add 'override:' at the start of your comments."
         );
         return;
       }
@@ -230,6 +243,24 @@ export function ApprovalModal({
                       </p>
                       <p className="text-xs text-red-700 mt-0.5">
                         These findings must be resolved before approval, or you must include
+                        {' '}<strong>"override:"</strong> at the start of your approval comment to bypass.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Open Obligations Warning */}
+              {openObligations > 0 && (
+                <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium text-amber-900">
+                        {openObligations} Open Obligation(s)
+                      </p>
+                      <p className="text-xs text-amber-700 mt-0.5">
+                        Complete or close all obligations before approving, or include
                         {' '}<strong>"override:"</strong> at the start of your approval comment to bypass.
                       </p>
                     </div>
@@ -397,7 +428,7 @@ export function ApprovalModal({
           {decision === "approve" && (
             <button
               onClick={handleApprove}
-              disabled={isLoading || !comment.trim() || !riskAck || (openCriticalFindings > 0 && !comment.toLowerCase().includes("override:"))}
+              disabled={isLoading || !comment.trim() || !riskAck || (openCriticalFindings > 0 && !comment.toLowerCase().includes("override:")) || (openObligations > 0 && !comment.toLowerCase().includes("override:"))}
               className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors inline-flex items-center gap-2"
             >
               {isLoading ? (

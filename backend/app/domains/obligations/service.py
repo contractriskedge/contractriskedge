@@ -43,6 +43,7 @@ class ObligationService:
         return ObligationResponse(
             id=str(o.id),
             tenant_id=str(o.tenant_id) if o.tenant_id else None,
+            obligation_number=o.obligation_number or "",
             name=o.name,
             description=o.description,
             obligation_type=o.obligation_type,
@@ -256,10 +257,23 @@ class ObligationService:
             if not vendor:
                 vendor = md.get('vendor') or ''
 
-        status = data.status or "draft"
+        status = data.status or "open"
+
+        # Auto-generate obligation number: OBL-YYYYMM-NNN
+        from sqlalchemy import func as sa_func
+        count_result = await self.session.execute(
+            sa_select(sa_func.count()).select_from(Obligation).where(
+                Obligation.tenant_id == uuid.UUID(self.tenant_id),
+            )
+        )
+        total_count = (count_result.scalar() or 0) + 1
+        now = datetime.now(timezone.utc)
+        obligation_number = f"OBL-{now.strftime('%Y%m')}-{total_count}"
+
         o = Obligation(
             id=uuid.uuid4(),
             tenant_id=uuid.UUID(self.tenant_id),
+            obligation_number=obligation_number,
             name=data.name,
             description=data.description,
             obligation_type=data.obligation_type,
@@ -345,9 +359,11 @@ class ObligationService:
 
         # Audit: log status changes
         if "status" in update_data and update_data["status"] != old_status:
+            reason = update_data.get("notes") or update_data.get("status_reason") or ""
             await self._log_audit(
                 obligation_id, f"obligation.status_changed:{old_status}→{update_data['status']}",
-                changes={"old_status": old_status, "new_status": update_data["status"]},
+                comment=reason if reason else None,
+                changes={"old_status": old_status, "new_status": update_data["status"], "reason": reason},
             )
         elif "assignee" in update_data and update_data["assignee"] != old_assignee:
             await self._log_audit(

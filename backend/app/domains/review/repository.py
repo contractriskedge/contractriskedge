@@ -62,23 +62,27 @@ class ReviewRepository(BaseRepository):
         return items, total or 0
 
     async def create_review(self, upload_id: str, tenant_id: str, created_by: str) -> ContractReview:
-        # Generate a human-readable contract number: C{month}{year}{running}
-        # e.g., C06202601 for June 2026, first contract
+        # Generate human-readable identifiers:
+        #   contract_number: C-202606-1
+        #   review_number:   CRev-202606-1
+        # Both share the same running number (x) so they stay in sync.
         now = datetime.utcnow()
-        month_year = now.strftime("%m%Y")
         # Count existing contracts this month to derive running number
         count_stmt = select(func.count()).select_from(ContractReview).where(
             ContractReview.tenant_id == tenant_id,
             ContractReview.created_at >= now.replace(day=1, hour=0, minute=0, second=0, microsecond=0),
         )
         running = (await self.session.scalar(count_stmt)) + 1
-        contract_number = f"C{month_year}{running:02d}"
+        ym = now.strftime("%Y%m")
+        contract_number = f"C-{ym}-{running}"
+        review_number = f"CRev-{ym}-{running}"
 
         metadata = {"contract_number": contract_number}
         review = ContractReview(
             upload_id=upload_id,
             tenant_id=tenant_id,
             created_by=created_by,
+            review_number=review_number,
             document_metadata=metadata,
         )
         self.session.add(review)

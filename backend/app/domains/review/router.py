@@ -18,7 +18,8 @@ from app.kernel.security.permissions import Permissions
 from app.kernel.web.pagination import PaginatedResponse, PaginationMeta
 from app.domains.review.schemas import (
     ReviewDetail, ReviewFilterParams, FindingItem, RedlineItem,
-    CommentItem, CommentCreate, AssignRequest, RedlineAssignRequest, EscalateRequest,
+    CommentItem, CommentCreate, AssignRequest, RedlineAssignRequest,
+    FavoriteToggleRequest, EscalateRequest,
     ApproveRequest, FindingResolveRequest, RedlineUpdateRequest,
     GenerateMitigationRedlineRequest, GenerateMitigationRedlineResponse,
     RegenerateRedlineRequest,
@@ -870,7 +871,10 @@ async def soft_delete_review(
     _: None = Depends(require_permission(Permissions.WORKFLOWS_WRITE)),
 ):
     """Soft-delete a review. Sets is_deleted flag without removing data."""
-    result = await service.soft_delete(review_id, body.reason if body else None)
+    try:
+        result = await service.soft_delete(review_id, body.reason if body else None)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not result:
         raise HTTPException(status_code=404, detail="Review not found")
     return {"review_id": review_id, "status": "deleted", "message": "Review soft-deleted."}
@@ -1802,11 +1806,32 @@ async def escalate_review(
     _: None = Depends(require_permission(Permissions.WORKFLOWS_ESCALATE)),
 ):
     """Escalate a review to a higher level."""
-    return await service.escalate(
-        review_id, body.reason, body.escalated_to,
-        raise_priority=body.raise_priority or False,
-        target_workflow_stage=body.target_workflow_stage,
-    )
+    try:
+        return await service.escalate(
+            review_id, body.reason, body.escalated_to,
+            raise_priority=body.raise_priority or False,
+            target_workflow_stage=body.target_workflow_stage,
+        )
+    except ValueError as e:
+        msg = str(e)
+        if "not found" in msg.lower():
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+    except ImmutableReviewError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/{review_id}/favorite")
+async def toggle_favorite(
+    review_id: str,
+    body: FavoriteToggleRequest,
+    service: ReviewService = Depends(get_review_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Toggle the favorite status of a review for the current user."""
+    return await service.toggle_favorite(review_id, body.is_favorite)
 
 
 @router.post("/{review_id}/approve")
@@ -3051,6 +3076,24 @@ async def advance_workflow(
     assignee_id = body.get("assignee_id")
     note = body.get("note")
 
+    # Approval/rejection must use the guarded approve() path (findings + obligations).
+    if action in ("approved", "rejected"):
+        try:
+            await service.approve(
+                review_id,
+                action,
+                comments=note,
+                conditions=body.get("conditions"),
+            )
+        except ConflictError as e:
+            raise HTTPException(status_code=409, detail=e.message)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        result = await service.get_review(review_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Review not found")
+        return result
+
     # Map WorkflowState action names to ReviewStatus values
     action_to_status = {
         "legal_review": "legal_approval",
@@ -3059,6 +3102,8 @@ async def advance_workflow(
         "approved": "approved",
         "rejected": "rejected",
         "archived": "archived",
+        "close": "closed",
+        "closed": "closed",
         "in_review": "in_review",
         "escalated": "escalated",
         "finalized": "finalized",

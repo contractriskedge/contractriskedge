@@ -1,16 +1,17 @@
 /**
- * useFavorites — per-user, per-tenant localStorage-backed favorites store.
+ * useFavorites — per-user, per-tenant favorites store backed by the backend API.
  *
- * Persists across refreshes and is scoped to the authenticated user/tenant
- * so two users on the same browser don't see each other's favorites.
+ * Favorites are persisted to the server so they work across devices and sessions.
+ * localStorage is used as an optimistic cache for instant UI feedback.
  *
  * Storage key: contractedge.favorites.v1.<tenantId>.<userId>
- * Stored as a JSON array of contract/clause ids.
+ * Stored as a JSON array of review/contract ids.
  */
 
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { reviewService } from "@/services/api/reviews";
 
 const STORAGE_PREFIX = "contractedge.favorites.v1";
 
@@ -110,9 +111,19 @@ export function useFavorites(tenantId: string | null | undefined, userId: string
   const toggle = useCallback(
     (id: string) => {
       const s = readSet(key);
-      if (s.has(id)) s.delete(id);
-      else s.add(id);
+      const newState = s.has(id) ? false : true;
+      if (newState) s.add(id);
+      else s.delete(id);
       write(s);
+      // Sync to backend — fire-and-forget
+      reviewService.toggleFavorite(id, newState).catch(() => {
+        // Revert on failure: undo the optimistic local change
+        const revert = readSet(key);
+        if (newState) revert.delete(id);
+        else revert.add(id);
+        writeSet(key, revert);
+        setIds(Array.from(revert));
+      });
     },
     [key, write],
   );

@@ -15,6 +15,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    String,
     Text,
     UniqueConstraint,
     func,
@@ -90,15 +91,15 @@ class ReviewStatus(str, PyEnum):
     @classmethod
     def valid_transitions(cls) -> dict[ReviewStatus, set[ReviewStatus]]:
         return {
-            cls.DRAFT: {cls.ANALYZING, cls.AI_ANALYZED, cls.CLOSED},
-            cls.UPLOADED: {cls.ANALYZING, cls.AI_ANALYZED, cls.ARCHIVED, cls.CLOSED},
-            cls.ANALYZING: {cls.AI_ANALYZED, cls.AI_REVIEWED, cls.UPLOADED, cls.CLOSED},
-            cls.AI_ANALYZED: {cls.AI_REVIEWED, cls.REVIEW_READY, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.IN_REVIEW, cls.CLOSED},
-            cls.AI_REVIEWED: {cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.IN_REVIEW, cls.CLOSED},
-            cls.REVIEW_READY: {cls.IN_REVIEW, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.CLOSED},
+            cls.DRAFT: {cls.ANALYZING, cls.AI_ANALYZED, cls.ESCALATED, cls.CLOSED},
+            cls.UPLOADED: {cls.ANALYZING, cls.AI_ANALYZED, cls.ARCHIVED, cls.ESCALATED, cls.CLOSED},
+            cls.ANALYZING: {cls.AI_ANALYZED, cls.AI_REVIEWED, cls.UPLOADED, cls.ESCALATED, cls.CLOSED},
+            cls.AI_ANALYZED: {cls.AI_REVIEWED, cls.REVIEW_READY, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.IN_REVIEW, cls.ESCALATED, cls.CLOSED},
+            cls.AI_REVIEWED: {cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.IN_REVIEW, cls.ESCALATED, cls.CLOSED},
+            cls.REVIEW_READY: {cls.IN_REVIEW, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.ESCALATED, cls.CLOSED},
             cls.PROCUREMENT_REVIEW: {
                 cls.LEGAL_REVIEW, cls.SECURITY_REVIEW, cls.NEGOTIATION,
-                cls.REJECTED, cls.CLOSED,
+                cls.REJECTED, cls.ESCALATED, cls.CLOSED,
             },
             cls.LEGAL_REVIEW: {
                 cls.APPROVED, cls.NEGOTIATION, cls.REJECTED,
@@ -110,7 +111,7 @@ class ReviewStatus(str, PyEnum):
             },
             cls.NEGOTIATION: {
                 cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW,
-                cls.APPROVED, cls.REJECTED, cls.CLOSED,
+                cls.APPROVED, cls.REJECTED, cls.ESCALATED, cls.CLOSED,
             },
             cls.IN_REVIEW: {
                 cls.CHANGES_REQUESTED, cls.PROCUREMENT_REVIEW,
@@ -120,7 +121,7 @@ class ReviewStatus(str, PyEnum):
                 cls.ESCALATED, cls.CLOSED,
             },
             cls.CHANGES_REQUESTED: {cls.IN_REVIEW, cls.ESCALATED, cls.CLOSED},
-            cls.PENDING_APPROVAL: {cls.APPROVED, cls.REJECTED, cls.IN_REVIEW, cls.CLOSED},
+            cls.PENDING_APPROVAL: {cls.APPROVED, cls.REJECTED, cls.IN_REVIEW, cls.ESCALATED, cls.CLOSED},
             cls.ESCALATED: {
                 cls.IN_REVIEW, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW,
                 cls.SECURITY_REVIEW, cls.LEGAL_APPROVAL,
@@ -224,6 +225,12 @@ class ContractReview(Base):
     approval_override_reason = Column(Text, nullable=True)
     approval_override_by = Column(Text, nullable=True)
     approval_override_timestamp = Column(DateTime(timezone=True), nullable=True)
+
+    # Favorites — per-user bookmarking for quick access
+    is_favorite = Column(Boolean, nullable=False, default=False)
+
+    # Human-readable review number (e.g. "CRev-202606-1")
+    review_number = Column(String(50), nullable=False, default="")
 
 
 class ReviewFinding(Base):

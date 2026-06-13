@@ -20,16 +20,17 @@
 
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText, AlertTriangle, Clock, ArrowUpDown, Lock,
   Search, Check, X, Loader2, UserPlus, ArrowUpRight, Archive,
   CheckSquare, Square, ChevronDown, Eye, ThumbsUp, ThumbsDown, Download,
-  ListChecks, Brain, Filter, Star,
+  ListChecks, Brain, Filter, Star, RefreshCw, CheckCircle2,
 } from "lucide-react";
 import { reviewService } from "@/services/api/reviews";
+import { obligationsService } from "@/services/api/obligations";
 import { api } from "@/services/api/client";
 import type { ReviewDetail, WorkloadMetrics } from "@/services/api/client";
 import { ApprovalModal } from "./ApprovalModal";
@@ -369,6 +370,19 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
   const { data, isLoading } = useReviewsList();
   const { data: metrics } = useWorkloadMetrics();
 
+  // Seed localStorage favorites from backend data on load
+  const reviews = data?.data ?? [];
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!reviews.length || seeded.current) return;
+    seeded.current = true;
+    for (const r of reviews) {
+      if (r.is_favorite) {
+        favorites.add(r.review_id);
+      }
+    }
+  }, [reviews, favorites]);
+
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [stageFilter, setStageFilter] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -389,9 +403,25 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
   const [approvalTarget, setApprovalTarget] = useState<ReviewDetail | null>(null);
   const [escalationTarget, setEscalationTarget] = useState<ReviewDetail | null>(null);
   const [closeTarget, setCloseTarget] = useState<{ id: string; name: string } | null>(null);
+  const [closeReason, setCloseReason] = useState("");
   const [bulkAction, setBulkAction] = useState<string>("");
+  const [openObligationCounts, setOpenObligationCounts] = useState<Record<string, number>>({});
+  const [fetchingObligations, setFetchingObligations] = useState(false);
 
-  const reviews = data?.data ?? [];
+  // Fetch open obligation counts when approval modal is triggered
+  useEffect(() => {
+    if (!approvalTarget || fetchingObligations) return;
+    const reviewId = approvalTarget.review_id;
+    if (openObligationCounts[reviewId] !== undefined) return;
+    setFetchingObligations(true);
+    obligationsService.getByContract(reviewId).then((res) => {
+      setOpenObligationCounts(prev => ({ ...prev, [reviewId]: (res as { open?: number }).open ?? 0 }));
+    }).catch(() => {
+      setOpenObligationCounts(prev => ({ ...prev, [reviewId]: 0 }));
+    }).finally(() => {
+      setFetchingObligations(false);
+    });
+  }, [approvalTarget, openObligationCounts, fetchingObligations]);
 
   // ── Mutations ──
 
@@ -511,12 +541,25 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["reviews"] });
       queryClient.invalidateQueries({ queryKey: ["reviews", "workload"] });
+      queryClient.invalidateQueries({ queryKey: ["contracts"] });
       setCloseTarget(null);
+    },
+  });
+
+  // ── Finalize Mutation ──
+
+  const finalizeMut = useMutation({
+    mutationFn: (reviewId: string) =>
+      reviewService.finalize(reviewId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["reviews", "workload"] });
     },
   });
 
   const handleCloseReview = (reviewId: string, name: string) => {
     setCloseTarget({ id: reviewId, name });
+    setCloseReason("");
   };
 
   // ── Escalate Mutation ──
@@ -527,8 +570,12 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
     }) =>
       reviewService.escalate(reviewId, { reason, escalated_to: escalatedTo, raise_priority: raisePriority, target_workflow_stage: targetStage }),
     onSuccess: () => {
+      // Invalidate all review list queries so every queue tab refreshes
       queryClient.invalidateQueries({ queryKey: ["reviews", "queue"] });
+      queryClient.invalidateQueries({ queryKey: ["reviews", "my-work"] });
       queryClient.invalidateQueries({ queryKey: ["reviews", "workload"] });
+      queryClient.invalidateQueries({ queryKey: ["reviews", "metrics"] });
+      queryClient.invalidateQueries({ queryKey: ["reviews", "detail"] });
       setEscalationTarget(null);
     },
   });
@@ -635,6 +682,53 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
     exportMut.mutate(ids);
   };
 
+  // ── Queue tab counts ──
+
+  const TERMINAL = useMemo(() => ["approved", "closed", "finalized", "archived", "rejected", "executed"], []);
+
+  const tabCounts = useMemo(() => {
+    const allActive = reviews.filter((r) => !TERMINAL.includes(r.status)).length;
+    const identifiers = [user?.sub, user?.email, user?.name].filter(Boolean).map((s) => (s as string).toLowerCase());
+    const myReviews = identifiers.length > 0
+      ? reviews.filter((r) => {
+          if (TERMINAL.includes(r.status)) return false;
+          const a = (r.assigned_to || "").toLowerCase();
+          const an = (r.assigned_to_name || "").toLowerCase();
+          if ((!a || a === "unassigned") && !an) return false;
+          return identifiers.some((id) => a === id || a.includes(id) || an === id || an.includes(id));
+        }).length
+      : reviews.filter((r) => r.assigned_to && r.assigned_to !== "Unassigned" && !TERMINAL.includes(r.status)).length;
+    const legal = reviews.filter(
+      (r) =>
+        r.workflow_stage === "legal_ops" ||
+        r.workflow_stage === "legal_approval" ||
+        r.status === "legal_review" ||
+        r.status === "legal_approval",
+    ).length;
+    const executive = reviews.filter(
+      (r) => r.workflow_stage === "executive" || r.status === "exec_approval",
+    ).length;
+    const compliance = reviews.filter(
+      (r) =>
+        r.workflow_stage === "compliance" ||
+        r.status === "compliance_review" ||
+        r.status === "compliance",
+    ).length;
+    const escalated = reviews.filter(
+      (r) => r.status === "escalated" || r.workflow_stage === "escalated",
+    ).length;
+    const overdue = reviews.filter(
+      (r) => r.sla_status === "overdue" || r.sla_status === "critical_overdue",
+    ).length;
+    const completed = reviews.filter((r) => TERMINAL.includes(r.status)).length;
+    const favoritesCount = reviews.filter((r) =>
+      favorites.isFavorite(r.review_id) ||
+      favorites.isFavorite(r.document_id || "") ||
+      favorites.isFavorite(r.contract_id || ""),
+    ).length;
+    return { all: allActive, my: myReviews, legal, executive, compliance, escalated, overdue, completed, favorites: favoritesCount };
+  }, [reviews, user, TERMINAL, favorites]);
+
   // ── Filtering & Sorting ──
 
   const filtered = useMemo(() => {
@@ -642,7 +736,6 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
 
     // Queue filter (role-based)
     // Terminal states excluded from default views
-    const TERMINAL = ["approved", "closed", "finalized", "archived", "rejected"];
 
     if (queueFilter === "all") {
       // All active reviews — exclude terminal states
@@ -767,7 +860,7 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
     });
     if (maxItems) list = list.slice(0, maxItems);
     return list;
-  }, [reviews, queueFilter, stageFilter, statusFilter, searchQuery, sortField, sortDir, maxItems, user]);
+  }, [reviews, queueFilter, stageFilter, statusFilter, searchQuery, sortField, sortDir, maxItems, user, favorites]);
 
   const toggleSort = (field: typeof sortField) => {
     if (sortField === field) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -1126,21 +1219,21 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
       {/* ── Queue Filter Tabs ── */}
       <div className="flex items-center gap-0.5 px-4 py-1.5 bg-gray-50 dark:bg-navy-850 border-b border-gray-200 dark:border-navy-700 overflow-x-auto">
         {[
-          { id: "all", label: "All Reviews" },
-          { id: "my", label: "My Reviews" },
-          { id: "legal", label: "Legal Queue", stage: "legal_ops" },
-          { id: "executive", label: "Executive Queue", stage: "executive" },
-          { id: "escalated", label: "Escalated" },
-          { id: "overdue", label: "Overdue" },
-          { id: "completed", label: "Completed" },
-          { id: "favorites", label: "Favorites", icon: Star, count: favorites.count },
+          { id: "all", label: "All Reviews", count: tabCounts.all },
+          { id: "my", label: "My Reviews", count: tabCounts.my },
+          { id: "legal", label: "Legal Queue", count: tabCounts.legal },
+          { id: "executive", label: "Executive Queue", count: tabCounts.executive },
+          { id: "compliance", label: "Compliance", count: tabCounts.compliance },
+          { id: "escalated", label: "Escalated", count: tabCounts.escalated },
+          { id: "overdue", label: "Overdue", count: tabCounts.overdue },
+          { id: "completed", label: "Completed", count: tabCounts.completed },
+          { id: "favorites", label: "Favorites", icon: Star, count: tabCounts.favorites },
         ].map((q) => (
           <button
             key={q.id}
             onClick={() => {
               setQueueFilter(q.id);
-              if (q.stage) setStageFilter(q.stage);
-              else setStageFilter("");
+              setStageFilter("");
             }}
             className={`px-3 py-1.5 text-[10px] font-medium rounded-md whitespace-nowrap transition-colors inline-flex items-center gap-1 ${
               queueFilter === q.id
@@ -1199,20 +1292,24 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
       )}
 
       {/* ── Bulk Assign Sub-Modal ── */}
-      {bulkAction === "assign" && (
-        <AssignModal
-          reviewId="bulk"
-          onClose={() => setBulkAction("")}
-          onAssign={(assigneeId, assigneeName) =>
-            bulkAssignMut.mutate({ ids: Array.from(selectedIds), assigneeId, assigneeName })
-          }
-        />
-      )}
+      <AnimatePresence mode="wait">
+        {bulkAction === "assign" && (
+          <AssignModal
+            key="bulk-assign"
+            reviewId="bulk"
+            onClose={() => setBulkAction("")}
+            onAssign={(assigneeId, assigneeName) =>
+              bulkAssignMut.mutate({ ids: Array.from(selectedIds), assigneeId, assigneeName })
+            }
+          />
+        )}
+      </AnimatePresence>
 
       {/* ── Assign Modal (single) ── */}
-      <AnimatePresence>
+      <AnimatePresence mode="wait">
         {assignTarget && (
           <AssignModal
+            key={`assign-${assignTarget}`}
             reviewId={assignTarget}
             onClose={() => setAssignTarget(null)}
             onAssign={(assigneeId, assigneeName) =>
@@ -1390,7 +1487,7 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                               className={`flex-shrink-0 p-0.5 rounded transition-colors ${
                                 favorites.isFavorite(review.review_id)
                                   ? "text-amber-500 hover:text-amber-600"
-                                  : "text-gray-300 dark:text-navy-500 opacity-0 group-hover:opacity-100 hover:text-amber-500"
+                                  : "text-gray-400 hover:text-amber-500 dark:text-gray-500"
                               }`}
                             >
                               <Star className={`w-3.5 h-3.5 ${favorites.isFavorite(review.review_id) ? "fill-current" : ""}`} />
@@ -1408,7 +1505,7 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                           {(() => {
                             const isExpired = review.status === "executed" && (review.sla_status === "critical_overdue" || review.sla_status === "overdue");
                             const isActive = review.status === "executed" && !isExpired;
-                            if (review.status === "archived") return <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 dark:bg-navy-700 dark:text-gray-400 flex-shrink-0">Closed</span>;
+                            if (review.status === "archived" || review.status === "closed") return <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 dark:bg-navy-700 dark:text-gray-400 flex-shrink-0">Closed</span>;
                             if (isExpired) return <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-300 flex-shrink-0">Expired</span>;
                             if (isActive) return <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-300 flex-shrink-0">Active</span>;
                             if (review.status === "finalized") return <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300 flex-shrink-0">Finalized</span>;
@@ -1445,7 +1542,8 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                           </div>
                         </div>
                         {/* ── Hover Tooltip Preview ── */}
-                        <div className="absolute left-0 top-full mt-1 z-20 hidden group-hover:block w-[380px] max-w-[380px] md:max-w-[90vw] bg-white dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded-lg shadow-xl pointer-events-none">
+                        <div className="invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-opacity duration-150 absolute z-40 w-[380px] max-w-[380px] md:max-w-[90vw] bg-white dark:bg-navy-700 border border-gray-200 dark:border-navy-600 rounded-lg shadow-xl pointer-events-none"
+                             style={{ top: '50%', left: 'calc(100% + 12px)', transform: 'translateY(-50%)', maxHeight: '60vh', overflowY: 'auto' }}>
                           <div className="p-3 space-y-2">
                             <div className="flex items-center gap-2">
                               <FileText className="w-4 h-4 text-navy-500 flex-shrink-0" />
@@ -1462,6 +1560,10 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                               {review.status.replace(/_/g, " ")} • {review.risk_score != null ? `${(review.risk_score * 100).toFixed(0)}% Risk` : "—"} • {review.finding_count} Findings • {review.redline_count} Redlines
                             </div>
                             <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                              <span>Contract: <span className="font-medium text-gray-700 dark:text-gray-200 font-mono">{review.contract_number || "—"}</span></span>
+                              <span>Review: <span className="font-medium text-gray-700 dark:text-gray-200 font-mono">{review.review_number || review.review_id.slice(0, 8)}</span></span>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
                               <span>Assignee: <span className="font-medium text-gray-700 dark:text-gray-200">{review.assigned_to_name || review.assigned_to || "Unassigned"}</span></span>
                               <span>Created: <span className="font-medium text-gray-700 dark:text-gray-200">{new Date(review.created_at).toLocaleDateString()}</span></span>
                             </div>
@@ -1476,9 +1578,6 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                                 <AlertTriangle className="w-3 h-3" /> SLA Overdue by {Math.round(review.overdue_hours)}h
                               </div>
                             )}
-                            <div className="text-[9px] text-gray-400 pt-0.5">
-                              Review ID: <span className="font-mono text-gray-500">{review.review_id}</span>
-                            </div>
                           </div>
                         </div>
                       </div>
@@ -1537,6 +1636,18 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                             >
                               {isRowAssigning ? "Assigning…" : displayName || "Unassigned"}
                             </span>
+                            {hasAssignee && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setAssignTarget(review.review_id);
+                                }}
+                                className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-navy-700 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex-shrink-0"
+                                title="Reassign"
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                              </button>
+                            )}
                           </div>
                         );
                       })()}
@@ -1611,7 +1722,17 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
                                   <ArrowUpRight className="w-3 h-3" />
                                 </button>
                               )}
-                              {/* Close — for finalized or executed contracts (not approved) */}
+                              {/* Finalize — for approved contracts */}
+                              {rowActions.canFinalize && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); finalizeMut.mutate(review.review_id); }}
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded-md bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/30 transition-colors"
+                                  title="Finalize contract"
+                                >
+                                  <CheckCircle2 className="w-3 h-3" />
+                                </button>
+                              )}
+                              {/* Close — for finalized or executed contracts */}
                               {(review.status === "finalized" || review.status === "executed") && (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleCloseReview(review.review_id, review.contract_number || review.document_name || "Contract"); }}
@@ -1662,12 +1783,14 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
       </div>
 
       {/* ── Approval Modal ── */}
-      <AnimatePresence>
+      <AnimatePresence mode="wait">
         {approvalTarget && (
           <ApprovalModal
+            key={`approve-${approvalTarget.review_id}`}
             reviewId={approvalTarget.review_id}
             reviewTitle={approvalTarget.document_name || approvalTarget.original_filename || `Review ${approvalTarget.review_id.slice(0, 8)}`}
             riskScore={approvalTarget.risk_score ?? undefined}
+            openObligations={openObligationCounts[approvalTarget.review_id] ?? 0}
             onApprove={async (decision, comment, conditions) => {
               await approveMut.mutateAsync({ reviewId: approvalTarget.review_id, decision, comment, conditions });
             }}
@@ -1681,9 +1804,10 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
       </AnimatePresence>
 
       {/* ── Escalation Modal ── */}
-      <AnimatePresence>
+      <AnimatePresence mode="wait">
         {escalationTarget && (
           <EscalationModal
+            key={`escalate-${escalationTarget.review_id}`}
             reviewId={escalationTarget.review_id}
             reviewTitle={escalationTarget.document_name || escalationTarget.original_filename || `Review ${escalationTarget.review_id.slice(0, 8)}`}
             currentPriority={escalationTarget.priority}
@@ -1704,20 +1828,32 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
       </AnimatePresence>
 
       {/* ── Close Confirmation Modal ── */}
-      <AnimatePresence>
+      <AnimatePresence mode="wait">
         {closeTarget && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setCloseTarget(null)}>
+          <motion.div key={`close-${closeTarget.id}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => { setCloseTarget(null); setCloseReason(""); }}>
             <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
               className="bg-white rounded-xl shadow-2xl border border-gray-200 w-full max-w-sm mx-4 p-5" onClick={e => e.stopPropagation()}>
               <h3 className="text-sm font-semibold text-navy-900">Close Contract</h3>
               <p className="text-[11px] text-gray-500 mt-1">Close "{closeTarget.name}"? This will archive the contract.</p>
               <p className="text-[10px] text-amber-600 mt-1">Open obligations will block this action.</p>
+              <div className="mt-3">
+                <label className="text-[10px] font-semibold text-gray-600">Reason for closing <span className="text-red-500">*</span></label>
+                <textarea value={closeReason} onChange={e => setCloseReason(e.target.value)}
+                  placeholder="Enter the reason for closing this contract..."
+                  rows={2}
+                  className="w-full mt-1 px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400 resize-none"
+                  autoFocus
+                />
+                {closeReason.trim().length > 0 && closeReason.trim().length < 5 && (
+                  <p className="text-[9px] text-red-500 mt-0.5">Please enter at least 5 characters</p>
+                )}
+              </div>
               <div className="mt-4 flex justify-end gap-2">
-                <button onClick={() => setCloseTarget(null)}
+                <button onClick={() => { setCloseTarget(null); setCloseReason(""); }}
                   className="px-3 py-1.5 text-[10px] font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50">Cancel</button>
-                <button onClick={() => closeMut.mutate({ reviewId: closeTarget.id })}
-                  disabled={closeMut.isPending}
+                <button onClick={() => closeMut.mutate({ reviewId: closeTarget.id, reason: closeReason.trim() })}
+                  disabled={closeMut.isPending || closeReason.trim().length < 5}
                   className="px-3 py-1.5 text-[10px] font-medium rounded-lg bg-gray-700 text-white hover:bg-gray-800 disabled:opacity-50">
                   {closeMut.isPending ? "Closing..." : "Close Contract"}
                 </button>

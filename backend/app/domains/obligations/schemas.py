@@ -188,6 +188,7 @@ class ObligationResponse(BaseModel):
 
     id: str
     tenant_id: Optional[str] = None
+    obligation_number: str = ""
     name: str
     description: Optional[str] = None
     obligation_type: str

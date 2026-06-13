@@ -215,8 +215,8 @@ def _map_status(status: str) -> str:
         "rejected": "draft",
         "finalized": "active",
         "executed": "active",
-        "archived": "expired",
-        "closed": "expired",
+        "closed": "closed",
+        "archived": "archived",
     }
     return mapping.get(status, "draft")
 
@@ -243,8 +243,8 @@ def _map_workflow(status: str) -> str:
         "rejected": "archived",
         "finalized": "executed",
         "executed": "executed",
+        "closed": "closed",
         "archived": "archived",
-        "closed": "archived",
     }
     return mapping.get(status, "draft")
 

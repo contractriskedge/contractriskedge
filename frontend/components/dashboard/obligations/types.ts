@@ -32,6 +32,7 @@ export interface ObligationKpi {
 
 export interface ObligationRecord {
   id: string;
+  obligationNumber: string;
   name: string;
   contractId: string;
   contractName: string;

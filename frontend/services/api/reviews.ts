@@ -332,6 +332,13 @@ export const reviewService = {
       { idempotencyKey },
     ),
 
+  /** Toggle favorite status */
+  toggleFavorite: (reviewId: string, isFavorite: boolean) =>
+    api.post<{ review_id: string; is_favorite: boolean }>(
+      `/reviews/${reviewId}/favorite`,
+      { is_favorite: isFavorite },
+    ),
+
   /** Approve/reject a review */
   approve: (reviewId: string, body: ApproveRequest, idempotencyKey?: string) =>
     api.post<Record<string, unknown>>(

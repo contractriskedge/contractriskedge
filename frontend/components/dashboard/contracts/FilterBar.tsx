@@ -106,6 +106,8 @@ export function FilterBar({ filters, onChange, onReset, allContracts }: FilterBa
         <option value="under_review">Under Review</option>
         <option value="expired">Expired</option>
         <option value="draft">Draft</option>
+        <option value="closed">Closed</option>
+        <option value="archived">Archived</option>
       </select>
       <select value={filters.workflowStage} onChange={(e) => onChange("workflowStage", e.target.value)}
         className="text-[11px] border border-gray-200 dark:border-navy-600 rounded-md px-2 py-1 text-gray-600 dark:text-gray-300 bg-white dark:bg-navy-800 hover:border-gray-300 dark:hover:border-navy-500 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors cursor-pointer" aria-label="Workflow Stage">
@@ -119,6 +121,7 @@ export function FilterBar({ filters, onChange, onReset, allContracts }: FilterBa
         <option value="negotiation">Negotiation</option>
         <option value="executive">Executive</option>
         <option value="executed">Executed</option>
+        <option value="closed">Closed</option>
         <option value="archived">Archived</option>
       </select>
       {activeCount > 0 && (

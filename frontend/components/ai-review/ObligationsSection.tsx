@@ -18,7 +18,7 @@ import { useQueryClient, useMutation, useQuery } from "@tanstack/react-query";
 import {
   ClipboardCheck, Plus, Edit3, Trash2, ExternalLink, Loader2,
   AlertCircle, FileText, Calendar, User, Shield, DollarSign,
-  CheckCircle2, XCircle, Clock, AlertTriangle, Link2,
+  CheckCircle2, XCircle, Clock, AlertTriangle, Link2, Activity,
 } from "lucide-react";
 import { useReviewContext } from "./ReviewContext";
 import { obligationsService } from "@/services/api/obligations";
@@ -246,6 +246,9 @@ export function ObligationsSection() {
                     </div>
                   </div>
                 )}
+
+                {/* Activity Section */}
+                <ObligationActivity obligationId={ob.id} />
               </div>
             );
           })}
@@ -348,30 +351,67 @@ function ObligationCreateModal({ contractId, contractName, onSave, onCancel, isS
   onCancel: () => void;
   isSaving: boolean;
 }) {
+  const ctx = useReviewContext();
+  const { findings } = ctx;
   const [name, setName] = useState("");
   const [obligationType, setObligationType] = useState("payment");
+  const [status, setStatus] = useState("open");
   const [dueDate, setDueDate] = useState("");
   const [description, setDescription] = useState("");
   const [notes, setNotes] = useState("");
   const [clauseReference, setClauseReference] = useState("");
+  const [clauseSearch, setClauseSearch] = useState("");
+  const [showClauseDropdown, setShowClauseDropdown] = useState(false);
+  const [owner, setOwner] = useState("");
+  const [assignee, setAssignee] = useState("");
+  const [department, setDepartment] = useState("");
+  const [businessUnit, setBusinessUnit] = useState("");
+  const [riskLevel, setRiskLevel] = useState("medium");
+  const [financialImpact, setFinancialImpact] = useState("");
+
+  // Extract unique clause references from findings for autocomplete
+  const clauseOptions = useMemo(() => {
+    const clauses = new Set<string>();
+    findings.forEach(f => {
+      if (f.clause_type) clauses.add(f.clause_type);
+      if (f.clause_text) {
+        const sectionMatch = f.clause_text.match(/(Section\s+\d+(?:\.\d+)*)/i);
+        if (sectionMatch) clauses.add(sectionMatch[1]);
+      }
+    });
+    return Array.from(clauses).sort();
+  }, [findings]);
+
+  const filteredClauseOptions = useMemo(() => {
+    if (!clauseSearch.trim()) return clauseOptions.slice(0, 10);
+    const q = clauseSearch.toLowerCase();
+    return clauseOptions.filter(c => c.toLowerCase().includes(q)).slice(0, 10);
+  }, [clauseOptions, clauseSearch]);
 
   const handleSave = () => {
     if (!name.trim()) return;
     onSave({
       name: name.trim(),
       obligationType,
+      status,
       description: description.trim() || undefined,
       dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
       notes: notes.trim() || undefined,
       clauseReference: clauseReference.trim() || undefined,
       contractUuidId: contractId,
       contractName: contractName,
+      owner: owner.trim() || undefined,
+      assignee: assignee.trim() || undefined,
+      department: department.trim() || undefined,
+      businessUnit: businessUnit.trim() || undefined,
+      riskLevel: riskLevel,
+      financialImpact: parseFloat(financialImpact) || undefined,
     });
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onCancel}>
-      <div className="bg-white rounded-xl shadow-2xl border border-gray-200 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-xl shadow-2xl border border-gray-200 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="px-4 py-3 border-b border-gray-100">
           <h3 className="text-sm font-semibold text-navy-900">New Obligation</h3>
           <p className="text-[10px] text-gray-500 mt-0.5">Create a new obligation for this contract</p>
@@ -382,30 +422,102 @@ function ObligationCreateModal({ contractId, contractName, onSave, onCancel, isS
             <input value={name} onChange={e => setName(e.target.value)}
               className="w-full mt-1 px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400" />
           </div>
-          <div>
-            <label className="text-[10px] font-semibold text-gray-600">Type</label>
-            <select value={obligationType} onChange={e => setObligationType(e.target.value)}
-              className="w-full mt-1 px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400">
-              {Object.entries(OBLIGATION_TYPES).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
-              ))}
-            </select>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] font-semibold text-gray-600">Type</label>
+              <select value={obligationType} onChange={e => setObligationType(e.target.value)}
+                className="w-full mt-1 px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400">
+                {Object.entries(OBLIGATION_TYPES).map(([k, v]) => (
+                  <option key={k} value={k}>{v}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold text-gray-600">Status</label>
+              <select value={status} onChange={e => setStatus(e.target.value)}
+                className="w-full mt-1 px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400">
+                <option value="open">Open</option>
+                <option value="in_progress">In Progress</option>
+                <option value="pending_supplier">Pending Supplier</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] font-semibold text-gray-600">Owner</label>
+              <input value={owner} onChange={e => setOwner(e.target.value)} placeholder="Owner name"
+                className="w-full mt-1 px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400" />
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold text-gray-600">Assignee</label>
+              <input value={assignee} onChange={e => setAssignee(e.target.value)} placeholder="Assignee name"
+                className="w-full mt-1 px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] font-semibold text-gray-600">Department</label>
+              <input value={department} onChange={e => setDepartment(e.target.value)} placeholder="e.g. Legal"
+                className="w-full mt-1 px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400" />
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold text-gray-600">Business Unit</label>
+              <input value={businessUnit} onChange={e => setBusinessUnit(e.target.value)} placeholder="e.g. Enterprise"
+                className="w-full mt-1 px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] font-semibold text-gray-600">Due Date</label>
+              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+                className="w-full mt-1 px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400" />
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold text-gray-600">Financial Impact ($)</label>
+              <input type="number" value={financialImpact} onChange={e => setFinancialImpact(e.target.value)} placeholder="0"
+                className="w-full mt-1 px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400" />
+            </div>
           </div>
           <div>
-            <label className="text-[10px] font-semibold text-gray-600">Due Date</label>
-            <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
-              className="w-full mt-1 px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400" />
+            <label className="text-[10px] font-semibold text-gray-600">Risk Level</label>
+            <div className="flex gap-1.5 mt-1">
+              {["low", "medium", "high", "critical"].map(level => (
+                <button key={level} type="button" onClick={() => setRiskLevel(level)}
+                  className={`px-2.5 py-1 text-[10px] font-medium rounded-lg transition-colors ${
+                    riskLevel === level
+                      ? level === "critical" ? "bg-red-600 text-white" : level === "high" ? "bg-orange-600 text-white" : level === "medium" ? "bg-amber-500 text-white" : "bg-green-600 text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}>
+                  {level.charAt(0).toUpperCase() + level.slice(1)}
+                </button>
+              ))}
+            </div>
           </div>
           <div>
             <label className="text-[10px] font-semibold text-gray-600">Description</label>
             <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2}
               className="w-full mt-1 px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400" />
           </div>
-          <div>
+          <div className="relative">
             <label className="text-[10px] font-semibold text-gray-600">Clause Reference</label>
-            <input value={clauseReference} onChange={e => setClauseReference(e.target.value)}
-              placeholder="e.g. Section 5.3 - Indemnification"
+            <input value={clauseReference || clauseSearch} onChange={e => { setClauseSearch(e.target.value); setClauseReference(""); setShowClauseDropdown(true); }}
+              onFocus={() => setShowClauseDropdown(true)}
+              placeholder="Search or type clause reference..."
               className="w-full mt-1 px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400" />
+            {showClauseDropdown && filteredClauseOptions.length > 0 && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowClauseDropdown(false)} />
+                <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-32 overflow-y-auto">
+                  {filteredClauseOptions.map((opt) => (
+                    <button key={opt} type="button" onClick={() => { setClauseReference(opt); setClauseSearch(opt); setShowClauseDropdown(false); }}
+                      className="w-full text-left px-3 py-1.5 text-[10px] hover:bg-navy-50 text-gray-700 hover:text-navy-900 transition-colors">
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            <p className="text-[8px] text-gray-400 mt-0.5">Preloaded from AI-detected clauses. Type to search or enter custom reference.</p>
           </div>
           <div>
             <label className="text-[10px] font-semibold text-gray-600">Notes</label>
@@ -421,6 +533,60 @@ function ObligationCreateModal({ contractId, contractName, onSave, onCancel, isS
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Obligation Activity ──────────────────────────────────────────
+
+function ObligationActivity({ obligationId }: { obligationId: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const { data: auditEntries, isLoading } = useQuery({
+    queryKey: ["obligation-audit", obligationId],
+    queryFn: () => obligationsService.getAuditHistory(obligationId),
+    enabled: expanded && !!obligationId,
+  });
+
+  const entries = Array.isArray(auditEntries) ? auditEntries : [];
+
+  return (
+    <div className="border-t border-gray-100 dark:border-navy-700">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between px-3 py-1.5 text-[9px] font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 dark:hover:bg-navy-750 transition-colors"
+      >
+        <span className="flex items-center gap-1">
+          <Activity className="w-3 h-3" />
+          Activity {entries.length > 0 && `(${entries.length})`}
+        </span>
+        <span className={`transform transition-transform ${expanded ? "rotate-180" : ""}`}>▾</span>
+      </button>
+      {expanded && (
+        <div className="px-3 pb-2 max-h-48 overflow-y-auto">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-3">
+              <Loader2 className="w-3.5 h-3.5 text-gray-400 animate-spin" />
+            </div>
+          ) : entries.length === 0 ? (
+            <p className="text-[9px] text-gray-400 py-2 text-center">No activity recorded</p>
+          ) : (
+            <div className="space-y-1">
+              {entries.map((a: any, i: number) => (
+                <div key={i} className="flex items-start gap-1.5 py-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-navy-300 mt-1.5 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-[9px] text-gray-700 dark:text-gray-300 leading-tight">{a.action}</p>
+                    <p className="text-[8px] text-gray-400">
+                      {a.actor || "System"} · {(a.created_at || "").slice(0, 10)}
+                      {a.comment && <span className="italic"> · "{a.comment}"</span>}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -39,7 +39,7 @@ import {
   Clock, User, RefreshCw, Download, Share2, ExternalLink,
   Edit3, GitCompare, MessageSquare, Activity, Calendar,
   Building2, Globe, Loader2, ChevronDown, ChevronRight, ChevronUp,
-  BarChart3, BookOpen, XCircle, DollarSign, GitBranch, Lock,
+  BarChart3, BookOpen, XCircle, DollarSign, GitBranch, Lock, Archive,
 } from "lucide-react";
 import {
   useContractDetail,
@@ -53,6 +53,7 @@ import {
 } from "./hooks";
 import { useRiskBreakdown } from "@/services/hooks";
 import { reviewService } from "@/services/api/reviews";
+import { useCloseReview } from "@/services/hooks/useReviews";
 import type { GovernanceTraceability } from "@/services/api/client";
 import { RelatedReviewsPanel } from "./RelatedReviewsPanel";
 import { LifecycleHistoryPanel } from "./LifecycleHistoryPanel";
@@ -60,6 +61,7 @@ import { WorkflowTimelinePanel, type TimelineEvent } from "./WorkflowTimelinePan
 import { AuditTrailPanel } from "./AuditTrailPanel";
 import { IntelligenceHub } from "./IntelligenceHub";
 import { formatDate } from "@/lib/date-utils";
+import { ApprovalModal } from "@/components/review/ApprovalModal";
 
 // ── Props ───────────────────────────────────────────────────────────────────
 
@@ -74,16 +76,21 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"overview" | "insights" | "clauses" | "activity" | "versions" | "reviews" | "lifecycle" | "workflow">("overview");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [approvalModalOpen, setApprovalModalOpen] = useState(false);
+  const [closeModalOpen, setCloseModalOpen] = useState(false);
+  const [closeReason, setCloseReason] = useState("");
 
   // ── Action Mutations ──────────────────────────────────────────
   const approveMut = useMutation({
-    mutationFn: () => reviewService.approve(contractId, { decision: "approved", comments: "Approved from Contract 360" }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["contract-detail"] }); setActionLoading(null); },
+    mutationFn: ({ decision, comment, conditions }: { decision: string; comment: string; conditions?: Record<string, unknown> }) =>
+      reviewService.approve(contractId, { decision, comments: comment, conditions }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["contract-detail"] }); setActionLoading(null); setApprovalModalOpen(false); },
     onError: () => setActionLoading(null),
   });
   const rejectMut = useMutation({
-    mutationFn: () => reviewService.approve(contractId, { decision: "rejected", comments: "Rejected from Contract 360" }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["contract-detail"] }); setActionLoading(null); },
+    mutationFn: ({ comment, category, severity }: { comment: string; category: string; severity: string }) =>
+      reviewService.approve(contractId, { decision: "rejected", comments: comment, conditions: { category, severity } }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["contract-detail"] }); setActionLoading(null); setApprovalModalOpen(false); },
     onError: () => setActionLoading(null),
   });
   const finalizeMut = useMutation({
@@ -91,6 +98,20 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["contract-detail"] }); setActionLoading(null); },
     onError: () => setActionLoading(null),
   });
+  const closeMut = useCloseReview();
+  const handleClose = async () => {
+    if (closeReason.trim().length < 5) return;
+    setActionLoading("close");
+    try {
+      await closeMut.mutateAsync({ reviewId: contractId, reason: closeReason.trim() });
+      setCloseModalOpen(false);
+      setCloseReason("");
+      queryClient.invalidateQueries({ queryKey: ["contract-detail"] });
+    } catch {
+      // Error handled by mutation state
+    }
+    setActionLoading(null);
+  };
 
   // ── Data Fetching (repository-only) ──────────────────────────────────
 
@@ -253,7 +274,10 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
     );
   }
 
-  const openObligations = obligations.filter(o => o.status === "overdue" || o.status === "pending").length;
+  const openObligations = obligationsData?.open ?? obligations.filter(
+    o => !["completed", "closed", "waived", "cancelled", "archived"].includes(o.status)
+  ).length;
+  const openCriticalFindings = findings.filter(f => (f.severity === "critical" || f.severity === "high") && f.status === "open").length;
 
   return (
     <div className="flex flex-col h-full bg-gray-50 dark:bg-navy-900">
@@ -305,7 +329,7 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
           {contract.status && ["in_review", "legal_review", "security_review", "procurement_review", "negotiation", "escalated", "exec_approval"].includes(contract.status) && (
             <>
               <button
-                onClick={() => { setActionLoading("approve"); approveMut.mutate(); }}
+                onClick={() => { setActionLoading("approve"); setApprovalModalOpen(true); }}
                 disabled={actionLoading === "approve" || approveMut.isPending}
                 className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition-colors shadow-sm"
                 title="Approve review"
@@ -314,7 +338,7 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                 Approve
               </button>
               <button
-                onClick={() => { setActionLoading("reject"); rejectMut.mutate(); }}
+                onClick={() => { setActionLoading("reject"); setApprovalModalOpen(true); }}
                 disabled={actionLoading === "reject" || rejectMut.isPending}
                 className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-md bg-white border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
                 title="Reject review"
@@ -333,6 +357,18 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
             >
               {finalizeMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Lock className="w-3.5 h-3.5" />}
               Finalize
+            </button>
+          )}
+          {/* Close — for finalized or executed contracts */}
+          {(contract.status === "finalized" || contract.status === "executed") && (
+            <button
+              onClick={() => { setCloseModalOpen(true); setCloseReason(""); }}
+              disabled={actionLoading === "close" || closeMut.isPending}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-md bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              title="Close contract — ends the lifecycle"
+            >
+              {closeMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Archive className="w-3.5 h-3.5" />}
+              Close
             </button>
           )}
           {approveMut.isError && (
@@ -848,6 +884,67 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
           </div>
         </div>
       </div>
+
+      {/* ── Approval Modal ── */}
+      {approvalModalOpen && (
+        <ApprovalModal
+          reviewId={contractId}
+          reviewTitle={contract.name}
+          riskScore={contract.risk_score != null ? contract.risk_score / 10 : undefined}
+          openCriticalFindings={openCriticalFindings}
+          openObligations={openObligations}
+          onApprove={async (decision, comment, conditions) => {
+            setActionLoading("approve");
+            await approveMut.mutateAsync({ decision, comment, conditions });
+          }}
+          onReject={async (comment, category, severity) => {
+            setActionLoading("reject");
+            await rejectMut.mutateAsync({ comment, category, severity });
+          }}
+          onClose={() => setApprovalModalOpen(false)}
+          isLoading={approveMut.isPending || rejectMut.isPending}
+        />
+      )}
+
+      {/* ── Close Modal ── */}
+      {closeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => { setCloseModalOpen(false); setCloseReason(""); }}>
+          <div className="bg-white rounded-xl shadow-2xl border border-gray-200 w-full max-w-sm mx-4 p-5" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-navy-900">Close Contract</h3>
+            <p className="text-[11px] text-gray-500 mt-1">Close "{contract.name}"? This will archive the contract and end its lifecycle.</p>
+            <p className="text-[10px] text-amber-600 mt-1">Open obligations will block this action.</p>
+            <div className="mt-3">
+              <label className="text-[10px] font-semibold text-gray-600">Reason for closing <span className="text-red-500">*</span></label>
+              <textarea
+                value={closeReason}
+                onChange={e => setCloseReason(e.target.value)}
+                placeholder="Enter the reason for closing this contract..."
+                rows={2}
+                className="w-full mt-1 px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400 resize-none"
+                autoFocus
+              />
+              {closeReason.trim().length > 0 && closeReason.trim().length < 5 && (
+                <p className="text-[9px] text-red-500 mt-0.5">Please enter at least 5 characters</p>
+              )}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => { setCloseModalOpen(false); setCloseReason(""); }}
+                className="px-3 py-1.5 text-[10px] font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClose}
+                disabled={closeMut.isPending || closeReason.trim().length < 5}
+                className="px-3 py-1.5 text-[10px] font-medium rounded-lg bg-gray-700 text-white hover:bg-gray-800 disabled:opacity-50"
+              >
+                {closeMut.isPending ? "Closing..." : "Close Contract"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

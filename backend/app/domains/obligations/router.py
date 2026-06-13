@@ -72,7 +72,8 @@ async def get_obligations_by_contract(
     items, total = await service.list_obligations(
         page=1, page_size=100, contract_id=contract_id,
     )
-    open_count = sum(1 for o in items if o.status in ("pending", "in_progress", "open", "active"))
+    from app.domains.review.service import TERMINAL_OBLIGATION_STATUSES
+    open_count = sum(1 for o in items if o.status not in TERMINAL_OBLIGATION_STATUSES)
     completed_count = sum(1 for o in items if o.status == "completed")
     overdue_count = sum(1 for o in items if o.status == "overdue")
     return {

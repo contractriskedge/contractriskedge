@@ -45,20 +45,32 @@ function InsightCard({ insight, index }: { insight: ObligationInsight; index: nu
   );
 }
 
-export function ObligationAiInsights({ insights }: { insights: ObligationInsight[] }) {
+export function ObligationAiInsights({ insights, compact }: { insights: ObligationInsight[]; compact?: boolean }) {
+  if (insights.length === 0) return null;
   const critical = insights.filter((i) => i.severity === "critical").length;
   const warning = insights.filter((i) => i.severity === "warning").length;
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2"><Brain className="w-4.5 h-4.5 text-navy-700" /><h2 className="text-sm font-semibold text-navy-900">Compliance Alerts</h2></div>
-        <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{insights.length} insights</span>
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Brain className="w-4 h-4 text-navy-700" />
+            <h3 className="text-xs font-semibold text-navy-900">Compliance Alerts</h3>
+          </div>
+          <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{insights.length}</span>
+        </div>
+        <div className="flex items-center gap-2 mt-2 px-2.5 py-1.5 bg-gradient-to-r from-navy-50 to-indigo-50 rounded-md border border-navy-100">
+          <Sparkles className="w-3.5 h-3.5 text-navy-600 flex-shrink-0" />
+          <span className="text-[10px] font-medium text-navy-700">
+            <span className="font-bold text-red-600">{critical} critical</span>
+            {" · "}
+            <span className="font-bold text-orange-600">{warning} warnings</span>
+          </span>
+        </div>
       </div>
-      <div className="flex items-center gap-3 px-3 py-2 bg-gradient-to-r from-navy-50 to-indigo-50 rounded-lg border border-navy-100">
-        <Sparkles className="w-4 h-4 text-navy-600" />
-        <span className="text-[11px] font-medium text-navy-700"><span className="font-bold text-red-600">{critical} critical</span> and <span className="font-bold text-orange-600">{warning} warnings</span></span>
+      <div className={`space-y-1.5 p-3 overflow-y-auto ${compact ? "max-h-[240px]" : "max-h-[420px]"}`}>
+        {insights.map((insight, i) => <InsightCard key={insight.id} insight={insight} index={i} />)}
       </div>
-      <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1">{insights.map((insight, i) => <InsightCard key={insight.id} insight={insight} index={i} />)}</div>
     </div>
   );
 }

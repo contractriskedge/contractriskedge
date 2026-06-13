@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import traceback
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -53,6 +54,11 @@ from app.kernel.web.exceptions import ConflictError
 from app.domains.notify.service import NotificationService
 
 logger = logging.getLogger(__name__)
+
+# Obligation statuses that no longer block approval or contract close.
+TERMINAL_OBLIGATION_STATUSES = frozenset({
+    "completed", "closed", "waived", "cancelled", "archived",
+})
 
 
 @dataclass
@@ -151,6 +157,56 @@ class ReviewService:
     async def list_reviews(self, filters: ReviewFilterParams) -> tuple[list, int]:
         return await self.review_repo.list_reviews(self.tenant_id, filters, filters)
 
+    def _obligation_contract_filter(self, review_id: str):
+        """Match obligations linked by UUID and/or legacy string contract_id."""
+        from sqlalchemy import or_
+        from app.domains.obligations.models import Obligation
+
+        try:
+            uid = uuid.UUID(review_id)
+            return or_(
+                Obligation.contract_uuid_id == uid,
+                Obligation.contract_id == review_id,
+                Obligation.contract_id == str(uid),
+            )
+        except ValueError:
+            return Obligation.contract_id == review_id
+
+    async def count_open_obligations(self, review_id: str) -> int:
+        """Count obligations that are still open for a contract/review."""
+        from app.domains.obligations.models import Obligation
+        from sqlalchemy import select as sa_select, func as sa_func
+
+        result = await self.review_repo.session.execute(
+            sa_select(sa_func.count()).select_from(Obligation).where(
+                Obligation.tenant_id == self.tenant_id,
+                self._obligation_contract_filter(review_id),
+                ~Obligation.status.in_(list(TERMINAL_OBLIGATION_STATUSES)),
+            )
+        )
+        count = result.scalar() or 0
+
+        # Debug: log all obligations for this contract to understand the link
+        if count > 0:
+            rows = await self.review_repo.session.execute(
+                sa_select(Obligation.id, Obligation.name, Obligation.status, Obligation.contract_uuid_id, Obligation.contract_id)
+                .where(
+                    Obligation.tenant_id == self.tenant_id,
+                    self._obligation_contract_filter(review_id),
+                )
+            )
+            for row in rows:
+                logger.info(
+                    "[DEBUG] Open obligation: id=%s name=%s status=%s contract_uuid_id=%s contract_id=%s review_id=%s",
+                    row.id, row.name, row.status, row.contract_uuid_id, row.contract_id, review_id,
+                )
+
+        logger.info(
+            "[DEBUG] count_open_obligations: review=%s open_count=%s",
+            review_id, count,
+        )
+        return count
+
     async def update_status(self, review_id: str, new_status: str, reason: Optional[str] = None) -> Optional[dict]:
         """Update review status with strict workflow validation.
 
@@ -161,19 +217,22 @@ class ReviewService:
         if new_status.lower() == "rejected" and not (reason and reason.strip()):
             raise ValueError("Rejection reason is required when rejecting a review.")
 
+        # Guard: closing/archiving requires a reason
+        if new_status.lower() in ("closed", "archived") and not (reason and reason.strip() and len(reason.strip()) >= 5):
+            raise ValueError("A closing reason of at least 5 characters is required when closing or archiving a contract.")
+
         # Guard: closing/archiving requires no open obligations
         if new_status.lower() in ("closed", "archived"):
-            from app.domains.obligations.models import Obligation
-            from sqlalchemy import select as sa_select, func as sa_func
-            open_obl = await self.review_repo.session.execute(
-                sa_select(sa_func.count()).select_from(Obligation).where(
-                    Obligation.contract_uuid_id == review_id,
-                    Obligation.tenant_id == self.tenant_id,
-                    ~Obligation.status.in_(["completed", "closed", "waived"]),
-                )
+            open_count = await self.count_open_obligations(review_id)
+            logger.info(
+                "[DEBUG] update_status obligation guard: review=%s target=%s open_count=%s",
+                review_id, new_status, open_count,
             )
-            open_count = open_obl.scalar() or 0
             if open_count > 0:
+                logger.warning(
+                    "[DEBUG] BLOCKED close/archive due to open obligations: review=%s open_count=%s user=%s",
+                    review_id, open_count, self.user.id,
+                )
                 raise ValueError(
                     f"Cannot close: {open_count} obligation(s) are still open. "
                     "Complete or close all obligations before closing the contract."
@@ -185,6 +244,33 @@ class ReviewService:
             return None
 
         current_status = str(review.status.value) if hasattr(review.status, 'value') else str(review.status)
+
+        # Guard: only finalized, executed, or rejected contracts can be closed/archived
+        # (prevents accidentally archiving contracts still in active review)
+        if new_status.lower() in ("closed", "archived"):
+            allowed_close_statuses = ["finalized", "executed", "rejected", "approved", "closed", "archived"]
+            logger.info(
+                "[DEBUG] update_status: review=%s user=%s new_status=%s current_status=%s reason=%s allowed=%s",
+                review_id, self.user.id, new_status, current_status,
+                reason[:50] if reason else "None", allowed_close_statuses,
+            )
+            if current_status not in allowed_close_statuses:
+                if reason and "override:" in reason.lower():
+                    logger.info(
+                        "Close/archive override for review %s: status %s overridden by %s",
+                        review_id, current_status, self.user.id,
+                    )
+                else:
+                    logger.warning(
+                        "[DEBUG] BLOCKED close/archive: review=%s current_status=%s target=%s user=%s",
+                        review_id, current_status, new_status, self.user.id,
+                    )
+                    raise ValueError(
+                        f"Cannot close/archive a contract with status '{current_status}'. "
+                        "Only finalized, executed, or rejected contracts can be closed. "
+                        "Add 'override:' to your reason to bypass this restriction."
+                    )
+
         current_state = map_legacy_status(current_status)
 
         # Validate transition through the state machine
@@ -487,16 +573,7 @@ class ReviewService:
             "adding_ip_ownership_clause": "All intellectual property rights in and to the deliverables, including all modifications, enhancements, and derivative works, shall be owned exclusively by [Company]. [Counterparty] hereby assigns all such rights to [Company].",
         }
 
-        proposed_text = clause_templates.get(
-            mitigation_type,
-            f"[Proposed clause for {effect.get('label', mitigation_type)} — please review and customize.]"
-        )
-        if linked_findings and linked_findings[0].recommendation:
-            rec = (linked_findings[0].recommendation or "").strip()
-            if rec and mitigation_type.startswith("generic_"):
-                proposed_text = rec
-
-        # Get linked findings for context
+        # Get linked findings for context (must be before proposed_text uses it)
         linked_findings = []
         if finding_ids:
             for fid in finding_ids:
@@ -509,6 +586,15 @@ class ReviewService:
                 finding = f_result.scalar_one_or_none()
                 if finding:
                     linked_findings.append(finding)
+
+        proposed_text = clause_templates.get(
+            mitigation_type,
+            f"[Proposed clause for {effect.get('label', mitigation_type)} — please review and customize.]"
+        )
+        if linked_findings and linked_findings[0].recommendation:
+            rec = (linked_findings[0].recommendation or "").strip()
+            if rec and mitigation_type.startswith("generic_"):
+                proposed_text = rec
 
         # Build rationale from mitigation description
         rationale = effect.get("description", f"Mitigation recommendation: {effect.get('label', mitigation_type)}")
@@ -1073,6 +1159,11 @@ class ReviewService:
         )
         await self.review_repo.session.execute(stmt)
 
+        # Set workflow_stage based on assignee's role for correct queue routing.
+        # This ensures the review appears in the appropriate queue tab (Legal,
+        # Executive, Compliance, etc.) after assignment.
+        await self._sync_workflow_stage_from_assignee(review_id, assignee_id)
+
         updated_review = await self.review_repo.get_review(review_id, self.tenant_id)
         result = {
             "assignment_id": str(assignment.assignment_id),
@@ -1100,7 +1191,10 @@ class ReviewService:
 
         # Send notification
         if self.notify_service:
-            await self.notify_service.send_review_assigned(review_id, assignee_id, self.user.id)
+            try:
+                await self.notify_service.send_review_assigned(review_id, assignee_id, self.user.id)
+            except Exception:
+                logger.warning("Assignment notification failed for %s: %s", review_id, traceback.format_exc())
 
         return result
 
@@ -1139,22 +1233,20 @@ class ReviewService:
             review_id, self.tenant_id, self.user.id, reason, escalated_to,
         )
 
-        # Determine the actual target status based on workflow stage
-        target_status: Optional[ReviewStatus] = None
+        # Determine the effective workflow stage for queue routing
         effective_stage: Optional[str] = target_workflow_stage
 
         if target_workflow_stage == "legal_approval":
-            target_status = ReviewStatus.LEGAL_APPROVAL
             effective_stage = "legal_approval"
         elif target_workflow_stage == "exec_approval":
-            target_status = ReviewStatus.EXEC_APPROVAL
             effective_stage = "executive"
         elif target_workflow_stage == "compliance":
-            target_status = ReviewStatus.IN_REVIEW
             effective_stage = "compliance"
 
-        # Transition to the target status (or escalated if no routing target)
-        final_status = target_status if target_status else ReviewStatus.ESCALATED
+        # Always transition to ESCALATED — this is universally allowed from any
+        # mutable non-escalated state. The workflow_stage column (updated below)
+        # drives queue routing (Legal Queue, Executive Queue, Compliance Queue).
+        final_status = ReviewStatus.ESCALATED
         await self.review_repo.update_status(
             review_id, self.tenant_id, final_status,
             changed_by=self.user.id,
@@ -1228,18 +1320,21 @@ class ReviewService:
 
         # Send escalation notification to the target
         if self.notify_service and escalated_to:
-            stage_label = target_workflow_stage.replace("_", " ").title() if target_workflow_stage else "Escalated"
-            await self.notify_service.send_notification(
-                user_id=escalated_to,
-                notif_type="review.escalated",
-                title=f"Review {stage_label}",
-                body=reason,
-                severity="high",
-                entity_type="review",
-                entity_id=review_id,
-                action_url=f"/reviews/{review_id}",
-                dedup_key=f"escalation:{review_id}",
-            )
+            try:
+                stage_label = target_workflow_stage.replace("_", " ").title() if target_workflow_stage else "Escalated"
+                await self.notify_service.send_notification(
+                    user_id=escalated_to,
+                    notif_type="review.escalated",
+                    title=f"Review {stage_label}",
+                    body=reason,
+                    severity="high",
+                    entity_type="review",
+                    entity_id=review_id,
+                    action_url=f"/reviews/{review_id}",
+                    dedup_key=f"escalation:{review_id}",
+                )
+            except Exception:
+                logger.warning("Escalation notification failed for %s: %s", review_id, traceback.format_exc())
 
         # Mark idempotency complete
         await self.idempotency.mark_completed("escalate", review_id, self.user.id, {
@@ -1340,6 +1435,33 @@ class ReviewService:
                             "Resolve or dismiss them in Findings first, or add 'override:' to your comments to bypass."
                         ),
                         details={"unresolved_critical_high_count": count},
+                    )
+
+            # Guard: if approving, check for open obligations
+            open_count = await self.count_open_obligations(review_id)
+            logger.info(
+                "[DEBUG] approve obligation guard: review=%s decision=%s open_count=%s",
+                review_id, decision, open_count,
+            )
+            if open_count > 0:
+                # Allow override if reason is provided (admin bypass)
+                if comments and "override:" in comments.lower():
+                    logger.info(
+                        "Approval override for review %s: %d open obligations overridden by %s",
+                        review_id, open_count, self.user.id,
+                    )
+                else:
+                    action_label = "approve" if decision == "approved" else "conditionally approve"
+                    logger.warning(
+                        "[DEBUG] BLOCKED approve due to open obligations: review=%s open_count=%s user=%s",
+                        review_id, open_count, self.user.id,
+                    )
+                    raise ConflictError(
+                        message=(
+                            f"Cannot {action_label}: {open_count} obligation(s) are still open. "
+                            "Complete or close all obligations before approving, or add 'override:' to your comments to bypass."
+                        ),
+                        details={"open_obligation_count": open_count},
                     )
 
         new_status = ReviewStatus.APPROVED if decision == "approved" else ReviewStatus.REJECTED
@@ -1458,6 +1580,26 @@ class ReviewService:
             "approved_by": self.user.id,
             "approved_at": approval.decided_at.isoformat() if approval.decided_at else datetime.utcnow().isoformat(),
         }
+
+    async def toggle_favorite(self, review_id: str, is_favorite: bool) -> dict:
+        """Toggle the favorite status of a review for the current user."""
+        from app.domains.review.models import ContractReview
+        from sqlalchemy import update, func
+
+        review = await self.review_repo.get_review(review_id, self.tenant_id)
+        if not review:
+            raise ValueError(f"Review {review_id} not found")
+
+        await self.review_repo.session.execute(
+            update(ContractReview)
+            .where(
+                ContractReview.review_id == review_id,
+                ContractReview.tenant_id == self.tenant_id,
+            )
+            .values(is_favorite=is_favorite, updated_at=func.now())
+        )
+
+        return {"review_id": review_id, "is_favorite": is_favorite}
 
     async def finalize(self, review_id: str) -> dict:
         """Finalize an approved review — locks the version and sets FINALIZED status.
@@ -1810,13 +1952,52 @@ class ReviewService:
         }
 
     async def soft_delete(self, review_id: str, reason: Optional[str] = None) -> bool:
-        """Soft-delete a review by setting is_deleted and deleted_at."""
+        """Soft-delete a review by setting is_deleted and deleted_at.
+
+        Guards:
+        - Requires a reason (min 5 characters) — prevents accidental deletion
+        - Only allows deletion of terminal-status contracts (finalized, executed,
+          rejected, closed, archived) — prevents deleting contracts in active review.
+          Add 'override:' to reason to bypass.
+        """
         review = await self.review_repo.get_review(review_id, self.tenant_id)
         if not review:
             return False
 
         raw_status = review.status
         status_str = raw_status.value if hasattr(raw_status, 'value') else str(raw_status)
+
+        # Guard: requires a reason
+        if not (reason and reason.strip() and len(reason.strip()) >= 5):
+            logger.warning(
+                "[DEBUG] BLOCKED soft_delete (no reason): review=%s status=%s user=%s",
+                review_id, status_str, self.user.id,
+            )
+            raise ValueError("A reason of at least 5 characters is required to delete/archive a contract.")
+
+        # Guard: only terminal-status contracts can be soft-deleted
+        allowed_delete_statuses = ["finalized", "executed", "rejected", "approved", "closed", "archived"]
+        logger.info(
+            "[DEBUG] soft_delete: review=%s user=%s status=%s reason=%s allowed=%s",
+            review_id, self.user.id, status_str,
+            reason[:50] if reason else "None", allowed_delete_statuses,
+        )
+        if status_str not in allowed_delete_statuses:
+            if "override:" in reason.lower():
+                logger.info(
+                    "Soft-delete override for review %s: status %s overridden by %s",
+                    review_id, status_str, self.user.id,
+                )
+            else:
+                logger.warning(
+                    "[DEBUG] BLOCKED soft_delete (wrong status): review=%s status=%s user=%s",
+                    review_id, status_str, self.user.id,
+                )
+                raise ValueError(
+                    f"Cannot archive contract {review_id} because it is in '{status_str}' status. "
+                    "Archiving is only allowed for contracts in finalized, executed, or rejected status. "
+                    "If you need to remove this contract, go to Ingestion and delete it from there."
+                )
 
         await self.review_repo.session.execute(
             update(ContractReview).where(
@@ -1950,6 +2131,44 @@ class ReviewService:
         if normalized == "normal":
             return "low"
         return "low"
+
+    async def _sync_workflow_stage_from_assignee(self, review_id: str, assignee_id: str) -> None:
+        """Set the review's workflow_stage based on the assignee's admin role.
+
+        This ensures the review appears in the correct queue tab (Legal Queue,
+        Executive Queue, Compliance Queue, etc.) after assignment or reassignment.
+        Falls back to the current workflow_stage if the assignee's role doesn't
+        map to a specific queue.
+        """
+        from app.domains.admin.models import AdminUser
+        from sqlalchemy import select
+
+        result = await self.review_repo.session.execute(
+            select(AdminUser.role).where(
+                AdminUser.user_id == assignee_id,
+                AdminUser.tenant_id == self.tenant_id,
+            )
+        )
+        assignee_role = result.scalar()
+
+        role_to_stage = {
+            "legal_ops": "legal_ops",
+            "compliance": "compliance",
+            "executive": "executive",
+            "reviewer": "reviewer",
+            "security": "security",
+            "procurement": "procurement",
+        }
+        stage = role_to_stage.get(assignee_role)
+        if stage:
+            await self.review_repo.session.execute(
+                update(ContractReview)
+                .where(
+                    ContractReview.review_id == review_id,
+                    ContractReview.tenant_id == self.tenant_id,
+                )
+                .values(workflow_stage=stage, updated_at=func.now())
+            )
 
     @staticmethod
     def _calculate_priority(review) -> str:
@@ -2472,6 +2691,7 @@ class ReviewService:
             "review_id": str(review.review_id),
             "upload_id": str(review.upload_id),
             "contract_id": str(review.contract_id) if review.contract_id else None,
+            "review_number": getattr(review, "review_number", None) or "",
             "status": status_str,
             "assigned_to": review.assigned_to,
             # Friendly display name resolved from admin_users via repository join.
@@ -2487,6 +2707,7 @@ class ReviewService:
             "redline_count": review.redline_count,
             "comment_count": review.comment_count,
             "escalation_count": review.escalation_count,
+            "is_favorite": getattr(review, "is_favorite", False) or False,
             **sla,
             "created_by": review.created_by,
             "created_at": review.created_at.isoformat(),

@@ -7,7 +7,7 @@ import { ClipboardCheck, Download, RefreshCw, Search, Filter, Bell, AlertTriangl
 import { ObligationKpiCards } from "./ObligationKpiCards";
 import { ObligationTable } from "./ObligationTable";
 import { ObligationAiInsights } from "./AiInsights";
-import { SlaPerformanceChart, SlaVendorTable, FinancialExposurePanel, ObligationTimeline } from "./SlaCenter";
+import { SlaPerformanceChart, SlaVendorTable, FinancialExposurePanel, ObligationTimeline, ComplianceOverviewPanel } from "./SlaCenter";
 import { ObligationDetailDrawer } from "./ObligationDetailDrawer";
 import { CreateObligationModal } from "./CreateObligationModal";
 import { CompleteObligationModal } from "./CompleteObligationModal";
@@ -30,6 +30,7 @@ import { useCreateObligation } from "@/services/hooks/useObligations";
 function toObligationRecord(o: ObligationResponse): ObligationRecord {
   return {
     id: o.id,
+    obligationNumber: o.obligation_number || "",
     name: o.name,
     contractId: o.contract_uuid_id ?? o.contract_id ?? "",
     contractName: o.contract_name ?? "",
@@ -407,7 +408,7 @@ export function ObligationCenter() {
   }
 
   return (
-    <div className="space-y-4 pb-24">
+    <div className="space-y-3 pb-8">
       {/* Page Header */}
       <div className="px-1 pt-1">
         <PageHeader
@@ -466,34 +467,36 @@ export function ObligationCenter() {
       {/* Filter Bar */}
       <ObligationFilterBar filters={filters} onChange={handleFilterChange} onReset={resetFilters} />
 
-      {/* Section 1: AI Insights + Timeline */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2">
-          <ObligationAiInsights insights={obligationInsights} />
+      {/* Main workspace: registry table + intelligence sidebar */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
+        <div className="xl:col-span-8 min-w-0">
+          <ObligationTable
+            obligations={filteredObligations}
+            onSelect={setSelectedObligation}
+            onToggleFavorite={toggleFavorite}
+            onComplete={(id) => {
+              const ob = obligations.find((o) => o.id === id);
+              if (ob) setCompleteTarget(ob);
+            }}
+            onCancel={(id) => cancelMutation.mutate(id)}
+            onArchive={(id) => archiveMutation.mutate(id)}
+            onDelete={(id) => { if (confirm("Permanently delete this obligation? This cannot be undone.")) deleteMutation.mutate(id); }}
+            onViewAudit={(id) => setAuditObligationId(id)}
+            isAdmin={false}
+          />
         </div>
-        <div className="lg:col-span-1">
-          <ObligationTimeline events={timelineEvents} />
+
+        <div className="xl:col-span-4 space-y-3">
+          {obligationInsights.length > 0 && (
+            <ObligationAiInsights insights={obligationInsights} compact />
+          )}
+          <ObligationTimeline events={timelineEvents} compact />
+          <ComplianceOverviewPanel kpis={kpisData} obligations={filteredObligations} />
         </div>
       </div>
 
-      {/* Section 2: Obligation Table */}
-      <ObligationTable
-        obligations={filteredObligations}
-        onSelect={setSelectedObligation}
-        onToggleFavorite={toggleFavorite}
-        onComplete={(id) => {
-          const ob = obligations.find((o) => o.id === id);
-          if (ob) setCompleteTarget(ob);
-        }}
-        onCancel={(id) => cancelMutation.mutate(id)}
-        onArchive={(id) => archiveMutation.mutate(id)}
-        onDelete={(id) => { if (confirm("Permanently delete this obligation? This cannot be undone.")) deleteMutation.mutate(id); }}
-        onViewAudit={(id) => setAuditObligationId(id)}
-        isAdmin={false}
-      />
-
-      {/* Section 3: SLA + Financial */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Analytics row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <SlaPerformanceChart data={slaMetrics} predictions={predictionData?.data ?? []} />
         <FinancialExposurePanel data={financialExposureData} valueAtRisk={varData ?? undefined} />
       </div>

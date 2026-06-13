@@ -8,6 +8,9 @@ const TERMINAL_REVIEW_STATUSES = new Set<ReviewSummary["status"]>([
   "approved",
   "rejected",
   "archived",
+  "closed",
+  "finalized",
+  "executed",
 ]);
 
 const TERMINAL_WORKFLOW_STAGES = new Set([

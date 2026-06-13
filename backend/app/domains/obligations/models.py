@@ -35,6 +35,7 @@ class Obligation(Base):
 
     id = Column(UUID, primary_key=True, default=lambda: str(uuid.uuid4()))
     tenant_id = Column(UUID, ForeignKey("tenants.tenant_id", ondelete="CASCADE"), nullable=True, index=True)
+    obligation_number = Column(String(50), nullable=False, default="")
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     obligation_type = Column(String(50), nullable=False)

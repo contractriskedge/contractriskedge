@@ -295,6 +295,11 @@ export function ReviewWorkspace({ reviewId, onBack }: ReviewWorkspaceProps) {
             description="Analyze findings, policy violations, redlines, and approval decisions in the AI Review Workspace."
             className="!block"
           />
+          {review?.review_number && (
+            <span className="text-[10px] font-mono text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-navy-700 px-2 py-0.5 rounded">
+              {review.review_number}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">

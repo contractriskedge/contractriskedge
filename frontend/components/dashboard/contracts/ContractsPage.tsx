@@ -42,6 +42,8 @@ export function ContractsPage() {
   // Real API hooks replacing mockData
   const { data: contractsData, isLoading: contractsLoading, error: contractsError, refetch: refetchContracts } = useContracts({
     search: search || undefined,
+    page_size: 100,
+    status: filters.status === "closed" || filters.status === "archived" ? filters.status : undefined,
   });
   const { data: kpisData, isLoading: kpisLoading } = useContractKpis();
   const { data: savedViewsData } = useSavedViews();
@@ -221,10 +223,26 @@ export function ContractsPage() {
                   ids.forEach((id) => window.open(`/api/v1/export/reviews/${id}/pdf`, "_blank"));
                   break;
                 case "archive":
-                  if (!confirm(`Archive ${ids.length} contracts?`)) return;
-                  Promise.allSettled(ids.map((id) => fetch(`/api/v1/reviews/${id}`, { method: "DELETE" }))).then(() => {
-                    refetchContracts();
-                  });
+                  {
+                    const archiveReason = prompt(`Reason for archiving ${ids.length} contracts? (min 5 characters)`);
+                    if (!archiveReason || archiveReason.trim().length < 5) return;
+                    Promise.allSettled(ids.map((id) =>
+                      fetch(`/api/v1/reviews/${id}`, {
+                        method: "DELETE",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ reason: archiveReason.trim() }),
+                      }).then((res) => {
+                        if (!res.ok) return res.text().then((text) => { throw new Error(text || `Archive failed (${res.status})`); });
+                        return res;
+                      })
+                    )).then((results) => {
+                      const failed = results.filter(r => r.status === "rejected");
+                      if (failed.length > 0) {
+                        alert(`${failed.length} contract(s) failed to archive:\n${failed.map((r: any) => r.reason?.message || "Unknown error").join("\n")}`);
+                      }
+                      if (failed.length < ids.length) refetchContracts();
+                    });
+                  }
                   break;
               }
               return;
@@ -254,9 +272,20 @@ export function ContractsPage() {
                 window.open(`/api/v1/export/reviews/${contractId}/pdf`, "_blank");
                 break;
               case "archive":
-                if (confirm("Archive this contract?")) {
-                  fetch(`/api/v1/reviews/${contractId}`, { method: "DELETE" }).finally(() => {
+                {
+                  const archiveReason = prompt("Reason for archiving this contract? (min 5 characters)");
+                  if (!archiveReason || archiveReason.trim().length < 5) break;
+                  fetch(`/api/v1/reviews/${contractId}`, {
+                    method: "DELETE",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ reason: archiveReason.trim() }),
+                  }).then((res) => {
+                    if (!res.ok) {
+                      return res.text().then((text) => { throw new Error(text || `Archive failed (${res.status})`); });
+                    }
                     refetchContracts();
+                  }).catch((err) => {
+                    alert(`Archive failed: ${err.message}`);
                   });
                 }
                 break;

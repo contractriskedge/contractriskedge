@@ -110,6 +110,7 @@ export interface AiReviewRequest {
 export interface ObligationResponse {
   id: string;
   tenant_id: string | null;
+  obligation_number: string;
   name: string;
   description: string | null;
   obligation_type: string;

@@ -110,7 +110,7 @@ const STATUS_CONFIG: Record<RedlineStatus, { color: string; bg: string; dot: str
   accepted:     { color: "text-green-700", bg: "bg-green-100", dot: "bg-green-500", label: "Accepted" },
   rejected:     { color: "text-red-700",   bg: "bg-red-100",   dot: "bg-red-500",   label: "Rejected" },
   modified:     { color: "text-purple-700",bg: "bg-purple-100",dot: "bg-purple-500", label: "Modified" },
-  invalid_mapping: { color: "text-red-800", bg: "bg-red-100", dot: "bg-red-600", label: "Invalid Mapping" },
+  invalid_mapping: { color: "text-red-800", bg: "bg-red-100", dot: "bg-red-600", label: "No Template Available" },
 };
 
 function isMappingInvalid(rl: RedlineItem): boolean {

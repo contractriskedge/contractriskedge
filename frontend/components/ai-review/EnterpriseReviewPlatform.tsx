@@ -22,6 +22,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -45,8 +46,9 @@ import { VersionsSection } from "./VersionsSection";
 import { RiskReductionSection } from "./RiskReductionSection";
 import { ObligationsSection } from "./ObligationsSection";
 import { ReviewMoreActionsMenu } from "./ReviewMoreActionsMenu";
-import { useReviewRedlinesData, useVersions, useAuditTrailEvents, useAdvanceWorkflow, useSubmitReviewDecision } from "./hooks";
+import { useReviewRedlinesData, useVersions, useAuditTrailEvents, useSubmitReviewDecision } from "./hooks";
 import { reviewService } from "@/services/api/reviews";
+import { obligationsService } from "@/services/api/obligations";
 import type { ReviewSection, ReviewSummary } from "./types";
 import {
   onLocateClauseSuccess,
@@ -71,6 +73,7 @@ interface SectionConfig {
 // ── Platform Inner ──────────────────────────────────────────────────────────
 
 function EnterpriseReviewPlatformInner() {
+  const router = useRouter();
   const ctx = useReviewContext();
   const {
     selectedReviewId, selectReview, reviews, selectedReview, workflow,
@@ -91,8 +94,8 @@ function EnterpriseReviewPlatformInner() {
   const [rejectionReason, setRejectionReason] = useState("");
   const [rejectError, setRejectError] = useState<string | null>(null);
 
-  // Approve uses workflow advance; reject uses /approve so reason is required + audited
-  const approveMutation = useAdvanceWorkflow();
+  // Approve uses guarded /approve endpoint; reject uses the same path for audit trail.
+  const approveMutation = useSubmitReviewDecision();
   const rejectMutation = useSubmitReviewDecision();
   const queryClient = useQueryClient();
 
@@ -121,6 +124,14 @@ function EnterpriseReviewPlatformInner() {
   });
   const hasBlockingFindings = (openFindingsData?.count ?? 0) > 0;
 
+  const { data: openObligationsData } = useQuery({
+    queryKey: ["reviews", selectedReviewId, "obligations", "open"],
+    queryFn: () => obligationsService.getByContract(selectedReviewId!),
+    enabled: !!selectedReviewId,
+    staleTime: 10_000,
+  });
+  const hasOpenObligations = (openObligationsData?.open ?? 0) > 0;
+
   const handleApprove = useCallback(async () => {
     if (!selectedReviewId) return;
     setApproveError(null);
@@ -132,10 +143,17 @@ function EnterpriseReviewPlatformInner() {
       );
       return;
     }
+    if (hasOpenObligations) {
+      setApproveError(
+        `${openObligationsData?.open ?? 0} obligation(s) are still open. ` +
+        "Complete or close all obligations before approving."
+      );
+      return;
+    }
     try {
       await approveMutation.mutateAsync({
         reviewId: selectedReviewId,
-        action: "approved",
+        decision: "approved",
       });
       queryClient.invalidateQueries({ queryKey: ["ai-platform"] });
     } catch (err) {
@@ -150,7 +168,7 @@ function EnterpriseReviewPlatformInner() {
       }
       setApproveError(msg);
     }
-  }, [selectedReviewId, approveMutation, queryClient]);
+  }, [selectedReviewId, approveMutation, queryClient, hasBlockingFindings, openFindingsData, hasOpenObligations, openObligationsData]);
 
   const openRejectModal = useCallback(() => {
     setApproveError(null);
@@ -422,14 +440,16 @@ function EnterpriseReviewPlatformInner() {
               {selectedReview.contract_number && (
                 <span className="text-[10px] font-mono font-semibold text-navy-700 dark:text-navy-200">{selectedReview.contract_number}</span>
               )}
-              <a
-                href={`/contracts/${selectedReview.review_id}`}
-                onClick={(e) => { e.preventDefault(); window.open(`/contracts/${selectedReview.review_id}`, '_blank'); }}
-                className="font-medium truncate max-w-[180px] hover:text-blue-600 hover:underline cursor-pointer"
+              {selectedReview.review_number && (
+                <span className="text-[9px] font-mono text-gray-500 dark:text-gray-400">{selectedReview.review_number}</span>
+              )}
+              <button
+                onClick={() => router.push(`/contracts/${selectedReview.review_id}`)}
+                className="font-medium truncate max-w-[180px] hover:text-blue-600 hover:underline cursor-pointer text-left bg-transparent border-none"
                 title={`${selectedReview.contract_number ? selectedReview.contract_number + ' — ' : ''}${selectedReview.contract_name}${selectedReview.original_filename ? ' (' + selectedReview.original_filename + ')' : ''}`}
               >
                 {selectedReview.contract_name}
-              </a>
+              </button>
               {selectedReview.original_filename && selectedReview.original_filename !== selectedReview.contract_name && (
                 <span className="text-gray-400 truncate max-w-[100px]" title={selectedReview.original_filename}>
                   ({selectedReview.original_filename})
@@ -486,9 +506,15 @@ function EnterpriseReviewPlatformInner() {
                 <>
                   <button
                     onClick={handleApprove}
-                    disabled={approveMutation.isPending || hasBlockingFindings}
+                    disabled={approveMutation.isPending || hasBlockingFindings || hasOpenObligations}
                     className="flex items-center gap-1 px-1.5 py-1 text-[9px] font-medium rounded hover:bg-green-50 text-green-700 transition-colors disabled:opacity-40"
-                    title={hasBlockingFindings ? `${openFindingsData?.count ?? 0} critical/high finding(s) unresolved — resolve or dismiss them first` : "Approve review"}
+                    title={
+                      hasBlockingFindings
+                        ? `${openFindingsData?.count ?? 0} critical/high finding(s) unresolved — resolve or dismiss them first`
+                        : hasOpenObligations
+                          ? `${openObligationsData?.open ?? 0} open obligation(s) — complete or close them first`
+                          : "Approve review"
+                    }
                   >
                     {approveMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
                     Approve

@@ -12,6 +12,8 @@ from pydantic_core.core_schema import ValidationInfo
 class ReviewSummary(BaseModel):
     review_id: str
     upload_id: str
+    contract_id: Optional[str] = None
+    review_number: str = ""
     status: str
     assigned_to: Optional[str] = None
     # Friendly display name of the assignee, resolved server-side from
@@ -24,6 +26,7 @@ class ReviewSummary(BaseModel):
     redline_count: int = 0
     comment_count: int = 0
     escalation_count: int = 0
+    is_favorite: bool = False
     created_by: str
     created_at: datetime
     updated_at: datetime
@@ -285,7 +288,7 @@ class CommentItem(BaseModel):
 
 class AssignRequest(BaseModel):
     assignee_id: str
-    role: str = Field(default="reviewer", pattern="^(reviewer|approver|observer)$")
+    role: str = Field(default="reviewer", pattern="^(reviewer|approver|observer|legal_ops|compliance|executive|security|procurement)$")
     due_date: Optional[datetime] = None
     notes: Optional[str] = None
 
@@ -293,6 +296,10 @@ class AssignRequest(BaseModel):
 class RedlineAssignRequest(BaseModel):
     assignee_id: str
     role: str = Field(default="legal_review", pattern="^(legal_review|procurement_review|security_review|business_review|reviewer|approver|observer)$")
+
+
+class FavoriteToggleRequest(BaseModel):
+    is_favorite: bool
 
 
 class EscalateRequest(BaseModel):

@@ -115,6 +115,23 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
   });
   const hasBlockingFindings = (openFindingsData?.count ?? 0) > 0;
 
+  // Pre-flight check: fetch open obligations count for approval gate
+  const { data: openObligationsData, isFetching: openObligationsLoading } = useQuery({
+    queryKey: ["reviews", reviewId, "obligations", "open"],
+    queryFn: async () => {
+      const res = await api.get<{ obligations: Array<Record<string, unknown>> }>(`/obligations/?contract_id=${reviewId}`);
+      const obligations = res?.obligations ?? [];
+      const open = obligations.filter(
+        (o) => !["completed", "closed", "waived", "cancelled", "archived"].includes(String(o.status ?? ""))
+      );
+      return { count: open.length };
+    },
+    enabled: activeModal === "approve" && (approveDecision === "approved" || approveDecision === "conditionally_approved"),
+    staleTime: 0,
+    refetchOnMount: true,
+  });
+  const hasOpenObligations = (openObligationsData?.count ?? 0) > 0;
+
   const closeModal = () => {
     setActiveModal(null);
     setAssigneeId("");
@@ -155,6 +172,16 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
         setApproveError(
           `${openFindingsData?.count ?? 0} critical/high finding(s) are still open. ` +
           "Add 'override:' at the start of your comments to acknowledge and bypass."
+        );
+        return;
+      }
+    }
+    // Pre-flight check: block if open obligations exist
+    if (hasOpenObligations && (approveDecision === "approved" || approveDecision === "conditionally_approved")) {
+      if (!approveComments.toLowerCase().includes("override:")) {
+        setApproveError(
+          `${openObligationsData?.count ?? 0} obligation(s) are still open. ` +
+          "Complete or close all obligations before approving, or add 'override:' at the start of your comments to bypass."
         );
         return;
       }
@@ -567,6 +594,21 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
                 </p>
               </div>
             )}
+            {/* Warning: open obligations */}
+            {hasOpenObligations && (approveDecision === "approved" || approveDecision === "conditionally_approved") && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-900/20">
+                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span className="text-sm font-semibold">Open Obligations</span>
+                </div>
+                <p className="mt-1 text-xs text-amber-600 dark:text-amber-300">
+                  {openObligationsData?.count} obligation(s) are still open.
+                </p>
+                <p className="mt-1 text-xs text-amber-500 dark:text-amber-400">
+                  Complete or close all obligations before approving, or add 'override:' at the start of your comments to bypass.
+                </p>
+              </div>
+            )}
             <div className="flex gap-2">
               {(["approved", "rejected", "conditionally_approved"] as const).map((d) => (
                 <button
@@ -606,8 +648,8 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
             )}
             <div className="flex justify-end gap-2">
               <button onClick={closeModal} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700">Cancel</button>
-              <button onClick={handleApprove} disabled={approveMutation.isPending || openFindingsLoading || (hasBlockingFindings && (approveDecision === "approved" || (approveDecision === "conditionally_approved" && !approveComments.toLowerCase().includes("override:")))) || (approveDecision === "rejected" && !approveComments.trim())}
-                title={openFindingsLoading ? "Checking for blocking findings..." : hasBlockingFindings && approveDecision === "approved" ? `${openFindingsData?.count ?? 0} critical/high finding(s) unresolved` : hasBlockingFindings && approveDecision === "conditionally_approved" && !approveComments.toLowerCase().includes("override:") ? "Add 'override:' in comments to bypass" : approveDecision === "rejected" && !approveComments.trim() ? "Rejection reason is required" : "Submit decision"}
+              <button onClick={handleApprove} disabled={approveMutation.isPending || openFindingsLoading || openObligationsLoading || (hasBlockingFindings && (approveDecision === "approved" || (approveDecision === "conditionally_approved" && !approveComments.toLowerCase().includes("override:")))) || (hasOpenObligations && (approveDecision === "approved" || approveDecision === "conditionally_approved") && !approveComments.toLowerCase().includes("override:")) || (approveDecision === "rejected" && !approveComments.trim())}
+                title={openFindingsLoading ? "Checking for blocking findings..." : openObligationsLoading ? "Checking for open obligations..." : hasBlockingFindings && approveDecision === "approved" ? `${openFindingsData?.count ?? 0} critical/high finding(s) unresolved` : hasBlockingFindings && approveDecision === "conditionally_approved" && !approveComments.toLowerCase().includes("override:") ? "Add 'override:' in comments to bypass" : hasOpenObligations && !approveComments.toLowerCase().includes("override:") ? `${openObligationsData?.count ?? 0} obligation(s) still open — add 'override:' to bypass` : approveDecision === "rejected" && !approveComments.trim() ? "Rejection reason is required" : "Submit decision"}
                 className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-50 ${
                   approveDecision === "approved" ? "bg-green-600 hover:bg-green-700"
                   : approveDecision === "rejected" ? "bg-red-600 hover:bg-red-700"
@@ -705,7 +747,7 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
               <p className="mt-1 text-xs">This will archive the contract and end its lifecycle. Open obligations will block this action.</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Closing Reason</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Closing Reason <span className="text-red-500">*</span></label>
               <textarea
                 value={closeReason}
                 onChange={(e) => setCloseReason(e.target.value)}
@@ -713,10 +755,13 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
                 rows={2}
                 className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300"
               />
+              {closeReason.trim().length > 0 && closeReason.trim().length < 5 && (
+                <p className="text-[10px] text-red-500 mt-0.5">Please enter at least 5 characters</p>
+              )}
             </div>
             <div className="flex justify-end gap-2">
               <button onClick={closeModal} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700">Cancel</button>
-              <button onClick={() => closeMutation.mutate({ reviewId, reason: closeReason || undefined }, { onSuccess: () => closeModal() })} disabled={closeMutation.isPending}
+              <button onClick={() => closeMutation.mutate({ reviewId, reason: closeReason.trim() }, { onSuccess: () => closeModal() })} disabled={closeMutation.isPending || closeReason.trim().length < 5}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50">
                 {closeMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
                 Close Contract

@@ -114,7 +114,7 @@ export function IntelligenceHub({
 
   // ── Open obligations count ──────────────────────────────────────
   const openObligations = obligations.filter(
-    (o) => o.status === "pending" || o.status === "in_progress" || o.status === "overdue",
+    (o) => o.status === "pending" || o.status === "in_progress" || o.status === "pending_supplier" || o.status === "overdue",
   ).length;
   const overdueObligations = obligations.filter((o) => o.status === "overdue").length;
 

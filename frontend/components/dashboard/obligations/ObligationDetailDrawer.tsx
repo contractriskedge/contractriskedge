@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, ClipboardCheck, Clock, AlertTriangle, DollarSign, Activity, Shield, FileText, User, Calendar, Brain, Link, ExternalLink, Loader2, CheckCircle2, XCircle, RotateCcw, Archive, Paperclip } from "lucide-react";
+import { X, ClipboardCheck, Clock, AlertTriangle, DollarSign, Activity, Shield, FileText, User, Calendar, Brain, Link, ExternalLink, Loader2, CheckCircle2, XCircle, RotateCcw, Archive, Paperclip, Edit3, Eye } from "lucide-react";
 import type { ObligationRecord } from "./types";
 import type { ObligationAuditLogResponse } from "@/services/api/obligations";
 import { RISK_BG, RISK_TEXT, RISK_BG_LIGHT, STATUS_CONFIG, OBLIGATION_TYPES } from "./types";
@@ -25,14 +25,59 @@ interface DrawerProps {
   obligation: ObligationRecord | null;
   onClose: () => void;
   onToggleFavorite?: (id: string) => void;
+  onStatusChange?: (id: string, status: string) => void;
 }
 
-export function ObligationDetailDrawer({ obligation, onClose, onToggleFavorite }: DrawerProps) {
+export function ObligationDetailDrawer({ obligation, onClose, onToggleFavorite, onStatusChange }: DrawerProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<TabId>("overview");
+  const [editMode, setEditMode] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const [statusReason, setStatusReason] = useState("");
+  const [pendingStatus, setPendingStatus] = useState<string | null>(null);
+  const [showStatusReasonModal, setShowStatusReasonModal] = useState(false);
+  const statusMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close status menu on outside click
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (statusMenuRef.current && !statusMenuRef.current.contains(e.target as Node)) {
+        setShowStatusMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const statusOptions = [
+    { value: "pending", label: "Pending", color: "text-yellow-700 bg-yellow-50" },
+    { value: "in_progress", label: "In Progress", color: "text-blue-700 bg-blue-50" },
+    { value: "pending_supplier", label: "Pending Supplier", color: "text-purple-700 bg-purple-50" },
+    { value: "completed", label: "Completed", color: "text-green-700 bg-green-50" },
+    { value: "cancelled", label: "Cancelled", color: "text-gray-600 bg-gray-100" },
+    { value: "waived", label: "Waived", color: "text-gray-600 bg-gray-100" },
+  ];
+
+  // ── Status Change Mutation ──
+  const statusMut = useMutation({
+    mutationFn: ({ id, status, reason }: { id: string; status: string; reason?: string }) => {
+      const payload: Record<string, unknown> = { status };
+      if (reason?.trim()) payload.notes = reason.trim();
+      return obligationsService.updateObligation(id, payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["obligations"] });
+      queryClient.invalidateQueries({ queryKey: ["obligations", "kpis"] });
+      queryClient.invalidateQueries({ queryKey: ["obligation-audit"] });
+      setShowStatusMenu(false);
+      setShowStatusReasonModal(false);
+      setStatusReason("");
+      setPendingStatus(null);
+    },
+  });
 
   // ── Action Mutations ──────────────────────────────────────────
   const completeMut = useMutation({
@@ -89,9 +134,50 @@ export function ObligationDetailDrawer({ obligation, onClose, onToggleFavorite }
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
               <div className="flex items-center gap-2 min-w-0">
                 <div className="w-8 h-8 rounded-lg bg-navy-700 flex items-center justify-center"><ClipboardCheck className="w-4 h-4 text-white" /></div>
-                <div className="min-w-0"><h3 className="text-sm font-semibold text-navy-900 truncate">{obligation.name}</h3><p className="text-[10px] text-gray-500">{obligation.id} • {obligation.vendor}</p></div>
+                <div className="min-w-0"><h3 className="text-sm font-semibold text-navy-900 truncate">{obligation.name}</h3><p className="text-[10px] text-gray-500">{obligation.obligationNumber || obligation.id.slice(0, 8)} • {obligation.vendor}</p></div>
               </div>
               <div className="flex items-center gap-1">
+                {/* Status Change Dropdown */}
+                <div className="relative" ref={statusMenuRef}>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowStatusMenu(!showStatusMenu); }}
+                    className="flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded bg-navy-100 text-navy-700 hover:bg-navy-200 transition-colors"
+                    title="Change status"
+                  >
+                    {statusMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                    Status
+                  </button>
+                  {showStatusMenu && (
+                    <div className="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-xl z-50 py-1">
+                      {statusOptions.filter(o => o.value !== obligation.status).map((opt) => (
+                        <button
+                          key={opt.value}
+                          onClick={() => {
+                            setShowStatusMenu(false);
+                            setPendingStatus(opt.value);
+                            setStatusReason("");
+                            setShowStatusReasonModal(true);
+                          }}
+                          className={`w-full text-left px-3 py-1.5 text-[10px] hover:bg-gray-50 flex items-center gap-2`}
+                        >
+                          <span className={`w-2 h-2 rounded-full ${opt.color.split(" ")[0].replace("text-", "bg-")}`} />
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {/* Edit Toggle */}
+                <button
+                  onClick={() => setEditMode(!editMode)}
+                  className={`flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded transition-colors ${
+                    editMode ? "bg-navy-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                  title={editMode ? "View mode" : "Edit obligation"}
+                >
+                  {editMode ? <Eye className="w-3 h-3" /> : <Edit3 className="w-3 h-3" />}
+                  {editMode ? "View" : "Edit"}
+                </button>
                 {/* Action Buttons */}
                 {obligation.status !== "completed" && obligation.status !== "cancelled" && obligation.status !== "archived" && (
                   <button onClick={() => setShowCompleteModal(true)} disabled={isPending("complete")}
@@ -99,22 +185,6 @@ export function ObligationDetailDrawer({ obligation, onClose, onToggleFavorite }
                     title="Mark as completed with evidence">
                     {isPending("complete") ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
                     Complete
-                  </button>
-                )}
-                {obligation.status === "active" && (
-                  <button onClick={() => handleAction("cancel", obligation.id)} disabled={isPending("cancel")}
-                    className="flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50 transition-colors"
-                    title="Cancel obligation">
-                    {isPending("cancel") ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
-                    Cancel
-                  </button>
-                )}
-                {(obligation.status === "completed" || obligation.status === "cancelled" || obligation.status === "overdue") && (
-                  <button onClick={() => handleAction("reopen", obligation.id)} disabled={isPending("reopen")}
-                    className="flex items-center gap-1 px-2 py-1 text-[9px] font-medium rounded bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50 transition-colors"
-                    title="Reopen obligation">
-                    {isPending("reopen") ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
-                    Reopen
                   </button>
                 )}
                 {obligation.status !== "archived" && (
@@ -128,16 +198,26 @@ export function ObligationDetailDrawer({ obligation, onClose, onToggleFavorite }
                 <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 text-gray-400"><X className="w-4 h-4" /></button>
               </div>
             </div>
-            <div className="px-4 py-2 border-b border-gray-100 flex gap-1 overflow-x-auto">
-              <TabBtn label="Overview" icon={<ClipboardCheck className="w-3 h-3" />} active={tab === "overview"} onClick={() => setTab("overview")} />
-              <TabBtn label="SLA" icon={<Activity className="w-3 h-3" />} active={tab === "sla"} onClick={() => setTab("sla")} />
-              <TabBtn label="Financial" icon={<DollarSign className="w-3 h-3" />} active={tab === "financial"} onClick={() => setTab("financial")} />
-              <TabBtn label="Compliance" icon={<Shield className="w-3 h-3" />} active={tab === "compliance"} onClick={() => setTab("compliance")} />
-              <TabBtn label="AI" icon={<Brain className="w-3 h-3" />} active={tab === "ai"} onClick={() => setTab("ai")} />
-              <TabBtn label="Activity" icon={<Clock className="w-3 h-3" />} active={tab === "activity"} onClick={() => setTab("activity")} />
+            <div className="flex items-center justify-between px-5 py-2 border-b border-gray-100 bg-gray-50/50">
+              <div className="flex gap-1 overflow-x-auto">
+                <TabBtn label="Overview" icon={<FileText className="w-3 h-3" />} active={tab === "overview"} onClick={() => setTab("overview")} />
+                <TabBtn label="SLA" icon={<Clock className="w-3 h-3" />} active={tab === "sla"} onClick={() => setTab("sla")} />
+                <TabBtn label="Financial" icon={<DollarSign className="w-3 h-3" />} active={tab === "financial"} onClick={() => setTab("financial")} />
+                <TabBtn label="Compliance" icon={<Shield className="w-3 h-3" />} active={tab === "compliance"} onClick={() => setTab("compliance")} />
+                <TabBtn label="AI" icon={<Brain className="w-3 h-3" />} active={tab === "ai"} onClick={() => setTab("ai")} />
+                <TabBtn label="Activity" icon={<Activity className="w-3 h-3" />} active={tab === "activity"} onClick={() => setTab("activity")} />
+              </div>
+              <button
+                onClick={() => router.push(`/obligations/${obligation.id}`)}
+                className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-md bg-navy-600 text-white hover:bg-navy-700 transition-colors flex-shrink-0"
+                title="Open full workspace"
+              >
+                <ExternalLink className="w-3 h-3" />
+                Full Workspace
+              </button>
             </div>
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              {tab === "overview" && <OverviewTab o={obligation} />}
+              {tab === "overview" && (editMode ? <EditOverviewTab o={obligation} onClose={onClose} /> : <OverviewTab o={obligation} />)}
               {tab === "sla" && <SlaTab o={obligation} />}
               {tab === "financial" && <FinancialTab o={obligation} />}
               {tab === "compliance" && <ComplianceTab />}
@@ -165,6 +245,55 @@ export function ObligationDetailDrawer({ obligation, onClose, onToggleFavorite }
           onClose={() => setShowCompleteModal(false)}
         />
       )}
+
+      {/* Status Change Reason Modal */}
+      <AnimatePresence>
+        {showStatusReasonModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => { setShowStatusReasonModal(false); setPendingStatus(null); }}>
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
+              className="bg-white rounded-xl shadow-2xl border border-gray-200 w-full max-w-sm mx-4 p-5" onClick={e => e.stopPropagation()}>
+              <h3 className="text-sm font-semibold text-navy-900">Change Status</h3>
+              <p className="text-[11px] text-gray-500 mt-1">
+                {obligation.name} — <span className="font-medium text-navy-700">{statusOptions.find(o => o.value === pendingStatus)?.label}</span>
+              </p>
+              <div className="mt-3">
+                <label className="text-[10px] font-semibold text-gray-600">Reason for change <span className="text-red-500">*</span></label>
+                <textarea
+                  value={statusReason}
+                  onChange={e => setStatusReason(e.target.value)}
+                  placeholder="Enter the reason for this status change..."
+                  rows={3}
+                  className="w-full mt-1 px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400 resize-none"
+                  autoFocus
+                />
+                {statusReason.trim().length > 0 && statusReason.trim().length < 5 && (
+                  <p className="text-[9px] text-red-500 mt-0.5">Please enter at least 5 characters</p>
+                )}
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button onClick={() => { setShowStatusReasonModal(false); setPendingStatus(null); setStatusReason(""); }}
+                  className="px-3 py-1.5 text-[10px] font-medium text-gray-600 hover:text-gray-800 rounded-lg hover:bg-gray-50 transition-colors">
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (pendingStatus && statusReason.trim().length >= 5) {
+                      statusMut.mutate({ id: obligation.id, status: pendingStatus, reason: statusReason.trim() });
+                      onStatusChange?.(obligation.id, pendingStatus);
+                    }
+                  }}
+                  disabled={!pendingStatus || statusReason.trim().length < 5 || statusMut.isPending}
+                  className="px-3 py-1.5 text-[10px] font-medium rounded-lg bg-navy-600 text-white hover:bg-navy-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1 transition-colors"
+                >
+                  {statusMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                  Confirm
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </AnimatePresence>
   );
 }
@@ -419,7 +548,7 @@ function AiTab({ o }: { o: ObligationRecord }) {
   );
 }
 
-function ActivityTab({ obligationId }: { obligationId: string }) {
+export function ActivityTab({ obligationId }: { obligationId: string }) {
   const { data: auditEntries, isLoading } = useQuery({
     queryKey: ["obligation-audit", obligationId],
     queryFn: () => obligationsService.getAuditHistory(obligationId),
@@ -466,4 +595,102 @@ function ActivityTab({ obligationId }: { obligationId: string }) {
 function RiskBadge({ score }: { score: number }) {
   const level = score >= 8 ? "critical" : score >= 6 ? "high" : score >= 4 ? "medium" : "low";
   return <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${RISK_BG_LIGHT[level]} ${RISK_TEXT[level]}`}><span className={`w-1.5 h-1.5 rounded-full ${RISK_BG[level]}`} />{score}/10</span>;
+}
+
+// ── Edit Overview Tab ────────────────────────────────────────────
+
+function EditOverviewTab({ o, onClose }: { o: ObligationRecord; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState(o.name);
+  const [description, setDescription] = useState(o.description);
+  const [owner, setOwner] = useState(o.owner);
+  const [assignee, setAssignee] = useState(o.assignee);
+  const [dueDate, setDueDate] = useState(o.dueDate);
+  const [department, setDepartment] = useState(o.department);
+  const [businessUnit, setBusinessUnit] = useState(o.businessUnit);
+  const [geography, setGeography] = useState(o.geography);
+  const [clauseReference, setClauseReference] = useState(o.clauseReference);
+  const [financialImpact, setFinancialImpact] = useState(String(o.financialImpact));
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await obligationsService.updateObligation(o.id, {
+        name,
+        description,
+        owner,
+        assignee,
+        due_date: dueDate,
+        department,
+        business_unit: businessUnit,
+        geography,
+        clause_reference: clauseReference,
+        financial_impact: parseFloat(financialImpact) || 0,
+      } as Record<string, unknown>);
+      queryClient.invalidateQueries({ queryKey: ["obligations"] });
+      onClose();
+    } catch (err) {
+      console.error("Failed to save obligation:", err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const inputClass = "w-full px-2.5 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:border-navy-400 focus:ring-1 focus:ring-navy-400 bg-white";
+
+  return (
+    <div className="space-y-3 p-1">
+      <div>
+        <label className="text-[10px] font-semibold text-gray-600">Name</label>
+        <input type="text" value={name} onChange={e => setName(e.target.value)} className={inputClass} />
+      </div>
+      <div>
+        <label className="text-[10px] font-semibold text-gray-600">Description</label>
+        <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} className={inputClass} />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-[10px] font-semibold text-gray-600">Owner</label>
+          <input type="text" value={owner} onChange={e => setOwner(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <label className="text-[10px] font-semibold text-gray-600">Assignee</label>
+          <input type="text" value={assignee} onChange={e => setAssignee(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <label className="text-[10px] font-semibold text-gray-600">Due Date</label>
+          <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <label className="text-[10px] font-semibold text-gray-600">Financial Impact</label>
+          <input type="number" value={financialImpact} onChange={e => setFinancialImpact(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <label className="text-[10px] font-semibold text-gray-600">Department</label>
+          <input type="text" value={department} onChange={e => setDepartment(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <label className="text-[10px] font-semibold text-gray-600">Business Unit</label>
+          <input type="text" value={businessUnit} onChange={e => setBusinessUnit(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <label className="text-[10px] font-semibold text-gray-600">Geography</label>
+          <input type="text" value={geography} onChange={e => setGeography(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <label className="text-[10px] font-semibold text-gray-600">Clause Reference</label>
+          <input type="text" value={clauseReference} onChange={e => setClauseReference(e.target.value)} className={inputClass} />
+        </div>
+      </div>
+      <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+        <button onClick={onClose} className="px-3 py-1.5 text-[10px] font-medium text-gray-600 hover:text-gray-800">Cancel</button>
+        <button onClick={handleSave} disabled={saving}
+          className="px-3 py-1.5 text-[10px] font-medium rounded-lg bg-navy-600 text-white hover:bg-navy-700 disabled:opacity-50 inline-flex items-center gap-1">
+          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+          Save Changes
+        </button>
+      </div>
+    </div>
+  );
 }

@@ -642,8 +642,8 @@ export function useCloseReview() {
     }) => reviewService.updateStatus(reviewId, "closed", reason),
 
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: reviewKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: reviewKeys.dashboard() });
+      queryClient.invalidateQueries({ queryKey: reviewKeys.all });
+      queryClient.invalidateQueries({ queryKey: ["contracts"] });
       queryClient.invalidateQueries({ queryKey: reviewKeys.detail(variables.reviewId) });
       queryClient.invalidateQueries({ queryKey: reviewKeys.status(variables.reviewId) });
     },

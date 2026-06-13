@@ -66,6 +66,7 @@ const SEVERITY_COLORS: Record<string, string> = {
 const OBLIGATION_STATUS: Record<string, { label: string; color: string; bg: string }> = {
   pending: { label: "Pending", color: "text-yellow-700", bg: "bg-yellow-100" },
   in_progress: { label: "In Progress", color: "text-blue-700", bg: "bg-blue-100" },
+  pending_supplier: { label: "Pending Supplier", color: "text-purple-700", bg: "bg-purple-100" },
   completed: { label: "Completed", color: "text-green-700", bg: "bg-green-100" },
   overdue: { label: "Overdue", color: "text-red-700", bg: "bg-red-100" },
 };
