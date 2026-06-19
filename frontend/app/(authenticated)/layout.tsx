@@ -64,7 +64,7 @@ export default function AuthenticatedLayout({
     else if (path.startsWith("/clause-library")) setActiveView("clause-library");
     else if (path.startsWith("/obligations")) setActiveView("obligations");
     else if (path.startsWith("/negotiation")) setActiveView("negotiation");
-    else if (path.startsWith("/clause-intelligence/redline-knowledge-center")) setActiveView("redline-knowledge-center");
+    else if (path.startsWith("/clause-intelligence/knowledge-center")) setActiveView("redline-knowledge-center");
     else if (path.startsWith("/clause-intelligence")) setActiveView("clause-intelligence");
     else if (path.startsWith("/policy")) setActiveView("policy");
     else if (path.startsWith("/relationships")) setActiveView("relationships");
@@ -116,7 +116,7 @@ export default function AuthenticatedLayout({
               obligations: "/obligations",
               negotiation: "/negotiation",
               "clause-intelligence": "/clause-intelligence",
-              "redline-knowledge-center": "/clause-intelligence/redline-knowledge-center",
+              "redline-knowledge-center": "/clause-intelligence/knowledge-center",
               policy: "/policy",
               relationships: "/relationships",
               "governance-dashboard": "/governance-dashboard",
