@@ -3,7 +3,7 @@
  */
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { motion } from "framer-motion";
 import {
   FileText,
@@ -13,8 +13,9 @@ import {
   TrendingUp,
   ArrowUp,
   Loader2,
+  Sparkles,
 } from "lucide-react";
-import { useCoverage, useMissingTemplates } from "@/services/hooks/useRedlineTemplates";
+import { useCoverage, useMissingTemplates, useGenerateDraft } from "@/services/hooks/useRedlineTemplates";
 
 function StatCard({
   icon: Icon,
@@ -56,6 +57,26 @@ function StatCard({
 export function OverviewTab() {
   const { data: coverage, isLoading } = useCoverage();
   const { data: missing } = useMissingTemplates(5);
+  const generateDraft = useGenerateDraft();
+  const [generating, setGenerating] = useState<string | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+
+  const handleGenerate = async (clauseType: string, findings: number) => {
+    setGenerating(clauseType);
+    setResult(null);
+    try {
+      await generateDraft.mutateAsync({
+        clause_type: clauseType,
+        finding_title: `Missing ${clauseType.replace(/_/g, " ")} Clause`,
+        finding_description: `${findings} findings detected across regression suite`,
+      });
+      setResult(`✅ Draft generated for ${clauseType.replace(/_/g, " ")}`);
+    } catch {
+      setResult("❌ Failed to generate draft");
+    } finally {
+      setGenerating(null);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -130,8 +151,16 @@ export function OverviewTab() {
                   {item.findings} findings
                 </p>
               </div>
-              <button className="text-xs px-3 py-1.5 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-md hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-colors">
-                Generate Draft
+              <button
+                onClick={() => handleGenerate(item.clause_type, item.findings)}
+                disabled={generating === item.clause_type}
+                className="text-xs px-3 py-1.5 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-md hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-colors disabled:opacity-50"
+              >
+                {generating === item.clause_type ? (
+                  <Loader2 className="w-3 h-3 animate-spin inline" />
+                ) : (
+                  "Generate Draft"
+                )}
               </button>
             </div>
           ))}
@@ -141,6 +170,11 @@ export function OverviewTab() {
             </p>
           )}
         </div>
+        {result && (
+          <div className="mt-3 text-xs text-center text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-700/50 rounded-lg py-2">
+            {result}
+          </div>
+        )}
       </div>
     </div>
   );
