@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_tenant_id, get_db
@@ -176,3 +178,101 @@ async def record_template_usage(
     """Record that a template was used (for analytics)."""
     await service.record_usage(template_id, accepted)
     return {"status": "recorded"}
+
+
+# ── Batch Operations ──────────────────────────────────────────────
+
+
+class BatchGenerateRequest(BaseModel):
+    items: list[AIDraftRequest]
+
+
+@router.post(
+    "/generate-batch",
+    summary="Batch generate AI drafts for multiple clause types",
+)
+async def batch_generate_drafts(
+    request: BatchGenerateRequest,
+    service: RedlineTemplateService = Depends(get_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Generate AI drafts for multiple missing clause types in one operation."""
+    results = []
+    errors = []
+    for item in request.items:
+        try:
+            result = await service.generate_ai_draft(
+                clause_type=item.clause_type,
+                finding_title=item.finding_title,
+                finding_description=item.finding_description,
+                jurisdiction=item.jurisdiction,
+                industry=item.industry,
+                risk_level=item.risk_level,
+            )
+            results.append(result)
+        except Exception as exc:
+            errors.append({"clause_type": item.clause_type, "error": str(exc)})
+    return {"results": results, "errors": errors, "total": len(request.items), "succeeded": len(results), "failed": len(errors)}
+
+
+@router.post(
+    "/promote-ai-template",
+    summary="Promote an AI-generated draft to an approved enterprise template",
+)
+async def promote_ai_template(
+    draft_text: str = Body(...),
+    name: str = Body(...),
+    clause_type: str = Body(...),
+    category: str = Body(...),
+    jurisdiction: Optional[str] = Body(None),
+    industry: Optional[str] = Body(None),
+    risk_level: Optional[str] = Body(None),
+    created_by: Optional[str] = Body(None),
+    service: RedlineTemplateService = Depends(get_service),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Promote an AI-generated draft to an approved enterprise template."""
+    create_data = {
+        "name": name,
+        "clause_type": clause_type,
+        "category": category or clause_type,
+        "jurisdiction": jurisdiction,
+        "industry": industry,
+        "risk_level": risk_level,
+        "template_text": draft_text,
+        "status": "active",
+        "created_by": created_by or user.id,
+        "approved_by": user.id,
+        "effective_date": datetime.now(timezone.utc).isoformat(),
+    }
+    return await service.create_template(create_data)
+
+
+@router.get(
+    "/analytics",
+    summary="Get template analytics (usage stats, trends)",
+)
+async def get_analytics(
+    service: RedlineTemplateService = Depends(get_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Get template analytics including usage stats and coverage trends."""
+    coverage = await service.get_coverage()
+    templates = await service.list_templates(limit=1000)
+    total_usage = sum(t.get("usage_count", 0) for t in templates)
+    avg_accept = (
+        sum(t.get("accept_rate", 0) for t in templates) / max(len(templates), 1)
+    )
+    return {
+        "coverage": coverage,
+        "total_templates": len(templates),
+        "total_usage": total_usage,
+        "avg_accept_rate": round(avg_accept, 2),
+        "by_status": {
+            "active": sum(1 for t in templates if t.get("status") == "active"),
+            "ai_draft": sum(1 for t in templates if t.get("status") == "ai_draft"),
+            "draft": sum(1 for t in templates if t.get("status") == "draft"),
+            "retired": sum(1 for t in templates if t.get("status") == "retired"),
+        },
+    }
