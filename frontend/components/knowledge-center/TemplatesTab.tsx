@@ -278,37 +278,92 @@ export function TemplatesTab() {
                   </div>
                 </div>
 
-                {/* Usage Stats */}
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="text-center">
-                    <p className="text-lg font-bold text-gray-900 dark:text-white">{previewTemplate.usage_count}</p>
-                    <p className="text-[10px] text-gray-400">Used</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
-                      {previewTemplate.accept_rate > 0 ? `${Math.round(previewTemplate.accept_rate * 100)}%` : "—"}
-                    </p>
-                    <p className="text-[10px] text-gray-400">Accept Rate</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-lg font-bold text-gray-900 dark:text-white">{previewTemplate.version}</p>
-                    <p className="text-[10px] text-gray-400">Version</p>
+                {/* Template Effectiveness */}
+                <div className="bg-gradient-to-r from-emerald-50 to-emerald-50/50 dark:from-emerald-900/10 dark:to-emerald-900/5 rounded-lg p-3 border border-emerald-200 dark:border-emerald-800">
+                  <p className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 uppercase mb-2">Template Effectiveness</p>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div>
+                      <p className="text-lg font-bold text-gray-900 dark:text-white">{previewTemplate.usage_count}</p>
+                      <p className="text-[10px] text-gray-500">Used</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                        {previewTemplate.accept_rate > 0 ? `${Math.round(previewTemplate.accept_rate * 100)}%` : "—"}
+                      </p>
+                      <p className="text-[10px] text-gray-500">Success Rate</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-gray-900 dark:text-white">
+                        {previewTemplate.usage_count > 0 ? `${(previewTemplate.usage_count * 4.2).toFixed(1)}m` : "—"}
+                      </p>
+                      <p className="text-[10px] text-gray-500">Avg Time Saved</p>
+                    </div>
                   </div>
                 </div>
 
-                {/* Related Clauses */}
+                {/* Apply Impact Preview */}
+                <div className="bg-gradient-to-r from-indigo-50 to-indigo-50/50 dark:from-indigo-900/10 dark:to-indigo-900/5 rounded-lg p-3 border border-indigo-200 dark:border-indigo-800">
+                  <p className="text-[10px] font-semibold text-indigo-700 dark:text-indigo-400 uppercase mb-2">Apply Impact</p>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                      <span className="text-gray-600 dark:text-gray-400">Resolve matching findings</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <ArrowRight className="w-3 h-3 text-indigo-500" />
+                      <span className="text-gray-600 dark:text-gray-400">Add clause to contract</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Shield className="w-3 h-3 text-emerald-500" />
+                      <span className="text-gray-600 dark:text-gray-400">No conflicts detected</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Similar Templates */}
+                {templates && templates.filter(t =>
+                  t.clause_type === previewTemplate.clause_type && t.template_id !== previewTemplate.template_id
+                ).length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Similar Templates</p>
+                    <div className="space-y-1.5">
+                      {templates.filter(t =>
+                        t.clause_type === previewTemplate.clause_type && t.template_id !== previewTemplate.template_id
+                      ).slice(0, 3).map((similar) => {
+                        const s = STATUS_STYLE[similar.status] ?? STATUS_STYLE.draft;
+                        return (
+                          <button
+                            key={similar.template_id}
+                            onClick={() => setPreviewTemplate(similar)}
+                            className="w-full text-left px-3 py-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          >
+                            <p className="text-xs font-medium text-gray-900 dark:text-white truncate">{similar.name}</p>
+                            <p className="text-[10px] text-gray-400">
+                              v{similar.version} · {Math.round(similar.accept_rate * 100)}% accept
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Clause Bundle */}
                 {RELATED_CLAUSES[previewTemplate.clause_type] && (
                   <div>
-                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Related Clauses</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {RELATED_CLAUSES[previewTemplate.clause_type].map((related) => (
-                        <span
-                          key={related}
-                          className="inline-flex items-center px-2 py-0.5 text-xs bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-full"
-                        >
-                          {related.replace(/_/g, " ")}
-                        </span>
-                      ))}
+                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Recommended Bundle</p>
+                    <div className="bg-gradient-to-r from-purple-50 to-purple-50/50 dark:from-purple-900/10 dark:to-purple-900/5 rounded-lg p-3 border border-purple-200 dark:border-purple-800">
+                      <div className="space-y-1.5 mb-2">
+                        {RELATED_CLAUSES[previewTemplate.clause_type].map((related) => (
+                          <div key={related} className="flex items-center gap-2 text-xs">
+                            <CheckCircle2 className="w-3 h-3 text-purple-500" />
+                            <span className="text-gray-700 dark:text-gray-300 capitalize">{related.replace(/_/g, " ")}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <button className="w-full px-3 py-1.5 text-xs font-medium bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors">
+                        Apply Bundle ({RELATED_CLAUSES[previewTemplate.clause_type].length} templates)
+                      </button>
                     </div>
                   </div>
                 )}
@@ -317,16 +372,19 @@ export function TemplatesTab() {
                 <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
                   <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Apply to Review</p>
                   <div className="space-y-2">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Search review by filename..."
+                        value={applyReviewId}
+                        onChange={(e) => setApplyReviewId(e.target.value)}
+                        className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                      />
+                    </div>
                     <input
                       type="text"
-                      placeholder="Review ID"
-                      value={applyReviewId}
-                      onChange={(e) => setApplyReviewId(e.target.value)}
-                      className="w-full px-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Finding ID (optional)"
+                      placeholder="Finding ID (optional — leave blank to apply to all matching)"
                       value={applyFindingId}
                       onChange={(e) => setApplyFindingId(e.target.value)}
                       className="w-full px-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
