@@ -1,10 +1,10 @@
 /**
- * Templates tab — library of all redline templates with status badges.
+ * Templates tab — library of all redline templates with status badges and preview panel.
  */
 "use client";
 
 import React, { useState } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText,
   Plus,
@@ -18,8 +18,15 @@ import {
   Eye,
   ThumbsUp,
   Send,
+  X,
+  ArrowRight,
+  FileCheck,
+  Globe,
+  Building2,
+  Shield,
 } from "lucide-react";
 import { useTemplates, useDeleteTemplate, useUpdateTemplate } from "@/services/hooks/useRedlineTemplates";
+import { redlineTemplateApi } from "@/services/api/redlineTemplates";
 import type { RedlineTemplate } from "@/services/api/redlineTemplates";
 
 const STATUS_STYLE: Record<string, { label: string; icon: React.ElementType; class: string; next?: string }> = {
@@ -32,11 +39,27 @@ const STATUS_STYLE: Record<string, { label: string; icon: React.ElementType; cla
   retired: { label: "Retired", icon: Archive, class: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
 };
 
+// Related clauses mapping
+const RELATED_CLAUSES: Record<string, string[]> = {
+  data_privacy: ["gdpr", "cross_border_transfer", "data_breach", "dpa"],
+  gdpr: ["data_privacy", "cross_border_transfer", "data_breach", "dpa"],
+  confidentiality: ["nda", "non_compete", "return_of_information"],
+  indemnification: ["liability", "limitation_of_liability", "insurance"],
+  liability: ["indemnification", "limitation_of_liability", "insurance"],
+  termination: ["notice_period", "auto_renewal", "for_cause_termination"],
+  intellectual_property: ["ip_ownership", "license", "non_compete"],
+};
+
 export function TemplatesTab() {
   const { data: templates, isLoading } = useTemplates();
   const deleteTemplate = useDeleteTemplate();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [previewTemplate, setPreviewTemplate] = useState<RedlineTemplate | null>(null);
+  const [applyReviewId, setApplyReviewId] = useState("");
+  const [applyFindingId, setApplyFindingId] = useState("");
+  const [applying, setApplying] = useState(false);
+  const [applyResult, setApplyResult] = useState<string | null>(null);
 
   const filtered = (templates ?? []).filter((t) => {
     const matchesSearch = t.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -44,6 +67,25 @@ export function TemplatesTab() {
     const matchesStatus = statusFilter === "all" || t.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
+
+  const handleApply = async () => {
+    if (!previewTemplate || !applyReviewId) return;
+    setApplying(true);
+    setApplyResult(null);
+    try {
+      const result = await redlineTemplateApi.applyToReview({
+        template_id: previewTemplate.template_id,
+        review_id: applyReviewId,
+        finding_id: applyFindingId || undefined,
+        clause_type: previewTemplate.clause_type,
+      });
+      setApplyResult(`✅ Applied "${result.template_name}" — redline created${result.finding_resolved ? " and finding resolved" : ""}`);
+    } catch (err) {
+      setApplyResult(`❌ ${err instanceof Error ? err.message : "Failed"}`);
+    } finally {
+      setApplying(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -75,8 +117,11 @@ export function TemplatesTab() {
           >
             <option value="all">All Status</option>
             <option value="active">Approved</option>
+            <option value="published">Published</option>
+            <option value="pending_review">Pending Review</option>
             <option value="ai_draft">AI Generated</option>
             <option value="draft">Draft</option>
+            <option value="deprecated">Deprecated</option>
             <option value="retired">Retired</option>
           </select>
         </div>
@@ -86,56 +131,228 @@ export function TemplatesTab() {
         </button>
       </div>
 
-      {/* Template Cards */}
-      {filtered.length === 0 ? (
-        <div className="text-center py-16">
-          <FileText className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-          <p className="text-gray-500 dark:text-gray-400">No templates found</p>
-          <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-            {templates?.length === 0
-              ? "Create your first template or generate AI drafts from the Coverage tab"
-              : "Try adjusting your filters"}
-          </p>
+      <div className="flex gap-4">
+        {/* Template Grid */}
+        <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 ${previewTemplate ? "lg:grid-cols-2" : "lg:grid-cols-3"}`}>
+          {filtered.length === 0 ? (
+            <div className="col-span-full text-center py-16">
+              <FileText className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+              <p className="text-gray-500 dark:text-gray-400">No templates found</p>
+              <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
+                {templates?.length === 0
+                  ? "Create your first template or generate AI drafts from the Coverage tab"
+                  : "Try adjusting your filters"}
+              </p>
+            </div>
+          ) : (
+            filtered.map((template) => {
+              const status = STATUS_STYLE[template.status] ?? STATUS_STYLE.draft;
+              const StatusIcon = status.icon;
+              return (
+                <motion.div
+                  key={template.template_id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  onClick={() => setPreviewTemplate(template)}
+                  className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 hover:shadow-md hover:border-indigo-300 dark:hover:border-indigo-700 transition-all cursor-pointer"
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-medium text-gray-900 dark:text-white truncate">
+                        {template.name}
+                      </h3>
+                      <p className="text-xs text-gray-400 capitalize mt-0.5">
+                        {template.clause_type.replace(/_/g, " ")}
+                      </p>
+                    </div>
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ml-2 ${status.class}`}>
+                      <StatusIcon className="w-3 h-3" />
+                      {status.label}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mb-3">
+                    {template.template_text.slice(0, 200)}
+                  </p>
+                  <div className="flex items-center justify-between text-xs text-gray-400">
+                    <span>v{template.version}</span>
+                    <span>Used {template.usage_count} times</span>
+                    <span>{template.accept_rate > 0 ? `${Math.round(template.accept_rate * 100)}% accept` : "—"}</span>
+                  </div>
+                </motion.div>
+              );
+            })
+          )}
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map((template) => {
-            const status = STATUS_STYLE[template.status] ?? STATUS_STYLE.draft;
-            const StatusIcon = status.icon;
-            return (
-              <motion.div
-                key={template.template_id}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 hover:shadow-md transition-shadow"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-medium text-gray-900 dark:text-white truncate">
-                      {template.name}
-                    </h3>
-                    <p className="text-xs text-gray-400 capitalize mt-0.5">
-                      {template.clause_type.replace(/_/g, " ")}
+
+        {/* Preview Panel */}
+        <AnimatePresence>
+          {previewTemplate && (
+            <motion.div
+              initial={{ opacity: 0, x: 300 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 300 }}
+              className="w-96 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden flex-shrink-0"
+            >
+              {/* Preview Header */}
+              <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+                <h3 className="font-semibold text-gray-900 dark:text-white text-sm truncate">
+                  {previewTemplate.name}
+                </h3>
+                <button
+                  onClick={() => { setPreviewTemplate(null); setApplyResult(null); }}
+                  className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                >
+                  <X className="w-4 h-4 text-gray-400" />
+                </button>
+              </div>
+
+              <div className="p-4 space-y-4 overflow-y-auto max-h-[calc(100vh-300px)]">
+                {/* Status & Version */}
+                <div className="flex items-center justify-between">
+                  {(() => {
+                    const s = STATUS_STYLE[previewTemplate.status] ?? STATUS_STYLE.draft;
+                    const Icon = s.icon;
+                    return (
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${s.class}`}>
+                        <Icon className="w-3 h-3" />
+                        {s.label}
+                      </span>
+                    );
+                  })()}
+                  <span className="text-xs text-gray-400">v{previewTemplate.version}</span>
+                </div>
+
+                {/* Metadata */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
+                    <p className="text-[10px] text-gray-400 uppercase">Clause Type</p>
+                    <p className="text-xs font-medium text-gray-900 dark:text-white capitalize mt-0.5">
+                      {previewTemplate.clause_type.replace(/_/g, " ")}
                     </p>
                   </div>
-                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ml-2 ${status.class}`}>
-                    <StatusIcon className="w-3 h-3" />
-                    {status.label}
-                  </span>
+                  <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
+                    <p className="text-[10px] text-gray-400 uppercase">Category</p>
+                    <p className="text-xs font-medium text-gray-900 dark:text-white capitalize mt-0.5">
+                      {previewTemplate.category.replace(/_/g, " ")}
+                    </p>
+                  </div>
+                  {previewTemplate.jurisdiction && (
+                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
+                      <p className="text-[10px] text-gray-400 uppercase flex items-center gap-1">
+                        <Globe className="w-3 h-3" /> Jurisdiction
+                      </p>
+                      <p className="text-xs font-medium text-gray-900 dark:text-white mt-0.5">
+                        {previewTemplate.jurisdiction}
+                      </p>
+                    </div>
+                  )}
+                  {previewTemplate.industry && (
+                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
+                      <p className="text-[10px] text-gray-400 uppercase flex items-center gap-1">
+                        <Building2 className="w-3 h-3" /> Industry
+                      </p>
+                      <p className="text-xs font-medium text-gray-900 dark:text-white mt-0.5">
+                        {previewTemplate.industry}
+                      </p>
+                    </div>
+                  )}
+                  {previewTemplate.risk_level && (
+                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
+                      <p className="text-[10px] text-gray-400 uppercase flex items-center gap-1">
+                        <Shield className="w-3 h-3" /> Risk Level
+                      </p>
+                      <p className="text-xs font-medium text-gray-900 dark:text-white mt-0.5 capitalize">
+                        {previewTemplate.risk_level}
+                      </p>
+                    </div>
+                  )}
                 </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mb-3">
-                  {template.template_text.slice(0, 200)}
-                </p>
-                <div className="flex items-center justify-between text-xs text-gray-400">
-                  <span>v{template.version}</span>
-                  <span>Used {template.usage_count} times</span>
-                  <span>{template.accept_rate > 0 ? `${Math.round(template.accept_rate * 100)}% accept` : "—"}</span>
+
+                {/* Template Text */}
+                <div>
+                  <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Template Text</p>
+                  <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 max-h-40 overflow-y-auto">
+                    <pre className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap font-sans">
+                      {previewTemplate.template_text}
+                    </pre>
+                  </div>
                 </div>
-              </motion.div>
-            );
-          })}
-        </div>
-      )}
+
+                {/* Usage Stats */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-gray-900 dark:text-white">{previewTemplate.usage_count}</p>
+                    <p className="text-[10px] text-gray-400">Used</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                      {previewTemplate.accept_rate > 0 ? `${Math.round(previewTemplate.accept_rate * 100)}%` : "—"}
+                    </p>
+                    <p className="text-[10px] text-gray-400">Accept Rate</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-gray-900 dark:text-white">{previewTemplate.version}</p>
+                    <p className="text-[10px] text-gray-400">Version</p>
+                  </div>
+                </div>
+
+                {/* Related Clauses */}
+                {RELATED_CLAUSES[previewTemplate.clause_type] && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Related Clauses</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {RELATED_CLAUSES[previewTemplate.clause_type].map((related) => (
+                        <span
+                          key={related}
+                          className="inline-flex items-center px-2 py-0.5 text-xs bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-full"
+                        >
+                          {related.replace(/_/g, " ")}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Apply to Review */}
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                  <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Apply to Review</p>
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      placeholder="Review ID"
+                      value={applyReviewId}
+                      onChange={(e) => setApplyReviewId(e.target.value)}
+                      className="w-full px-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Finding ID (optional)"
+                      value={applyFindingId}
+                      onChange={(e) => setApplyFindingId(e.target.value)}
+                      className="w-full px-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    />
+                    <button
+                      onClick={handleApply}
+                      disabled={applying || !applyReviewId}
+                      className="w-full px-3 py-2 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                    >
+                      {applying ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <ArrowRight className="w-3 h-3" />
+                      )}
+                      Apply to Review
+                    </button>
+                    {applyResult && (
+                      <p className="text-xs text-center text-gray-600 dark:text-gray-400">{applyResult}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }

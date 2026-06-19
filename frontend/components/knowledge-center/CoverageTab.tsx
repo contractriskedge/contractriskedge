@@ -59,6 +59,8 @@ export function CoverageTab() {
     );
   }
 
+  const maxFindings = Math.max(...(coverage?.by_clause_type ?? []).map((c) => c.total_findings), 1);
+
   return (
     <div className="space-y-4">
       {/* Summary Bar */}
@@ -83,6 +85,35 @@ export function CoverageTab() {
         </div>
       </div>
 
+      {/* Coverage Heat Map */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Coverage Heat Map</h3>
+        <div className="space-y-1.5">
+          {(coverage?.by_clause_type ?? []).slice(0, 12).map((item) => {
+            const pct = item.coverage_pct;
+            const barWidth = Math.max((item.total_findings / maxFindings) * 100, 4);
+            const barColor = pct >= 80 ? "bg-emerald-500" : pct >= 40 ? "bg-amber-500" : pct > 0 ? "bg-orange-500" : "bg-red-500";
+            return (
+              <div key={item.clause_type} className="flex items-center gap-3">
+                <span className="text-xs text-gray-500 w-28 text-right capitalize truncate">
+                  {item.clause_type.replace(/_/g, " ")}
+                </span>
+                <div className="flex-1 h-5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden relative">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+                    style={{ width: `${barWidth}%` }}
+                  />
+                </div>
+                <span className={`text-xs font-medium w-12 text-right ${
+                  pct >= 80 ? "text-emerald-600" : pct >= 40 ? "text-amber-600" : "text-red-600"
+                }`}>
+                  {Math.round(pct)}%
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
       {/* Filters */}
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-xs">
