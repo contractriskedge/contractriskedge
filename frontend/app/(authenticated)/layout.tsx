@@ -26,7 +26,7 @@ import { useRealtimeCoordinator } from "@/src/lib/realtime/realtimeCoordinator";
 import { useInvalidationOrchestrator } from "@/src/lib/realtime/invalidationOrchestrator";
 import { Sun, Moon, ZoomIn, ZoomOut } from "lucide-react";
 
-type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "executive-dashboard" | "policy" | "clause-intelligence" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center";
+type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "executive-dashboard" | "policy" | "clause-intelligence" | "redline-knowledge-center" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center";
 
 export default function AuthenticatedLayout({
   children,
@@ -64,6 +64,7 @@ export default function AuthenticatedLayout({
     else if (path.startsWith("/clause-library")) setActiveView("clause-library");
     else if (path.startsWith("/obligations")) setActiveView("obligations");
     else if (path.startsWith("/negotiation")) setActiveView("negotiation");
+    else if (path.startsWith("/clause-intelligence/redline-knowledge-center")) setActiveView("redline-knowledge-center");
     else if (path.startsWith("/clause-intelligence")) setActiveView("clause-intelligence");
     else if (path.startsWith("/policy")) setActiveView("policy");
     else if (path.startsWith("/relationships")) setActiveView("relationships");
@@ -115,6 +116,7 @@ export default function AuthenticatedLayout({
               obligations: "/obligations",
               negotiation: "/negotiation",
               "clause-intelligence": "/clause-intelligence",
+              "redline-knowledge-center": "/clause-intelligence/redline-knowledge-center",
               policy: "/policy",
               relationships: "/relationships",
               "governance-dashboard": "/governance-dashboard",

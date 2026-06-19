@@ -40,7 +40,7 @@ import {
   Activity,
 } from "lucide-react";
 
-type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "review-dashboard" | "executive-dashboard" | "policy" | "clause-intelligence" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center";
+type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "review-dashboard" | "executive-dashboard" | "policy" | "clause-intelligence" | "redline-knowledge-center" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center";
 
 interface SidebarProps {
   activeView: ViewType;
@@ -73,7 +73,8 @@ const navGroups: NavGroup[] = [
     items: [
       { id: "ingestion", label: "Ingestion", icon: Upload, permission: "contracts:write" },
       { id: "contracts", label: "Contracts", icon: FileText, permission: "contracts:read" },
-      { id: "clause-library", label: "Clause Intelligence Center", icon: Library, permission: "contracts:read" },
+      { id: "clause-library", label: "Clause Library", icon: Library, permission: "contracts:read" },
+      { id: "redline-knowledge-center", label: "Redline Knowledge Center", icon: BookOpen, permission: "contracts:read" },
       { id: "obligations", label: "Obligations", icon: ClipboardCheck, permission: "contracts:read" },
     ],
   },
@@ -83,7 +84,6 @@ const navGroups: NavGroup[] = [
       { id: "review-dashboard", label: "Review Dashboard", icon: ClipboardList, permission: "contracts:read" },
       { id: "review", label: "Review Queue", icon: Eye, permission: "contracts:read" },
       { id: "negotiation", label: "Negotiation", icon: GitMerge, permission: "contracts:read" },
-      { id: "clause-intelligence", label: "Clause Intel", icon: Network, permission: "contracts:read" },
       { id: "policy", label: "Policy Engine", icon: ScrollText, permission: "contracts:read" },
     ],
   },
