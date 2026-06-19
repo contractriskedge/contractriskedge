@@ -495,6 +495,115 @@ class PolicyContextResult(BaseModel):
 # ── Filter / Query Schemas ──────────────────────────────────────────
 
 
+# ── Redline Template Schemas ────────────────────────────────────────
+
+
+class RedlineTemplateCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=300)
+    clause_type: str = Field(..., min_length=1, max_length=100)
+    category: str = Field(default="general", max_length=100)
+    jurisdiction: Optional[str] = Field(None, max_length=50)
+    industry: Optional[str] = Field(None, max_length=100)
+    language: str = Field(default="en", max_length=10)
+    risk_level: Optional[str] = Field(None, pattern="^(low|medium|high|critical)?$")
+    template_text: str = Field(..., min_length=1)
+    variables: Optional[dict[str, Any]] = None
+    status: str = Field(default="draft", pattern="^(draft|active|retired)$")
+    playbook_id: Optional[str] = None
+    effective_date: Optional[datetime] = None
+
+
+class RedlineTemplateUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=300)
+    clause_type: Optional[str] = Field(None, min_length=1, max_length=100)
+    category: Optional[str] = Field(None, max_length=100)
+    jurisdiction: Optional[str] = Field(None, max_length=50)
+    industry: Optional[str] = Field(None, max_length=100)
+    language: Optional[str] = Field(None, max_length=10)
+    risk_level: Optional[str] = Field(None, pattern="^(low|medium|high|critical)?$")
+    template_text: Optional[str] = Field(None, min_length=1)
+    variables: Optional[dict[str, Any]] = None
+    status: Optional[str] = Field(None, pattern="^(draft|active|retired)$")
+    playbook_id: Optional[str] = None
+    effective_date: Optional[datetime] = None
+
+
+class RedlineTemplateItem(BaseModel):
+    template_id: str
+    tenant_id: str
+    name: str
+    clause_type: str
+    category: str = "general"
+    jurisdiction: Optional[str] = None
+    industry: Optional[str] = None
+    language: str = "en"
+    risk_level: Optional[str] = None
+    template_text: str
+    variables: Optional[dict[str, Any]] = None
+    version: int = 1
+    status: str = "draft"
+    playbook_id: Optional[str] = None
+    usage_count: int = 0
+    accept_rate: float = 0.0
+    created_by: Optional[str] = None
+    approved_by: Optional[str] = None
+    effective_date: Optional[datetime] = None
+    retired_date: Optional[datetime] = None
+    last_used: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TemplateCoverageByClauseType(BaseModel):
+    clause_type: str
+    label: str
+    findings: int = 0
+    has_template: bool = False
+    coverage_pct: float = 0.0
+
+
+class TemplateCoverageResponse(BaseModel):
+    total_findings: int = 0
+    total_clause_types: int = 0
+    templates_found: int = 0
+    templates_missing: int = 0
+    coverage_pct: float = 0.0
+    by_clause_type: list[TemplateCoverageByClauseType] = Field(default_factory=list)
+
+
+class TemplateGenerateRequest(BaseModel):
+    clause_type: str = Field(..., min_length=1, max_length=100)
+    jurisdiction: Optional[str] = Field(None, max_length=50)
+    industry: Optional[str] = Field(None, max_length=100)
+    risk_level: Optional[str] = Field(None, pattern="^(low|medium|high|critical)?$")
+
+
+class TemplateGenerateResponse(BaseModel):
+    clause_type: str
+    jurisdiction: Optional[str] = None
+    industry: Optional[str] = None
+    generated_text: str
+    model_used: str
+    provider: str
+
+
+class TemplateFilterParams(BaseModel):
+    clause_type: Optional[str] = None
+    category: Optional[str] = None
+    jurisdiction: Optional[str] = None
+    industry: Optional[str] = None
+    risk_level: Optional[str] = None
+    status: Optional[str] = None
+    search: Optional[str] = None
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+    sort_by: str = Field(default="created_at")
+    sort_order: str = Field(default="desc", pattern="^(asc|desc)$")
+
+
+# ── Filter / Query Schemas ──────────────────────────────────────────
+
+
 class PlaybookFilterParams(BaseModel):
     status: Optional[str] = None
     jurisdiction: Optional[str] = None

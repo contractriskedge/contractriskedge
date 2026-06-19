@@ -486,6 +486,47 @@ class PolicyOverride(Base):
 # ── Governance Audit Events ─────────────────────────────────────────
 
 
+class RedlineTemplate(Base):
+    """A reusable redline template for clause language — maps to AI finding clause_types.
+
+    Templates can be matched to findings by clause_type, jurisdiction, industry,
+    risk_level, etc. They serve as the "coverage" target: if a clause_type has
+    at least one active template, it's considered covered.
+    """
+    __tablename__ = "redline_templates"
+
+    template_id = Column(UUID, primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID, ForeignKey("tenants.tenant_id", ondelete="CASCADE"), nullable=False, index=True)
+
+    name = Column(Text, nullable=False)
+    clause_type = Column(Text, nullable=False, index=True)  # matches AI finding clause_type values
+    category = Column(Text, nullable=False, default="general")  # e.g. "data_privacy", "liability", "ip"
+    jurisdiction = Column(Text, nullable=True)  # e.g. "EU", "US", "UK"
+    industry = Column(Text, nullable=True)  # e.g. "Technology", "Healthcare", "Finance"
+    language = Column(Text, nullable=False, default="en")
+    risk_level = Column(Text, nullable=True)  # "low", "medium", "high", "critical"
+
+    template_text = Column(Text, nullable=False)  # the actual clause language
+    variables = Column(JSONB, nullable=True)  # template variables like [amount], [party]
+
+    version = Column(Integer, nullable=False, default=1)
+    status = Column(Text, nullable=False, default="draft")  # "draft", "active", "retired"
+
+    playbook_id = Column(UUID, ForeignKey("clause_standards.clause_id", ondelete="SET NULL"), nullable=True, index=True)
+
+    usage_count = Column(Integer, nullable=False, default=0)
+    accept_rate = Column(Float, nullable=False, default=0.0)
+
+    created_by = Column(Text, nullable=True)
+    approved_by = Column(Text, nullable=True)
+    effective_date = Column(DateTime(timezone=True), nullable=True)
+    retired_date = Column(DateTime(timezone=True), nullable=True)
+    last_used = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class GovernanceAuditEvent(Base):
     """Immutable audit trail for all playbook and policy governance actions."""
     __tablename__ = "governance_audit_events"

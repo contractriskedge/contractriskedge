@@ -355,6 +355,7 @@ def create_app() -> FastAPI:
     from app.domains.review.router import router as review_router
     from app.domains.notify.router import router as notify_router
     from app.domains.playbook.router import router as playbook_router
+    from app.domains.playbook.template_router import router as template_router
     from app.domains.analytics.router import router as analytics_router
     from app.domains.audit.router import router as audit_router
     from app.domains.exports.router import router as exports_router
@@ -362,6 +363,8 @@ def create_app() -> FastAPI:
     from app.domains.admin.router import router as admin_router
     from app.domains.cases.router import router as cases_router
     from app.kernel.events.router import router as events_router
+    # ── Redline Template Library ──
+    from app.domains.redline_templates.router import router as redline_template_router
     # ── Integration subsystem (connectors, OAuth, webhooks, sync) ──
     from app.integration.router import integration_router
 
@@ -377,6 +380,7 @@ def create_app() -> FastAPI:
     app.include_router(review_router, prefix="/api/v1")
     app.include_router(notify_router, prefix="/api/v1")
     app.include_router(playbook_router, prefix="/api/v1")
+    app.include_router(template_router, prefix="/api/v1")
     app.include_router(analytics_router, prefix="/api/v1")
     app.include_router(audit_router, prefix="/api/v1")
     app.include_router(exports_router, prefix="/api/v1")
@@ -384,6 +388,8 @@ def create_app() -> FastAPI:
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(cases_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")
+    # ── Redline Template Library ──
+    app.include_router(redline_template_router, prefix="/api/v1")
     # ── Integration router (connectors, OAuth, webhooks, sync) ──
     app.include_router(integration_router, prefix="/api/v1")
     # ── Batch upload router ──

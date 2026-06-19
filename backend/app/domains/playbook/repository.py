@@ -14,6 +14,7 @@ from app.domains.playbook.models import (
     LegalPlaybook, PlaybookVersion, ClauseStandard,
     PolicyRule, PolicyEvaluation, ApprovalThreshold,
     ClauseRecommendation, PolicyOverride, GovernanceAuditEvent,
+    RedlineTemplate,
     PlaybookStatus, OverrideStatus, EvaluationStatus,
 )
 
@@ -594,6 +595,116 @@ class PlaybookRepository(BaseRepository):
         return await self.get_override(override_id, tenant_id)
 
     # ── Governance Audit Events ────────────────────────────────────
+
+    # ── Redline Templates ───────────────────────────────────────────
+
+    async def create_template(self, tenant_id: str, created_by: Optional[str] = None,
+                               **kwargs) -> RedlineTemplate:
+        template = RedlineTemplate(
+            tenant_id=tenant_id, created_by=created_by, **kwargs,
+        )
+        self.session.add(template)
+        await self.session.flush()
+        return template
+
+    async def get_template(self, template_id: str, tenant_id: str) -> Optional[RedlineTemplate]:
+        stmt = select(RedlineTemplate).where(
+            RedlineTemplate.template_id == template_id,
+            RedlineTemplate.tenant_id == tenant_id,
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def list_templates(self, tenant_id: str, filters) -> tuple[list, int]:
+        query = select(RedlineTemplate).where(RedlineTemplate.tenant_id == tenant_id)
+        if filters.clause_type:
+            query = query.where(RedlineTemplate.clause_type == filters.clause_type)
+        if filters.category:
+            query = query.where(RedlineTemplate.category == filters.category)
+        if filters.jurisdiction:
+            query = query.where(RedlineTemplate.jurisdiction == filters.jurisdiction)
+        if filters.industry:
+            query = query.where(RedlineTemplate.industry == filters.industry)
+        if filters.risk_level:
+            query = query.where(RedlineTemplate.risk_level == filters.risk_level)
+        if filters.status:
+            query = query.where(RedlineTemplate.status == filters.status)
+        if filters.search:
+            search = f"%{filters.search}%"
+            query = query.where(
+                or_(RedlineTemplate.name.ilike(search), RedlineTemplate.template_text.ilike(search))
+            )
+        sort_col = getattr(RedlineTemplate, filters.sort_by, RedlineTemplate.created_at)
+        order = sort_col.desc() if filters.sort_order == "desc" else sort_col.asc()
+        query = query.order_by(order)
+        return await self.paginate(query, filters.page, filters.page_size)
+
+    async def update_template(self, template_id: str, tenant_id: str, **kwargs) -> Optional[RedlineTemplate]:
+        template = await self.get_template(template_id, tenant_id)
+        if not template:
+            return None
+        allowed = {"name", "clause_type", "category", "jurisdiction", "industry",
+                    "language", "risk_level", "template_text", "variables", "version",
+                    "status", "playbook_id", "usage_count", "accept_rate",
+                    "approved_by", "effective_date", "retired_date", "last_used"}
+        updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+        if updates:
+            stmt = update(RedlineTemplate).where(
+                RedlineTemplate.template_id == template_id,
+                RedlineTemplate.tenant_id == tenant_id,
+            ).values(**updates)
+            await self.session.execute(stmt)
+            await self.session.flush()
+        return await self.get_template(template_id, tenant_id)
+
+    async def soft_delete_template(self, template_id: str, tenant_id: str) -> Optional[RedlineTemplate]:
+        return await self.update_template(template_id, tenant_id, status="retired",
+                                           retired_date=datetime.utcnow())
+
+    async def get_templates_by_clause_type(self, tenant_id: str,
+                                            clause_type: str) -> list[RedlineTemplate]:
+        stmt = select(RedlineTemplate).where(
+            RedlineTemplate.tenant_id == tenant_id,
+            RedlineTemplate.clause_type == clause_type,
+            RedlineTemplate.status.in_(["active", "draft"]),
+        ).order_by(RedlineTemplate.version.desc())
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_distinct_clause_types_with_templates(self, tenant_id: str) -> list[str]:
+        """Return distinct clause_type values that have at least one active template."""
+        from sqlalchemy import distinct
+        stmt = select(distinct(RedlineTemplate.clause_type)).where(
+            RedlineTemplate.tenant_id == tenant_id,
+            RedlineTemplate.status.in_(["active", "draft"]),
+        )
+        result = await self.session.execute(stmt)
+        return [row[0] for row in result.all()]
+
+    async def get_template_coverage_stats(self, tenant_id: str) -> dict:
+        """Aggregate coverage stats: total templates, by status."""
+        from sqlalchemy import func
+        total = await self.scalar(
+            select(func.count()).select_from(RedlineTemplate).where(
+                RedlineTemplate.tenant_id == tenant_id,
+            )
+        )
+        active = await self.scalar(
+            select(func.count()).select_from(RedlineTemplate).where(
+                RedlineTemplate.tenant_id == tenant_id,
+                RedlineTemplate.status == "active",
+            )
+        )
+        by_clause_type = await self.session.execute(
+            select(RedlineTemplate.clause_type, func.count())
+            .where(RedlineTemplate.tenant_id == tenant_id)
+            .group_by(RedlineTemplate.clause_type)
+        )
+        return {
+            "total": total or 0,
+            "active": active or 0,
+            "by_clause_type": {row[0]: row[1] for row in by_clause_type.all()},
+        }
 
     async def create_audit_event(self, tenant_id: str, event_type: str, entity_type: str,
                                   entity_id: str, actor_id: str, actor_role: Optional[str] = None,

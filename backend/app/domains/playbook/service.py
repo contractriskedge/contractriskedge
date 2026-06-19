@@ -21,6 +21,7 @@ from app.domains.playbook.models import (
     LegalPlaybook, PlaybookVersion, ClauseStandard,
     PolicyRule, PolicyEvaluation, ApprovalThreshold,
     ClauseRecommendation, PolicyOverride, GovernanceAuditEvent,
+    RedlineTemplate,
     PlaybookStatus, OverrideStatus, EvaluationStatus,
     DeviationSeverity,
 )
@@ -31,6 +32,10 @@ from app.domains.playbook.schemas import (
     PolicyRuleCreate, PolicyRuleUpdate,
     ApprovalThresholdCreate, ApprovalThresholdUpdate,
     OverrideRequest, OverrideReview,
+    RedlineTemplateCreate, RedlineTemplateUpdate,
+    TemplateCoverageResponse, TemplateCoverageByClauseType,
+    TemplateGenerateRequest, TemplateGenerateResponse,
+    TemplateFilterParams,
     PlaybookFilterParams, ClauseFilterParams, RuleFilterParams,
     EvaluationFilterParams, OverrideFilterParams, AuditFilterParams,
 )
@@ -1122,4 +1127,257 @@ class AIPolicyInjectionService:
             "threshold_type": t.threshold_type,
             "approval_role": t.approval_role,
             "auto_approve": t.auto_approve,
+        }
+
+
+# ── Redline Template Service ────────────────────────────────────────
+
+
+@dataclass
+class TemplateService:
+    """Manages redline template lifecycle and coverage analysis."""
+
+    repo: PlaybookRepository
+    tenant_id: str
+
+    # ── CRUD ──────────────────────────────────────────────────────
+
+    async def create_template(self, data: RedlineTemplateCreate,
+                               created_by: Optional[str] = None) -> dict:
+        template = await self.repo.create_template(
+            tenant_id=self.tenant_id,
+            created_by=created_by,
+            name=data.name,
+            clause_type=data.clause_type,
+            category=data.category,
+            jurisdiction=data.jurisdiction,
+            industry=data.industry,
+            language=data.language,
+            risk_level=data.risk_level,
+            template_text=data.template_text,
+            variables=data.variables,
+            status=data.status,
+            playbook_id=data.playbook_id,
+            effective_date=data.effective_date,
+        )
+        return self._template_to_dict(template)
+
+    async def get_template(self, template_id: str) -> Optional[dict]:
+        template = await self.repo.get_template(template_id, self.tenant_id)
+        return self._template_to_dict(template) if template else None
+
+    async def list_templates(self, filters: TemplateFilterParams) -> tuple[list, int]:
+        items, total = await self.repo.list_templates(self.tenant_id, filters)
+        return [self._template_to_dict(t) for t in items], total
+
+    async def update_template(self, template_id: str, data: RedlineTemplateUpdate) -> Optional[dict]:
+        template = await self.repo.update_template(
+            template_id, self.tenant_id, **data.model_dump(exclude_none=True),
+        )
+        return self._template_to_dict(template) if template else None
+
+    async def delete_template(self, template_id: str) -> Optional[dict]:
+        template = await self.repo.soft_delete_template(template_id, self.tenant_id)
+        return self._template_to_dict(template) if template else None
+
+    # ── Coverage Analysis ─────────────────────────────────────────
+
+    async def get_coverage(self) -> TemplateCoverageResponse:
+        """Analyze template coverage across all finding clause_types for this tenant."""
+        from sqlalchemy import select, func, distinct
+        from app.domains.review.models import ReviewFinding
+
+        # Get all distinct clause_types from review_findings for this tenant
+        stmt = (
+            select(ReviewFinding.clause_type, func.count().label("cnt"))
+            .where(
+                ReviewFinding.tenant_id == self.tenant_id,
+                ReviewFinding.clause_type.isnot(None),
+            )
+            .group_by(ReviewFinding.clause_type)
+            .order_by(func.count().desc())
+        )
+        result = await self.repo.session.execute(stmt)
+        clause_type_rows = result.all()
+
+        # Get all clause_types that have active/draft templates
+        template_types = await self.repo.get_distinct_clause_types_with_templates(self.tenant_id)
+        template_set = set(template_types)
+
+        total_findings = 0
+        total_clause_types = len(clause_type_rows)
+        templates_found = 0
+        by_clause_type = []
+
+        # Human-readable label mapping
+        LABEL_MAP = {
+            "gdpr": "GDPR Compliance",
+            "data_privacy": "Data Privacy",
+            "liability": "Limitation of Liability",
+            "indemnification": "Indemnification",
+            "confidentiality": "Confidentiality",
+            "ip": "Intellectual Property",
+            "intellectual_property": "Intellectual Property",
+            "termination": "Termination",
+            "governing_law": "Governing Law",
+            "dispute_resolution": "Dispute Resolution",
+            "force_majeure": "Force Majeure",
+            "payment_terms": "Payment Terms",
+            "warranty": "Warranty",
+            "insurance": "Insurance",
+            "compliance": "Compliance",
+            "audit_rights": "Audit Rights",
+            "assignment": "Assignment",
+            "non_compete": "Non-Compete",
+            "non_solicit": "Non-Solicit",
+            "sla": "SLA",
+            "escrow": "Escrow",
+            "data_processing": "Data Processing",
+            "data_transfer": "Data Transfer",
+            "data_security": "Data Security",
+            "data_breach": "Data Breach Notification",
+            "data_retention": "Data Retention",
+            "data_protection": "Data Protection",
+            "export_control": "Export Control",
+            "sanctions": "Sanctions Compliance",
+            "anti_bribery": "Anti-Bribery",
+            "anti_corruption": "Anti-Corruption",
+            "general": "General",
+        }
+
+        for clause_type, cnt in clause_type_rows:
+            if not clause_type:
+                continue
+            ct = str(clause_type)
+            total_findings += cnt
+            has_template = ct in template_set
+            if has_template:
+                templates_found += 1
+            label = LABEL_MAP.get(ct, ct.replace("_", " ").title())
+            by_clause_type.append(TemplateCoverageByClauseType(
+                clause_type=ct,
+                label=label,
+                findings=cnt,
+                has_template=has_template,
+                coverage_pct=100.0 if has_template else 0.0,
+            ))
+
+        templates_missing = total_clause_types - templates_found
+        coverage_pct = (templates_found / total_clause_types * 100) if total_clause_types > 0 else 0.0
+
+        return TemplateCoverageResponse(
+            total_findings=total_findings,
+            total_clause_types=total_clause_types,
+            templates_found=templates_found,
+            templates_missing=templates_missing,
+            coverage_pct=round(coverage_pct, 1),
+            by_clause_type=by_clause_type,
+        )
+
+    # ── AI Template Generation ────────────────────────────────────
+
+    async def generate_template(self, request: TemplateGenerateRequest) -> TemplateGenerateResponse:
+        """Generate a draft clause template using the LLM."""
+        from app.config import settings
+        from app.domains.ai.llm import LLMRequest, OpenAIProvider, DeepSeekProvider
+
+        # Build prompt
+        system_prompt = (
+            "You are a senior contract attorney specializing in commercial contract drafting. "
+            "Generate a clear, enforceable, and balanced clause for the given clause type. "
+            "Use standard legal language. Include placeholders in [brackets] for variable fields. "
+            "Output ONLY the clause text — no explanations, no markdown formatting."
+        )
+
+        prompt_parts = [f"Generate a {request.clause_type} clause"]
+        if request.jurisdiction:
+            prompt_parts.append(f" for {request.jurisdiction} jurisdiction")
+        if request.industry:
+            prompt_parts.append(f" in the {request.industry} industry")
+        if request.risk_level:
+            prompt_parts.append(f" with {request.risk_level} risk level")
+        prompt_parts.append(
+            ". Include clear obligations, timeframes where applicable, "
+            "and standard protections. Use [PartyA] and [PartyB] as parties."
+        )
+        prompt = "".join(prompt_parts)
+
+        # Try to use DeepSeek first (cheaper), fall back to OpenAI
+        provider = None
+        model_used = ""
+        provider_name = ""
+
+        if settings.deepseek_api_key:
+            try:
+                provider = DeepSeekProvider(api_key=settings.deepseek_api_key)
+                llm_request = LLMRequest(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    temperature=0.3,
+                    max_tokens=2048,
+                )
+                response = await provider.complete(llm_request)
+                model_used = response.model
+                provider_name = response.provider
+                return TemplateGenerateResponse(
+                    clause_type=request.clause_type,
+                    jurisdiction=request.jurisdiction,
+                    industry=request.industry,
+                    generated_text=response.content.strip(),
+                    model_used=model_used,
+                    provider=provider_name,
+                )
+            except Exception as exc:
+                logger.warning("DeepSeek template generation failed, falling back to OpenAI: %s", exc)
+
+        # Fallback to OpenAI
+        if settings.openai_api_key:
+            provider = OpenAIProvider(api_key=settings.openai_api_key)
+            llm_request = LLMRequest(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                temperature=0.3,
+                max_tokens=2048,
+            )
+            response = await provider.complete(llm_request)
+            model_used = response.model
+            provider_name = response.provider
+            return TemplateGenerateResponse(
+                clause_type=request.clause_type,
+                jurisdiction=request.jurisdiction,
+                industry=request.industry,
+                generated_text=response.content.strip(),
+                model_used=model_used,
+                provider=provider_name,
+            )
+
+        raise RuntimeError("No LLM provider configured (set OPENAI_API_KEY or DEEPSEEK_API_KEY)")
+
+    # ── Helpers ───────────────────────────────────────────────────
+
+    def _template_to_dict(self, t: RedlineTemplate) -> dict:
+        return {
+            "template_id": str(t.template_id),
+            "tenant_id": str(t.tenant_id),
+            "name": t.name,
+            "clause_type": t.clause_type,
+            "category": t.category,
+            "jurisdiction": t.jurisdiction,
+            "industry": t.industry,
+            "language": t.language,
+            "risk_level": t.risk_level,
+            "template_text": t.template_text,
+            "variables": t.variables,
+            "version": t.version,
+            "status": t.status,
+            "playbook_id": str(t.playbook_id) if t.playbook_id else None,
+            "usage_count": t.usage_count,
+            "accept_rate": t.accept_rate,
+            "created_by": t.created_by,
+            "approved_by": t.approved_by,
+            "effective_date": t.effective_date.isoformat() if t.effective_date else None,
+            "retired_date": t.retired_date.isoformat() if t.retired_date else None,
+            "last_used": t.last_used.isoformat() if t.last_used else None,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "updated_at": t.updated_at.isoformat() if t.updated_at else None,
         }
