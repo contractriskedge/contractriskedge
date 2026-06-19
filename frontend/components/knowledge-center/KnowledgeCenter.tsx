@@ -1,5 +1,5 @@
 /**
- * Redline Knowledge Center — complete template management hub.
+ * Knowledge Center — complete template management hub.
  *
  * Tabs: Overview | Coverage | Templates | AI Suggestions | Analytics
  */
@@ -34,7 +34,7 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: "analytics", label: "Analytics", icon: TrendingUp },
 ];
 
-export function RedlineKnowledgeCenter() {
+export function KnowledgeCenter() {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
 
   return (
@@ -47,7 +47,7 @@ export function RedlineKnowledgeCenter() {
           </div>
           <div>
             <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
-              Redline Knowledge Center
+              Knowledge Center
             </h1>
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Enterprise template library with AI-powered coverage analytics

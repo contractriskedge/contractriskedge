@@ -68,6 +68,12 @@ export interface AIDraftResponse {
   clause_type: string;
   confidence: number;
   model_used: string;
+  provenance?: {
+    confidence: number;
+    sources: { type: string; count: number; label: string }[];
+    factors: { name: string; score: number; weight: string }[];
+    matching_score: number;
+  };
 }
 
 export interface TemplateCreateRequest {

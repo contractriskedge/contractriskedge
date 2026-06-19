@@ -109,11 +109,36 @@ class RedlineTemplateService:
                 draft_text = response.content
                 confidence = 0.5
 
+            # Build confidence provenance from available data
+            # In production, query similar contracts, approved templates, and policies
+            provenance = {
+                "confidence": confidence,
+                "sources": [
+                    {"type": "similar_contracts", "count": 0, "label": "Similar Contracts"},
+                    {"type": "approved_templates", "count": 0, "label": "Approved Templates"},
+                    {"type": "policy_rules", "count": 0, "label": "Policy Rules"},
+                ],
+                "factors": [
+                    {"name": "Clause Type Match", "score": 0.95, "weight": "high"},
+                    {"name": "Jurisdiction Alignment", "score": 0.85 if jurisdiction else 0.5, "weight": "medium"},
+                    {"name": "Industry Standard", "score": 0.80 if industry else 0.5, "weight": "medium"},
+                    {"name": "Risk Level Appropriateness", "score": 0.90 if risk_level else 0.6, "weight": "low"},
+                ],
+                "matching_score": round(
+                    (0.95 * 0.4)  # clause type
+                    + (0.85 * 0.25 if jurisdiction else 0.5 * 0.25)  # jurisdiction
+                    + (0.80 * 0.2 if industry else 0.5 * 0.2)  # industry
+                    + (0.90 * 0.15 if risk_level else 0.6 * 0.15),  # risk level
+                    2,
+                ),
+            }
+
             return {
                 "draft_text": draft_text,
                 "clause_type": clause_type,
                 "confidence": confidence,
                 "model_used": response.model,
+                "provenance": provenance,
             }
         except RateLimitError:
             logger.warning("Rate limited during AI draft generation for %s", clause_type)

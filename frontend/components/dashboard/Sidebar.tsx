@@ -74,7 +74,7 @@ const navGroups: NavGroup[] = [
       { id: "ingestion", label: "Ingestion", icon: Upload, permission: "contracts:write" },
       { id: "contracts", label: "Contracts", icon: FileText, permission: "contracts:read" },
       { id: "clause-library", label: "Clause Library", icon: Library, permission: "contracts:read" },
-      { id: "redline-knowledge-center", label: "Redline Knowledge Center", icon: BookOpen, permission: "contracts:read" },
+      { id: "redline-knowledge-center", label: "Knowledge Center", icon: BookOpen, permission: "contracts:read" },
       { id: "obligations", label: "Obligations", icon: ClipboardCheck, permission: "contracts:read" },
     ],
   },

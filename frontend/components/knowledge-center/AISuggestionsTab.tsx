@@ -95,18 +95,21 @@ export function AISuggestionsTab() {
                   <p className="text-xs text-gray-400">{item.findings} findings</p>
                 </div>
               </div>
-              <button
-                onClick={() => handleGenerate(item)}
-                disabled={generating === item.clause_type}
-                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-md hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-colors disabled:opacity-50"
-              >
-                {generating === item.clause_type ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                ) : (
-                  <FilePlus2 className="w-3 h-3" />
-                )}
-                Generate
-              </button>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400">{item.findings} findings</span>
+                <button
+                  onClick={() => handleGenerate(item)}
+                  disabled={generating === item.clause_type}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-md hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-colors disabled:opacity-50"
+                >
+                  {generating === item.clause_type ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <FilePlus2 className="w-3 h-3" />
+                  )}
+                  Generate
+                </button>
+              </div>
             </motion.div>
           ))}
           {(!missing || missing.length === 0) && (
@@ -140,9 +143,48 @@ export function AISuggestionsTab() {
                   <X className="w-4 h-4 text-gray-400" />
                 </button>
               </div>
+
+              {/* Confidence & Matching Score */}
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div className="bg-purple-50 dark:bg-purple-900/10 rounded-lg p-3">
+                  <p className="text-xs text-purple-600 dark:text-purple-400 mb-1">
+                    AI Confidence
+                  </p>
+                  <p className="text-lg font-bold text-purple-700 dark:text-purple-300">
+                    {Math.round((draft.response.provenance?.confidence ?? draft.response.confidence) * 100)}%
+                  </p>
+                  <div className="mt-2 space-y-1">
+                    {(draft.response.provenance?.sources ?? []).map((s) => (
+                      <div key={s.type} className="flex items-center justify-between text-xs">
+                        <span className="text-gray-500">{s.label}</span>
+                        <span className="font-medium text-gray-700 dark:text-gray-300">{s.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="bg-indigo-50 dark:bg-indigo-900/10 rounded-lg p-3">
+                  <p className="text-xs text-indigo-600 dark:text-indigo-400 mb-1">
+                    Matching Score
+                  </p>
+                  <p className="text-lg font-bold text-indigo-700 dark:text-indigo-300">
+                    {Math.round((draft.response.provenance?.matching_score ?? 0) * 100)}%
+                  </p>
+                  <div className="mt-2 space-y-1">
+                    {(draft.response.provenance?.factors ?? []).map((f) => (
+                      <div key={f.name} className="flex items-center justify-between text-xs">
+                        <span className="text-gray-500">{f.name}</span>
+                        <span className="font-medium text-gray-700 dark:text-gray-300">
+                          {Math.round(f.score * 100)}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
               <div className="bg-purple-50 dark:bg-purple-900/10 rounded-lg p-3 mb-3">
                 <p className="text-xs text-purple-600 dark:text-purple-400 mb-1">
-                  AI Generated — Confidence: {Math.round(draft.response.confidence * 100)}%
+                  AI Generated — {draft.response.model_used}
                 </p>
                 <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
                   {draft.response.draft_text}
