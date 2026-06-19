@@ -148,7 +148,9 @@ class RedlineTemplateService:
             raise
 
     def _to_dict(self, template) -> dict[str, Any]:
-        """Convert ORM model to dict."""
+        """Convert to dict — already a dict from raw SQL repository."""
+        if isinstance(template, dict):
+            return template
         return {
             "template_id": str(template.template_id),
             "tenant_id": str(template.tenant_id),

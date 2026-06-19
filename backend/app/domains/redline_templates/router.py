@@ -187,6 +187,17 @@ class BatchGenerateRequest(BaseModel):
     items: list[AIDraftRequest]
 
 
+class PromoteAITemplateRequest(BaseModel):
+    draft_text: str
+    name: str
+    clause_type: str
+    category: str
+    jurisdiction: Optional[str] = None
+    industry: Optional[str] = None
+    risk_level: Optional[str] = None
+    created_by: Optional[str] = None
+
+
 @router.post(
     "/generate-batch",
     summary="Batch generate AI drafts for multiple clause types",
@@ -220,31 +231,32 @@ async def batch_generate_drafts(
     summary="Promote an AI-generated draft to an approved enterprise template",
 )
 async def promote_ai_template(
-    draft_text: str = Body(...),
-    name: str = Body(...),
-    clause_type: str = Body(...),
-    category: str = Body(...),
-    jurisdiction: Optional[str] = Body(None),
-    industry: Optional[str] = Body(None),
-    risk_level: Optional[str] = Body(None),
-    created_by: Optional[str] = Body(None),
+    body: PromoteAITemplateRequest,
     service: RedlineTemplateService = Depends(get_service),
     user: UserContext = Depends(get_current_user),
     _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
 ):
     """Promote an AI-generated draft to an approved enterprise template."""
+    import uuid
     create_data = {
-        "name": name,
-        "clause_type": clause_type,
-        "category": category or clause_type,
-        "jurisdiction": jurisdiction,
-        "industry": industry,
-        "risk_level": risk_level,
-        "template_text": draft_text,
+        "template_id": uuid.uuid4(),
+        "name": body.name,
+        "clause_type": body.clause_type,
+        "category": body.category or body.clause_type,
+        "jurisdiction": body.jurisdiction,
+        "industry": body.industry,
+        "risk_level": body.risk_level,
+        "template_text": body.draft_text,
+        "language": "en",
+        "version": 1,
         "status": "active",
-        "created_by": created_by or user.id,
+        "usage_count": 0,
+        "accept_rate": 0.0,
+        "created_by": body.created_by or user.id,
         "approved_by": user.id,
-        "effective_date": datetime.now(timezone.utc).isoformat(),
+        "effective_date": datetime.now(timezone.utc),
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
     }
     return await service.create_template(create_data)
 

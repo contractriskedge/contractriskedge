@@ -96,3 +96,14 @@ class AIDraftResponse(BaseModel):
     clause_type: str
     confidence: float
     model_used: str
+
+
+class PromoteAITemplateRequest(BaseModel):
+    draft_text: str
+    name: str
+    clause_type: str
+    category: str
+    jurisdiction: Optional[str] = None
+    industry: Optional[str] = None
+    risk_level: Optional[str] = None
+    created_by: Optional[str] = None

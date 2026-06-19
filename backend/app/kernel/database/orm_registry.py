@@ -28,6 +28,7 @@ _MODEL_MODULES = (
     "app.domains.human_oversight.models",
     "app.domains.workflow_packs.models",
     "app.domains.negotiation.models",
+    "app.domains.redline_templates.models",
 )
 
 

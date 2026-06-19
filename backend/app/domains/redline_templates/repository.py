@@ -1,40 +1,54 @@
-"""Repository for RedlineTemplate data access."""
+"""Repository for RedlineTemplate data access.
+
+Uses raw SQL via ``sqlalchemy.text()`` instead of an ORM model to avoid
+``extend_existing`` conflicts with the shared ``Base`` metadata.
+"""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
-from sqlalchemy import select, func, update, delete as sa_delete, text as sa_text
+from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.redline_templates.models import RedlineTemplate
+from app.domains.redline_templates._table import redline_templates_table
+
+
+def _row_to_dict(row) -> dict[str, Any]:
+    """Convert a raw SQL result row to a dict."""
+    if row is None:
+        return None
+    return dict(row._mapping)
 
 
 class RedlineTemplateRepository:
-    """Data access for redline templates."""
+    """Data access for redline templates using raw SQL."""
 
     def __init__(self, session: AsyncSession, tenant_id: str):
         self.session = session
         self.tenant_id = tenant_id
 
-    async def create(self, data: dict) -> RedlineTemplate:
-        template = RedlineTemplate(
-            tenant_id=self.tenant_id,
-            **data,
-        )
-        self.session.add(template)
+    async def create(self, data: dict) -> dict[str, Any]:
+        cols = ", ".join(data.keys())
+        placeholders = ", ".join(f":{k}" for k in data)
+        sql = sa_text(f"""
+            INSERT INTO redline_templates (tenant_id, {cols})
+            VALUES (:tenant_id, {placeholders})
+            RETURNING *
+        """)
+        result = await self.session.execute(sql, {"tenant_id": self.tenant_id, **data})
         await self.session.flush()
-        return template
+        return _row_to_dict(result.fetchone())
 
-    async def get(self, template_id: str) -> Optional[RedlineTemplate]:
-        stmt = select(RedlineTemplate).where(
-            RedlineTemplate.template_id == template_id,
-            RedlineTemplate.tenant_id == self.tenant_id,
-        )
-        result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
+    async def get(self, template_id: str) -> Optional[dict[str, Any]]:
+        sql = sa_text("""
+            SELECT * FROM redline_templates
+            WHERE template_id = :template_id AND tenant_id = :tenant_id
+        """)
+        result = await self.session.execute(sql, {"template_id": template_id, "tenant_id": self.tenant_id})
+        return _row_to_dict(result.fetchone())
 
     async def list(
         self,
@@ -43,59 +57,65 @@ class RedlineTemplateRepository:
         status: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> list[RedlineTemplate]:
-        query = select(RedlineTemplate).where(RedlineTemplate.tenant_id == self.tenant_id)
+    ) -> list[dict[str, Any]]:
+        conditions = ["tenant_id = :tenant_id"]
+        params = {"tenant_id": self.tenant_id, "limit": limit, "offset": offset}
         if clause_type:
-            query = query.where(RedlineTemplate.clause_type == clause_type)
+            conditions.append("clause_type = :clause_type")
+            params["clause_type"] = clause_type
         if category:
-            query = query.where(RedlineTemplate.category == category)
+            conditions.append("category = :category")
+            params["category"] = category
         if status:
-            query = query.where(RedlineTemplate.status == status)
-        query = query.order_by(RedlineTemplate.created_at.desc()).limit(limit).offset(offset)
-        result = await self.session.execute(query)
-        return list(result.scalars().all())
+            conditions.append("status = :status")
+            params["status"] = status
+        where = " AND ".join(conditions)
+        sql = sa_text(f"""
+            SELECT * FROM redline_templates
+            WHERE {where}
+            ORDER BY created_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        result = await self.session.execute(sql, params)
+        return [_row_to_dict(r) for r in result.fetchall()]
 
-    async def update(self, template_id: str, data: dict) -> Optional[RedlineTemplate]:
+    async def update(self, template_id: str, data: dict) -> Optional[dict[str, Any]]:
         data["updated_at"] = datetime.now(timezone.utc)
-        stmt = (
-            update(RedlineTemplate)
-            .where(
-                RedlineTemplate.template_id == template_id,
-                RedlineTemplate.tenant_id == self.tenant_id,
-            )
-            .values(**data)
-        )
-        await self.session.execute(stmt)
+        sets = ", ".join(f"{k} = :{k}" for k in data)
+        params = {"template_id": template_id, "tenant_id": self.tenant_id, **data}
+        sql = sa_text(f"""
+            UPDATE redline_templates
+            SET {sets}
+            WHERE template_id = :template_id AND tenant_id = :tenant_id
+            RETURNING *
+        """)
+        result = await self.session.execute(sql, params)
         await self.session.flush()
-        return await self.get(template_id)
+        return _row_to_dict(result.fetchone())
 
     async def delete(self, template_id: str) -> bool:
-        stmt = sa_delete(RedlineTemplate).where(
-            RedlineTemplate.template_id == template_id,
-            RedlineTemplate.tenant_id == self.tenant_id,
-        )
-        result = await self.session.execute(stmt)
+        sql = sa_text("""
+            DELETE FROM redline_templates
+            WHERE template_id = :template_id AND tenant_id = :tenant_id
+        """)
+        result = await self.session.execute(sql, {"template_id": template_id, "tenant_id": self.tenant_id})
         await self.session.flush()
         return result.rowcount > 0
 
     async def record_usage(self, template_id: str, accepted: bool = True) -> None:
-        """Increment usage count and update accept_rate."""
-        template = await self.get(template_id)
-        if not template:
-            return
-        new_count = template.usage_count + 1
-        new_rate = ((template.accept_rate * template.usage_count) + (1.0 if accepted else 0.0)) / new_count
-        stmt = (
-            update(RedlineTemplate)
-            .where(RedlineTemplate.template_id == template_id)
-            .values(
-                usage_count=new_count,
-                accept_rate=new_rate,
-                last_used=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
-            )
-        )
-        await self.session.execute(stmt)
+        sql = sa_text("""
+            UPDATE redline_templates
+            SET usage_count = usage_count + 1,
+                accept_rate = ((accept_rate * usage_count) + :accepted) / (usage_count + 1),
+                last_used = NOW(),
+                updated_at = NOW()
+            WHERE template_id = :template_id AND tenant_id = :tenant_id
+        """)
+        await self.session.execute(sql, {
+            "template_id": template_id,
+            "tenant_id": self.tenant_id,
+            "accepted": 1.0 if accepted else 0.0,
+        })
         await self.session.flush()
 
     async def get_coverage(self) -> dict:

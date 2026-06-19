@@ -3,7 +3,7 @@
  */
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText,
@@ -63,6 +63,79 @@ export function TemplatesTab() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newTemplate, setNewTemplate] = useState({ name: "", clause_type: "", category: "", template_text: "" });
   const createTemplate = useCreateTemplate();
+
+  // Context-aware review detection
+  const [reviewSearch, setReviewSearch] = useState("");
+  const [reviewResults, setReviewResults] = useState<{ review_id: string; filename: string }[]>([]);
+  const [selectedReview, setSelectedReview] = useState<{ review_id: string; filename: string } | null>(null);
+  const [showReviewDropdown, setShowReviewDropdown] = useState(false);
+  const [findings, setFindings] = useState<{ finding_id: string; title: string; clause_type: string }[]>([]);
+  const [selectedFinding, setSelectedFinding] = useState<{ finding_id: string; title: string } | null>(null);
+  const reviewSearchRef = useRef<HTMLDivElement>(null);
+
+  // Auto-detect review from URL params (e.g. ?review_id=xxx&finding_id=yyy)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const rid = params.get("review_id");
+    const fid = params.get("finding_id");
+    if (rid) {
+      setSelectedReview({ review_id: rid, filename: "Current Review" });
+      setApplyReviewId(rid);
+    }
+    if (fid) {
+      setSelectedFinding({ finding_id: fid, title: "Current Finding" });
+      setApplyFindingId(fid);
+    }
+  }, []);
+
+  // Search reviews when user types
+  useEffect(() => {
+    if (reviewSearch.length < 2) {
+      setReviewResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const { reviewService } = await import("@/services/api/reviews");
+        const result = await reviewService.list({ page_size: 10 });
+        const items = result.data || [];
+        const filtered = items
+          .filter((r: any) => (r.filename || r.title || "").toLowerCase().includes(reviewSearch.toLowerCase()))
+          .map((r: any) => ({ review_id: r.review_id || r.id, filename: r.filename || r.title || "Unknown" }));
+        setReviewResults(filtered.slice(0, 5));
+        setShowReviewDropdown(filtered.length > 0);
+      } catch { /* ignore */ }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [reviewSearch]);
+
+  // Load findings when a review is selected
+  useEffect(() => {
+    if (!selectedReview) return;
+    (async () => {
+      try {
+        const { reviewService } = await import("@/services/api/reviews");
+        const result = await reviewService.get(selectedReview.review_id);
+        const items = (result as any)?.findings || [];
+        setFindings(items.map((f: any) => ({
+          finding_id: f.finding_id || f.id,
+          title: f.title || f.clause_type || "Unknown",
+          clause_type: f.clause_type || "",
+        })));
+      } catch { /* ignore */ }
+    })();
+  }, [selectedReview]);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (reviewSearchRef.current && !reviewSearchRef.current.contains(e.target as Node)) {
+        setShowReviewDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const filtered = (templates ?? []).filter((t) => {
     const matchesSearch = t.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -441,43 +514,170 @@ export function TemplatesTab() {
                   </div>
                 )}
 
-                {/* Apply to Review */}
+                {/* Apply to Review — Context-Aware */}
                 <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-                  <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Apply to Review</p>
-                  <div className="space-y-2">
-                    <div className="relative">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
-                      <input
-                        type="text"
-                        placeholder="Search review by filename..."
-                        value={applyReviewId}
-                        onChange={(e) => setApplyReviewId(e.target.value)}
-                        className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                      />
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="Finding ID (optional — leave blank to apply to all matching)"
-                      value={applyFindingId}
-                      onChange={(e) => setApplyFindingId(e.target.value)}
-                      className="w-full px-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                    />
-                    <button
-                      onClick={handleApply}
-                      disabled={applying || !applyReviewId}
-                      className="w-full px-3 py-2 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
-                    >
-                      {applying ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <ArrowRight className="w-3 h-3" />
+                  <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    {selectedReview ? "Apply to Review" : "Select Review"}
+                  </p>
+
+                  {/* If review is auto-detected from URL, show current context */}
+                  {selectedReview && !reviewSearch ? (
+                    <div className="space-y-2">
+                      <div className="bg-indigo-50 dark:bg-indigo-900/10 rounded-lg p-2.5 border border-indigo-200 dark:border-indigo-800">
+                        <p className="text-xs font-medium text-indigo-700 dark:text-indigo-300">{selectedReview.filename}</p>
+                        <p className="text-[10px] text-indigo-500 mt-0.5">Auto-detected from workspace</p>
+                      </div>
+
+                      {/* Findings dropdown */}
+                      {findings.length > 0 && (
+                        <select
+                          value={selectedFinding?.finding_id || ""}
+                          onChange={(e) => {
+                            const f = findings.find((x) => x.finding_id === e.target.value);
+                            if (f) {
+                              setSelectedFinding(f);
+                              setApplyFindingId(f.finding_id);
+                            }
+                          }}
+                          className="w-full px-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        >
+                          <option value="">All matching findings</option>
+                          {findings.map((f) => (
+                            <option key={f.finding_id} value={f.finding_id}>{f.title}</option>
+                          ))}
+                        </select>
                       )}
-                      Apply to Review
-                    </button>
-                    {applyResult && (
-                      <p className="text-xs text-center text-gray-600 dark:text-gray-400">{applyResult}</p>
-                    )}
-                  </div>
+
+                      {/* Apply Impact */}
+                      <div className="bg-gradient-to-r from-emerald-50 to-emerald-50/50 dark:from-emerald-900/10 dark:to-emerald-900/5 rounded-lg p-2.5 border border-emerald-200 dark:border-emerald-800">
+                        <div className="space-y-1 text-xs">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                            <span className="text-gray-600 dark:text-gray-400">
+                              {selectedFinding ? "Resolve 1 finding" : "Resolve matching findings"}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <ArrowRight className="w-3 h-3 text-indigo-500" />
+                            <span className="text-gray-600 dark:text-gray-400">Insert clause into contract</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Shield className="w-3 h-3 text-emerald-500" />
+                            <span className="text-gray-600 dark:text-gray-400">No conflicts detected</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={handleApply}
+                        disabled={applying}
+                        className="w-full px-3 py-2 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                      >
+                        {applying ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                        Accept & Apply
+                      </button>
+                    </div>
+                  ) : (
+                    /* Review search (standalone mode) */
+                    <div className="space-y-2" ref={reviewSearchRef}>
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                        <input
+                          type="text"
+                          placeholder="Search contract name..."
+                          value={reviewSearch}
+                          onChange={(e) => {
+                            setReviewSearch(e.target.value);
+                            if (selectedReview) {
+                              setSelectedReview(null);
+                              setApplyReviewId("");
+                              setSelectedFinding(null);
+                              setApplyFindingId("");
+                              setFindings([]);
+                            }
+                          }}
+                          onFocus={() => reviewResults.length > 0 && setShowReviewDropdown(true)}
+                          className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        />
+                      </div>
+
+                      {/* Review dropdown results */}
+                      {showReviewDropdown && reviewResults.length > 0 && (
+                        <div className="border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 overflow-hidden shadow-lg">
+                          {reviewResults.map((r) => (
+                            <button
+                              key={r.review_id}
+                              onClick={() => {
+                                setSelectedReview(r);
+                                setApplyReviewId(r.review_id);
+                                setReviewSearch(r.filename);
+                                setShowReviewDropdown(false);
+                              }}
+                              className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border-b border-gray-100 dark:border-gray-700 last:border-0"
+                            >
+                              {r.filename}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Findings dropdown (after review selected) */}
+                      {selectedReview && findings.length > 0 && (
+                        <select
+                          value={selectedFinding?.finding_id || ""}
+                          onChange={(e) => {
+                            const f = findings.find((x) => x.finding_id === e.target.value);
+                            if (f) {
+                              setSelectedFinding(f);
+                              setApplyFindingId(f.finding_id);
+                            }
+                          }}
+                          className="w-full px-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        >
+                          <option value="">All matching findings</option>
+                          {findings.map((f) => (
+                            <option key={f.finding_id} value={f.finding_id}>{f.title}</option>
+                          ))}
+                        </select>
+                      )}
+
+                      {/* Apply button (only when review selected) */}
+                      {selectedReview && (
+                        <>
+                          <div className="bg-gradient-to-r from-emerald-50 to-emerald-50/50 dark:from-emerald-900/10 dark:to-emerald-900/5 rounded-lg p-2.5 border border-emerald-200 dark:border-emerald-800">
+                            <div className="space-y-1 text-xs">
+                              <div className="flex items-center gap-2">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                                <span className="text-gray-600 dark:text-gray-400">
+                                  {selectedFinding ? "Resolve 1 finding" : "Resolve matching findings"}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <ArrowRight className="w-3 h-3 text-indigo-500" />
+                                <span className="text-gray-600 dark:text-gray-400">Insert clause into contract</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Shield className="w-3 h-3 text-emerald-500" />
+                                <span className="text-gray-600 dark:text-gray-400">No conflicts detected</span>
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            onClick={handleApply}
+                            disabled={applying}
+                            className="w-full px-3 py-2 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                          >
+                            {applying ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                            Accept & Apply
+                          </button>
+                        </>
+                      )}
+
+                      {applyResult && (
+                        <p className="text-xs text-center text-gray-600 dark:text-gray-400">{applyResult}</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -487,3 +687,5 @@ export function TemplatesTab() {
     </div>
   );
 }
+
+export { RELATED_CLAUSES };
