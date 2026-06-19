@@ -25,7 +25,7 @@ import {
   Building2,
   Shield,
 } from "lucide-react";
-import { useTemplates, useDeleteTemplate, useUpdateTemplate } from "@/services/hooks/useRedlineTemplates";
+import { useTemplates, useDeleteTemplate, useUpdateTemplate, useCreateTemplate } from "@/services/hooks/useRedlineTemplates";
 import { redlineTemplateApi } from "@/services/api/redlineTemplates";
 import type { RedlineTemplate } from "@/services/api/redlineTemplates";
 
@@ -60,6 +60,9 @@ export function TemplatesTab() {
   const [applyFindingId, setApplyFindingId] = useState("");
   const [applying, setApplying] = useState(false);
   const [applyResult, setApplyResult] = useState<string | null>(null);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [newTemplate, setNewTemplate] = useState({ name: "", clause_type: "", category: "", template_text: "" });
+  const createTemplate = useCreateTemplate();
 
   const filtered = (templates ?? []).filter((t) => {
     const matchesSearch = t.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -125,11 +128,81 @@ export function TemplatesTab() {
             <option value="retired">Retired</option>
           </select>
         </div>
-        <button className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
+        <button
+          onClick={() => setShowCreateDialog(true)}
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+        >
           <Plus className="w-4 h-4" />
           New Template
         </button>
       </div>
+
+      {/* Create Dialog */}
+      <AnimatePresence>
+        {showCreateDialog && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+            onClick={() => setShowCreateDialog(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white dark:bg-gray-800 rounded-xl p-6 w-full max-w-lg shadow-xl"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-gray-900 dark:text-white">Create Template</h3>
+                <button onClick={() => setShowCreateDialog(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+                  <X className="w-4 h-4 text-gray-400" />
+                </button>
+              </div>
+              <div className="space-y-3">
+                <input
+                  type="text" placeholder="Template Name" value={newTemplate.name}
+                  onChange={(e) => setNewTemplate({ ...newTemplate, name: e.target.value })}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                />
+                <input
+                  type="text" placeholder="Clause Type (e.g. gdpr, indemnification)" value={newTemplate.clause_type}
+                  onChange={(e) => setNewTemplate({ ...newTemplate, clause_type: e.target.value })}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                />
+                <input
+                  type="text" placeholder="Category" value={newTemplate.category}
+                  onChange={(e) => setNewTemplate({ ...newTemplate, category: e.target.value })}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                />
+                <textarea
+                  placeholder="Template Text" value={newTemplate.template_text} rows={6}
+                  onChange={(e) => setNewTemplate({ ...newTemplate, template_text: e.target.value })}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono"
+                />
+                <button
+                  onClick={async () => {
+                    if (!newTemplate.name || !newTemplate.clause_type || !newTemplate.template_text) return;
+                    await createTemplate.mutateAsync({
+                      name: newTemplate.name,
+                      clause_type: newTemplate.clause_type,
+                      category: newTemplate.category || newTemplate.clause_type,
+                      template_text: newTemplate.template_text,
+                    });
+                    setShowCreateDialog(false);
+                    setNewTemplate({ name: "", clause_type: "", category: "", template_text: "" });
+                  }}
+                  disabled={!newTemplate.name || !newTemplate.clause_type || !newTemplate.template_text || createTemplate.isPending}
+                  className="w-full px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                >
+                  {createTemplate.isPending ? <Loader2 className="w-4 h-4 animate-spin inline" /> : "Create Template"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="flex gap-4">
         {/* Template Grid */}
