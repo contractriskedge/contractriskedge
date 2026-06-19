@@ -14,8 +14,11 @@ import {
   Sparkles,
   Eye,
   X,
+  ArrowRight,
+  FileCheck,
 } from "lucide-react";
 import { useMissingTemplates, useGenerateDraft } from "@/services/hooks/useRedlineTemplates";
+import { redlineTemplateApi } from "@/services/api/redlineTemplates";
 import type { MissingTemplate, AIDraftResponse } from "@/services/api/redlineTemplates";
 
 export function AISuggestionsTab() {
@@ -23,9 +26,15 @@ export function AISuggestionsTab() {
   const generateDraft = useGenerateDraft();
   const [generating, setGenerating] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ clause: string; response: AIDraftResponse } | null>(null);
+  const [applying, setApplying] = useState(false);
+  const [applyResult, setApplyResult] = useState<string | null>(null);
+  const [reviewId, setReviewId] = useState("");
+  const [findingId, setFindingId] = useState("");
+  const [showApplyForm, setShowApplyForm] = useState(false);
 
   const handleGenerate = async (item: MissingTemplate) => {
     setGenerating(item.clause_type);
+    setApplyResult(null);
     try {
       const response = await generateDraft.mutateAsync({
         clause_type: item.clause_type,
@@ -33,10 +42,44 @@ export function AISuggestionsTab() {
         finding_description: `${item.findings} findings detected across ${item.first_seen ? "regression suite" : "contracts"}`,
       });
       setDraft({ clause: item.clause_type, response });
+      setShowApplyForm(false);
     } catch {
       alert("Failed to generate draft. Check API key.");
     } finally {
       setGenerating(null);
+    }
+  };
+
+  const handleApply = async () => {
+    if (!draft || !reviewId) {
+      alert("Please enter a Review ID");
+      return;
+    }
+    setApplying(true);
+    setApplyResult(null);
+    try {
+      // First promote to template
+      const template = await redlineTemplateApi.promoteToTemplate({
+        draft_text: draft.response.draft_text,
+        name: `${draft.clause.replace(/_/g, " ")} Clause`,
+        clause_type: draft.clause,
+        category: draft.clause,
+      });
+
+      // Then apply to review
+      const result = await redlineTemplateApi.applyToReview({
+        template_id: template.template_id,
+        review_id: reviewId,
+        finding_id: findingId || undefined,
+        clause_type: draft.clause,
+      });
+
+      setApplyResult(`✅ Applied "${result.template_name}" to review — redline created${result.finding_resolved ? " and finding resolved" : ""}`);
+      setShowApplyForm(false);
+    } catch (err) {
+      setApplyResult(`❌ Failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -190,14 +233,86 @@ export function AISuggestionsTab() {
                   {draft.response.draft_text}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
-                <button className="flex-1 px-3 py-2 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors">
-                  <CheckCircle2 className="w-4 h-4 inline mr-1" />
-                  Accept & Save as Template
-                </button>
-                <button className="px-3 py-2 text-sm font-medium border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                  <Eye className="w-4 h-4" />
-                </button>
+              <div className="flex flex-col gap-2">
+                {/* Action buttons */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowApplyForm(true)}
+                    className="flex-1 px-3 py-2 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+                  >
+                    <CheckCircle2 className="w-4 h-4 inline mr-1" />
+                    Accept & Apply to Review
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await redlineTemplateApi.promoteToTemplate({
+                          draft_text: draft.response.draft_text,
+                          name: `${draft.clause.replace(/_/g, " ")} Clause`,
+                          clause_type: draft.clause,
+                          category: draft.clause,
+                        });
+                        setApplyResult("✅ Saved as enterprise template!");
+                      } catch {
+                        setApplyResult("❌ Failed to save template");
+                      }
+                    }}
+                    className="px-3 py-2 text-sm font-medium border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <FileCheck className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Apply form */}
+                <AnimatePresence>
+                  {showApplyForm && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-2">
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                          Apply to Review
+                        </p>
+                        <input
+                          type="text"
+                          placeholder="Review ID"
+                          value={reviewId}
+                          onChange={(e) => setReviewId(e.target.value)}
+                          className="w-full px-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Finding ID (optional)"
+                          value={findingId}
+                          onChange={(e) => setFindingId(e.target.value)}
+                          className="w-full px-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        />
+                        <button
+                          onClick={handleApply}
+                          disabled={applying}
+                          className="w-full px-3 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                        >
+                          {applying ? (
+                            <Loader2 className="w-3 h-3 animate-spin inline mr-1" />
+                          ) : (
+                            <ArrowRight className="w-3 h-3 inline mr-1" />
+                          )}
+                          Apply to Review
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Result message */}
+                {applyResult && (
+                  <div className="text-xs text-center py-1 px-2 bg-gray-50 dark:bg-gray-700/50 rounded">
+                    {applyResult}
+                  </div>
+                )}
               </div>
             </motion.div>
           )}

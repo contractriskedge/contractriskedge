@@ -249,6 +249,112 @@ async def promote_ai_template(
     return await service.create_template(create_data)
 
 
+@router.post(
+    "/apply-to-review",
+    summary="Apply a template to a review — creates redline and marks finding resolved",
+)
+async def apply_template_to_review(
+    template_id: str = Body(...),
+    review_id: str = Body(...),
+    finding_id: Optional[str] = Body(None),
+    clause_type: str = Body(...),
+    service: RedlineTemplateService = Depends(get_service),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Apply a redline template to a review.
+
+    Creates a ReviewRedline from the template text and optionally
+    marks the linked finding as resolved.
+    """
+    # 1. Get the template
+    template = await service.get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    # 2. Get the review to find upload_id
+    from sqlalchemy import select as sa_select
+    from app.domains.review.models import ContractReview
+    review_result = await db.execute(
+        sa_select(ContractReview).where(
+            ContractReview.review_id == review_id,
+            ContractReview.tenant_id == tenant_id,
+        )
+    )
+    review = review_result.scalar_one_or_none()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    # 3. Create the redline
+    from app.domains.review.repository import ReviewRepository
+    from app.domains.review.models import ReviewRedline, RedlineStatus
+
+    review_repo = ReviewRepository(db, tenant_id=tenant_id)
+    redline = ReviewRedline(
+        review_id=review_id,
+        tenant_id=tenant_id,
+        upload_id=str(review.upload_id),
+        clause_type=clause_type,
+        original_text="",
+        proposed_text=template["template_text"],
+        operation="insert",
+        anchor_text=None,
+        rationale=f"Applied from template: {template['name']} (v{template['version']})",
+        risk_level=template.get("risk_level") or "medium",
+        finding_id=finding_id,
+        redline_metadata={
+            "template_id": template_id,
+            "template_name": template["name"],
+            "template_version": template["version"],
+            "applied_by": user.id,
+            "source": "knowledge_center_apply",
+        },
+        status=RedlineStatus.PROPOSED,
+    )
+    db.add(redline)
+    await db.flush()
+
+    # 4. Mark finding as resolved if finding_id provided
+    if finding_id:
+        from app.domains.review.models import ReviewFinding
+        find_result = await db.execute(
+            sa_select(ReviewFinding).where(
+                ReviewFinding.finding_id == finding_id,
+                ReviewFinding.tenant_id == tenant_id,
+            )
+        )
+        finding = find_result.scalar_one_or_none()
+        if finding:
+            finding.status = "resolved"
+            finding.resolved_by = user.id
+            from datetime import datetime, timezone
+            finding.resolved_at = datetime.now(timezone.utc)
+
+    # 5. Update review redline count
+    from sqlalchemy import func as sa_func
+    count_result = await db.execute(
+        sa_select(sa_func.count()).select_from(ReviewRedline).where(
+            ReviewRedline.review_id == review_id,
+        )
+    )
+    review.redline_count = count_result.scalar() or 0
+
+    # 6. Record template usage
+    await service.record_usage(template_id, accepted=True)
+
+    await db.commit()
+
+    return {
+        "status": "applied",
+        "redline_id": str(redline.redline_id),
+        "review_id": review_id,
+        "template_name": template["name"],
+        "finding_resolved": finding_id is not None,
+    }
+
+
 @router.get(
     "/analytics",
     summary="Get template analytics (usage stats, trends)",

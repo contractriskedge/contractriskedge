@@ -153,4 +153,19 @@ export const redlineTemplateApi = {
   // Usage
   recordUsage: (id: string, accepted = true) =>
     api.post(`/redline-templates/${id}/use?accepted=${accepted}`),
+
+  // One-click Apply to Review
+  applyToReview: (data: {
+    template_id: string;
+    review_id: string;
+    finding_id?: string;
+    clause_type: string;
+  }) =>
+    api.post<{
+      status: string;
+      redline_id: string;
+      review_id: string;
+      template_name: string;
+      finding_resolved: boolean;
+    }>("/redline-templates/apply-to-review", data),
 };
