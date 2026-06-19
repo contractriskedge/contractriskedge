@@ -3,7 +3,7 @@
  */
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Lightbulb,
@@ -16,6 +16,7 @@ import {
   X,
   ArrowRight,
   FileCheck,
+  Search,
 } from "lucide-react";
 import { useMissingTemplates, useGenerateDraft } from "@/services/hooks/useRedlineTemplates";
 import { redlineTemplateApi } from "@/services/api/redlineTemplates";
@@ -28,9 +29,76 @@ export function AISuggestionsTab() {
   const [draft, setDraft] = useState<{ clause: string; response: AIDraftResponse } | null>(null);
   const [applying, setApplying] = useState(false);
   const [applyResult, setApplyResult] = useState<string | null>(null);
-  const [reviewId, setReviewId] = useState("");
-  const [findingId, setFindingId] = useState("");
   const [showApplyForm, setShowApplyForm] = useState(false);
+
+  // Context-aware review selection
+  const [reviewSearch, setReviewSearch] = useState("");
+  const [reviewResults, setReviewResults] = useState<{ review_id: string; filename: string }[]>([]);
+  const [selectedReview, setSelectedReview] = useState<{ review_id: string; filename: string } | null>(null);
+  const [showReviewDropdown, setShowReviewDropdown] = useState(false);
+  const [findings, setFindings] = useState<{ finding_id: string; title: string; clause_type: string }[]>([]);
+  const [selectedFinding, setSelectedFinding] = useState<{ finding_id: string; title: string } | null>(null);
+  const reviewSearchRef = useRef<HTMLDivElement>(null);
+
+  // Auto-detect from URL params
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const rid = params.get("review_id");
+    const fid = params.get("finding_id");
+    if (rid) {
+      setSelectedReview({ review_id: rid, filename: "Current Review" });
+    }
+    if (fid) {
+      setSelectedFinding({ finding_id: fid, title: "Current Finding" });
+    }
+  }, []);
+
+  // Search reviews
+  useEffect(() => {
+    if (reviewSearch.length < 2) { setReviewResults([]); return; }
+    const timer = setTimeout(async () => {
+      try {
+        const { reviewService } = await import("@/services/api/reviews");
+        const result = await reviewService.list({ page_size: 10 });
+        const items = result.data || [];
+        const filtered = items
+          .filter((r: any) => (r.document_name || r.original_filename || "").toLowerCase().includes(reviewSearch.toLowerCase()))
+          .map((r: any) => ({ review_id: r.review_id || r.id, filename: r.document_name || r.original_filename || "Unknown" }));
+        setReviewResults(filtered.slice(0, 5));
+        setShowReviewDropdown(filtered.length > 0);
+      } catch { /* ignore */ }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [reviewSearch]);
+
+  // Load findings when review selected
+  useEffect(() => {
+    if (!selectedReview) return;
+    (async () => {
+      try {
+        const { reviewService } = await import("@/services/api/reviews");
+        await reviewService.get(selectedReview.review_id);
+        const findingsResp = await (await import("@/services/api/client")).api.get(`/reviews/${selectedReview.review_id}/findings`);
+        const items = findingsResp?.findings || [];
+        setFindings(items.map((f: any) => ({
+          finding_id: f.finding_id || f.id,
+          title: f.title || f.clause_type || "Unknown",
+          clause_type: f.clause_type || "",
+        })));
+      } catch { /* ignore */ }
+    })();
+  }, [selectedReview]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (reviewSearchRef.current && !reviewSearchRef.current.contains(e.target as Node)) {
+        setShowReviewDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const handleGenerate = async (item: MissingTemplate) => {
     setGenerating(item.clause_type);
@@ -51,8 +119,8 @@ export function AISuggestionsTab() {
   };
 
   const handleApply = async () => {
-    if (!draft || !reviewId) {
-      alert("Please enter a Review ID");
+    if (!draft || !selectedReview) {
+      alert("Please search and select a review first");
       return;
     }
     setApplying(true);
@@ -69,12 +137,12 @@ export function AISuggestionsTab() {
       // Then apply to review
       const result = await redlineTemplateApi.applyToReview({
         template_id: template.template_id,
-        review_id: reviewId,
-        finding_id: findingId || undefined,
+        review_id: selectedReview.review_id,
+        finding_id: selectedFinding?.finding_id,
         clause_type: draft.clause,
       });
 
-      setApplyResult(`✅ Applied "${result.template_name}" to review — redline created${result.finding_resolved ? " and finding resolved" : ""}`);
+      setApplyResult(`✅ Applied "${result.template_name}" to "${selectedReview.filename}" — redline created${result.finding_resolved ? " and finding resolved" : ""}`);
       setShowApplyForm(false);
     } catch (err) {
       setApplyResult(`❌ Failed: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -272,36 +340,80 @@ export function AISuggestionsTab() {
                       exit={{ opacity: 0, height: 0 }}
                       className="overflow-hidden"
                     >
-                      <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-2">
+                      <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-2" ref={reviewSearchRef}>
                         <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                          Apply to Review
+                          Select Review
                         </p>
-                        <input
-                          type="text"
-                          placeholder="Review ID"
-                          value={reviewId}
-                          onChange={(e) => setReviewId(e.target.value)}
-                          className="w-full px-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                        />
-                        <input
-                          type="text"
-                          placeholder="Finding ID (optional)"
-                          value={findingId}
-                          onChange={(e) => setFindingId(e.target.value)}
-                          className="w-full px-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                        />
-                        <button
-                          onClick={handleApply}
-                          disabled={applying}
-                          className="w-full px-3 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                        >
-                          {applying ? (
-                            <Loader2 className="w-3 h-3 animate-spin inline mr-1" />
-                          ) : (
-                            <ArrowRight className="w-3 h-3 inline mr-1" />
-                          )}
-                          Apply to Review
-                        </button>
+
+                        {/* Review search */}
+                        <div className="relative">
+                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                          <input
+                            type="text"
+                            placeholder="Search contract name..."
+                            value={selectedReview ? selectedReview.filename : reviewSearch}
+                            onChange={(e) => {
+                              setReviewSearch(e.target.value);
+                              setSelectedReview(null);
+                              setSelectedFinding(null);
+                              setFindings([]);
+                            }}
+                            onFocus={() => reviewResults.length > 0 && setShowReviewDropdown(true)}
+                            className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                          />
+                        </div>
+
+                        {/* Dropdown */}
+                        {showReviewDropdown && reviewResults.length > 0 && (
+                          <div className="border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 overflow-hidden shadow-lg">
+                            {reviewResults.map((r) => (
+                              <button
+                                key={r.review_id}
+                                onClick={() => {
+                                  setSelectedReview(r);
+                                  setReviewSearch(r.filename);
+                                  setShowReviewDropdown(false);
+                                }}
+                                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border-b border-gray-100 dark:border-gray-700 last:border-0"
+                              >
+                                {r.filename}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Findings dropdown */}
+                        {selectedReview && findings.length > 0 && (
+                          <select
+                            value={selectedFinding?.finding_id || ""}
+                            onChange={(e) => {
+                              const f = findings.find((x) => x.finding_id === e.target.value);
+                              if (f) setSelectedFinding(f);
+                            }}
+                            className="w-full px-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                          >
+                            <option value="">All matching findings</option>
+                            {findings.map((f) => (
+                              <option key={f.finding_id} value={f.finding_id}>{f.title}</option>
+                            ))}
+                          </select>
+                        )}
+
+                        {/* Apply button */}
+                        {selectedReview && (
+                          <button
+                            onClick={handleApply}
+                            disabled={applying}
+                            className="w-full px-3 py-1.5 text-xs font-medium bg-emerald-600 text-white rounded hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                          >
+                            {applying ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="w-3 h-3" />
+                            )}
+                            Apply to "{selectedReview.filename}"
+                          </button>
+                        )}
                       </div>
                     </motion.div>
                   )}

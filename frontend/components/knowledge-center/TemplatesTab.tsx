@@ -100,8 +100,8 @@ export function TemplatesTab() {
         const result = await reviewService.list({ page_size: 10 });
         const items = result.data || [];
         const filtered = items
-          .filter((r: any) => (r.filename || r.title || "").toLowerCase().includes(reviewSearch.toLowerCase()))
-          .map((r: any) => ({ review_id: r.review_id || r.id, filename: r.filename || r.title || "Unknown" }));
+          .filter((r: any) => (r.document_name || r.original_filename || "").toLowerCase().includes(reviewSearch.toLowerCase()))
+          .map((r: any) => ({ review_id: r.review_id || r.id, filename: r.document_name || r.original_filename || "Unknown" }));
         setReviewResults(filtered.slice(0, 5));
         setShowReviewDropdown(filtered.length > 0);
       } catch { /* ignore */ }
@@ -116,7 +116,9 @@ export function TemplatesTab() {
       try {
         const { reviewService } = await import("@/services/api/reviews");
         const result = await reviewService.get(selectedReview.review_id);
-        const items = (result as any)?.findings || [];
+        // Findings are at /reviews/{id}/findings endpoint
+        const findingsResp = await (await import("@/services/api/client")).api.get(`/reviews/${selectedReview.review_id}/findings`);
+        const items = findingsResp?.findings || (result as any)?.findings || [];
         setFindings(items.map((f: any) => ({
           finding_id: f.finding_id || f.id,
           title: f.title || f.clause_type || "Unknown",
