@@ -319,7 +319,7 @@ function AssignModal({
                 setSelected({ id: user.user_id, name: user.name });
               }
             }}
-            allowedRoles={["tenant_admin", "reviewer", "legal_ops", "compliance", "executive", "admin"]}
+            allowedRoles={["tenant_admin", "reviewer", "legal_ops", "legal_reviewer", "compliance", "executive", "admin"]}
             placeholder="Search by name, email, or role…"
             reviewerWorkloads={reviewerWorkloads}
             allowNone
@@ -1788,7 +1788,7 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
           <ApprovalModal
             key={`approve-${approvalTarget.review_id}`}
             reviewId={approvalTarget.review_id}
-            reviewTitle={approvalTarget.document_name || approvalTarget.original_filename || `Review ${approvalTarget.review_id.slice(0, 8)}`}
+            reviewTitle={approvalTarget.document_name || approvalTarget.original_filename || approvalTarget.review_number || `Review ${approvalTarget.review_id.slice(0, 8)}`}
             riskScore={approvalTarget.risk_score ?? undefined}
             openObligations={openObligationCounts[approvalTarget.review_id] ?? 0}
             onApprove={async (decision, comment, conditions) => {
@@ -1809,7 +1809,7 @@ export function ReviewQueue({ onReviewSelect, maxItems }: ReviewQueueProps) {
           <EscalationModal
             key={`escalate-${escalationTarget.review_id}`}
             reviewId={escalationTarget.review_id}
-            reviewTitle={escalationTarget.document_name || escalationTarget.original_filename || `Review ${escalationTarget.review_id.slice(0, 8)}`}
+            reviewTitle={escalationTarget.document_name || escalationTarget.original_filename || escalationTarget.review_number || `Review ${escalationTarget.review_id.slice(0, 8)}`}
             currentPriority={escalationTarget.priority}
             currentStage={escalationTarget.workflow_stage}
             onEscalate={async (reason, escalatedTo, raisePriority, targetStage) => {

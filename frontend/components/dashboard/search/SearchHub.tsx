@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useMemo, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, PanelLeft, PanelRight, Sparkles, SlidersHorizontal,
@@ -146,6 +147,8 @@ function buildKpis(totalResults: number, avgScore: number, queryCount: number): 
 // ── Component ───────────────────────────────────────────────────
 
 export function SearchHub() {
+  const router = useRouter();
+
   // Core search state
   const [query, setQuery] = useState("");
   const [searchMode, setSearchMode] = useState<SearchMode>("hybrid");
@@ -298,14 +301,20 @@ export function SearchHub() {
       result_id: result.id,
       position: results.findIndex((r) => r.id === result.id) + 1,
     });
-  }, [debouncedQuery, results, trackClick]);
+    // Navigate to the contract detail page
+    const contractId = result.metadata?.contract_id || result.metadata?.entity_id;
+    if (contractId) {
+      router.push(`/contracts/${contractId}`);
+    }
+  }, [debouncedQuery, results, trackClick, router]);
 
-  const handlePreview = useCallback((_result: SearchResult) => {
-    // Quick Preview Drawer disabled — all tabs previously used mock data.
-    // Wire to a real backend endpoint before re-enabling.
-    // See: QuickPreviewDrawer.tsx lines 12-24 (mockQuickPreviewData)
-    console.warn("[SearchHub] Quick Preview disabled — no backend endpoint yet");
-  }, []);
+  const handlePreview = useCallback((result: SearchResult) => {
+    // Navigate to the contract detail page for quick access
+    const contractId = result.metadata?.contract_id || result.metadata?.entity_id;
+    if (contractId) {
+      router.push(`/contracts/${contractId}`);
+    }
+  }, [router]);
 
   const handleInsightClick = useCallback((insight: AiDiscoveryInsight) => {
     if (insight.suggestedQuery) {

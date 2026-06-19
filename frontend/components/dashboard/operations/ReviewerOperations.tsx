@@ -182,10 +182,10 @@ function UnifiedWorkQueue({ items, loading }: { items: Array<{ review_id: string
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium text-navy-900 dark:text-white truncate">
               {item.contract_number ? <span className="font-mono text-[10px] text-gray-400 mr-1">{item.contract_number}</span> : ""}
-              {item.contract_name ?? `Review ${item.review_id.slice(0, 8)}`}
+              {item.contract_name ?? item.review_number ?? `Review ${item.review_id.slice(0, 8)}`}
             </p>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-[10px] text-gray-500">{item.review_id.slice(0, 8)}</span>
+              <span className="text-[10px] text-gray-500">{item.review_number || item.review_id.slice(0, 8)}</span>
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${statusColor(item.status)}`}>
                 {item.status.replace(/_/g, " ")}
               </span>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import {
   Upload, Link, FolderOpen, Download, Search, Filter,
   ChevronDown, Save, RotateCcw,
@@ -9,7 +9,7 @@ import type { ProcessingQueue, SavedFilter } from "./types";
 
 interface IngestionToolbarProps {
   queues: ProcessingQueue[];
-  onUpload: (files: FileList | null) => void;
+  onOpenUploadModal: () => void;
   onBulkImport: () => void;
   onConnectSource: () => void;
   onRetryFailed: () => void;
@@ -28,26 +28,18 @@ interface IngestionToolbarProps {
 }
 
 export function IngestionToolbar({
-  queues, onUpload, onBulkImport, onConnectSource, onRetryFailed, onExportLogs,
+  queues, onOpenUploadModal, onBulkImport, onConnectSource, onRetryFailed, onExportLogs,
   onPauseQueue, onResumeQueue, searchQuery, onSearchChange,
   compactMode, onToggleCompact, savedFilters, onApplyFilter, onSaveCurrentFilter,
   onToggleActivity, showActivity,
 }: IngestionToolbarProps) {
   const [showFilterMenu, setShowFilterMenu] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleUploadClick = () => fileInputRef.current?.click();
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onUpload(e.target.files);
-    e.target.value = "";
-  };
 
   return (
     <div className="bg-white dark:bg-navy-800 border-b border-gray-200 dark:border-navy-700">
       <div className="flex items-center justify-between px-3 py-1">
         <div className="flex items-center gap-1">
-          <input ref={fileInputRef} type="file" multiple accept=".pdf,.docx,.doc,.tiff,.tif,.png,.jpg,.jpeg" onChange={handleFileChange} className="hidden" />
-          <button onClick={handleUploadClick} className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-semibold transition-colors">
+          <button onClick={onOpenUploadModal} className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-semibold transition-colors">
             <Upload className="w-3 h-3" /> Upload Contracts
           </button>
           <button onClick={onConnectSource} className="flex items-center gap-1 px-2 py-1 border border-gray-300 dark:border-navy-600 hover:bg-gray-50 dark:hover:bg-navy-700 rounded text-[10px] font-medium text-gray-600 dark:text-gray-300 transition-colors">
@@ -102,4 +94,3 @@ export function IngestionToolbar({
     </div>
   );
 }
-

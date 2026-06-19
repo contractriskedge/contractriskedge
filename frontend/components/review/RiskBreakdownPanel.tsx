@@ -28,10 +28,12 @@ import {
   AlertTriangle, TrendingDown, Shield, CheckCircle2, Clock,
   ChevronDown, ChevronRight, XCircle, FileText, Info,
   CornerDownRight, ArrowUp, ArrowDown, Zap, DollarSign, BookOpen, GitBranch,
+  Lock,
 } from "lucide-react";
 import { useRiskBreakdown, useGenerateMitigationRedline } from "@/services/hooks";
 import { AsyncBoundary } from "@/components/shared/AsyncBoundary";
 import { CardSkeleton } from "@/components/shared/LoadingSkeleton";
+import { useAuth } from "@/components/auth/AuthProvider";
 import type {
   RiskBreakdown, RiskBreakdownItem, RiskBreakdownFinding, MitigatedFinding,
   ExposureContributor, MitigationSuggestion, TopRecommendedActions, TopRecommendedAction,
@@ -891,6 +893,9 @@ function TopActionsWidget({
   originalRisk: number;
   reviewId: string;
 }) {
+  const { hasPermission } = useAuth();
+  const canGenerate = hasPermission("workflows:write") || hasPermission("*");
+
   if (!actions?.top_actions?.length) return null;
 
   const totalReduction = actions.total_potential_reduction_abs;
@@ -903,6 +908,7 @@ function TopActionsWidget({
   const generateMutation = useGenerateMitigationRedline(reviewId);
 
   const handleGenerateRedline = async (action: TopRecommendedAction) => {
+    if (!canGenerate) return;
     setGeneratingId(action.mitigation_type);
     setSuccessId(null);
     setSuccessData(null);
@@ -1010,24 +1016,34 @@ function TopActionsWidget({
                   <FileText className="w-2.5 h-2.5" />
                   Review Finding
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleGenerateRedline(action)}
-                  disabled={generatingId === action.mitigation_type}
-                  className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[7px] font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 dark:border-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-300"
-                  title="Generate a draft redline for this mitigation"
-                >
-                  {generatingId === action.mitigation_type ? (
-                    <>Generating...</>
-                  ) : successId === action.mitigation_type ? (
-                    <>✓ Draft created</>
-                  ) : (
-                    <>
-                      <FileText className="w-2.5 h-2.5" />
-                      Generate Redline
-                    </>
-                  )}
-                </button>
+                {canGenerate ? (
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateRedline(action)}
+                    disabled={generatingId === action.mitigation_type}
+                    className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[7px] font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 dark:border-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-300"
+                    title="Generate a draft redline for this mitigation"
+                  >
+                    {generatingId === action.mitigation_type ? (
+                      <>Generating...</>
+                    ) : successId === action.mitigation_type ? (
+                      <>✓ Draft created</>
+                    ) : (
+                      <>
+                        <FileText className="w-2.5 h-2.5" />
+                        Generate Redline
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <span
+                    className="inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[7px] font-medium text-gray-400 dark:border-gray-700 dark:bg-gray-800/50"
+                    title="You have read-only access"
+                  >
+                    <Lock className="w-2.5 h-2.5" />
+                    Read Only
+                  </span>
+                )}
               </div>
               {/* Success toast with traceability */}
               {successId === action.mitigation_type && successData && (

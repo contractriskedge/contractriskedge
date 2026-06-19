@@ -55,7 +55,8 @@ from app.domains.notify.service import NotificationService
 
 logger = logging.getLogger(__name__)
 
-# Obligation statuses that no longer block approval or contract close.
+# Obligation statuses that are considered terminal (no longer open).
+# Open obligations block contract close, but NOT approval/finalize/execute.
 TERMINAL_OBLIGATION_STATUSES = frozenset({
     "completed", "closed", "waived", "cancelled", "archived",
 })
@@ -213,6 +214,11 @@ class ReviewService:
         Uses the WorkflowState machine to validate transitions.
         Records audit trail for every transition.
         """
+        logger.info(
+            "[DEBUG-LIFECYCLE] update_status called: review=%s new_status=%s reason=%s user=%s tenant=%s",
+            review_id, new_status, reason, getattr(self.user, 'id', 'unknown'), self.tenant_id,
+        )
+
         # Guard: rejection requires a reason
         if new_status.lower() == "rejected" and not (reason and reason.strip()):
             raise ValueError("Rejection reason is required when rejecting a review.")
@@ -241,9 +247,14 @@ class ReviewService:
         target_state = map_legacy_status(new_status)
         review = await self.review_repo.get_review(review_id, self.tenant_id)
         if not review:
+            logger.warning("[DEBUG-LIFECYCLE] update_status: review not found: %s", review_id)
             return None
 
         current_status = str(review.status.value) if hasattr(review.status, 'value') else str(review.status)
+        logger.info(
+            "[DEBUG-LIFECYCLE] update_status: current_status=%s target_state=%s db_status will be derived",
+            current_status, target_state,
+        )
 
         # Guard: only finalized, executed, or rejected contracts can be closed/archived
         # (prevents accidentally archiving contracts still in active review)
@@ -277,6 +288,7 @@ class ReviewService:
         try:
             validate_transition(current_state, target_state, review_id=review_id)
         except TransitionError as e:
+            logger.warning("[DEBUG-LIFECYCLE] Transition rejected: %s", str(e))
             raise ValueError(str(e))
 
         # Map WorkflowState to DB-persistable ReviewStatus before writing.
@@ -284,6 +296,10 @@ class ReviewService:
         # negotiation→in_review that exist in WorkflowState but not
         # in the PostgreSQL review_status enum.
         db_status = to_db_status(target_state)
+        logger.info(
+            "[DEBUG-LIFECYCLE] Performing transition: %s -> %s (db_status=%s) reason=%s",
+            current_status, new_status, db_status, reason,
+        )
 
         # Perform the transition
         review = await self.review_repo.update_status(
@@ -302,6 +318,20 @@ class ReviewService:
             to_status=db_status,
             actor_id=self.user.id,
             reason=reason,
+        )
+
+        # Send notification for close/archive
+        if new_status.lower() in ("closed", "archived") and self.notify_service:
+            contract_number = getattr(review, 'review_number', None) or review_id[:8]
+            await self.notify_service.send_contract_closed(
+                review_id=review_id,
+                user_id=self.user.id,
+                contract_number=contract_number,
+            )
+
+        logger.info(
+            "[DEBUG-LIFECYCLE] Transition complete: %s -> %s (db_status=%s) audit recorded",
+            current_status, new_status, db_status,
         )
 
         return self._review_to_detail(review) if review else None
@@ -1437,32 +1467,10 @@ class ReviewService:
                         details={"unresolved_critical_high_count": count},
                     )
 
-            # Guard: if approving, check for open obligations
-            open_count = await self.count_open_obligations(review_id)
-            logger.info(
-                "[DEBUG] approve obligation guard: review=%s decision=%s open_count=%s",
-                review_id, decision, open_count,
-            )
-            if open_count > 0:
-                # Allow override if reason is provided (admin bypass)
-                if comments and "override:" in comments.lower():
-                    logger.info(
-                        "Approval override for review %s: %d open obligations overridden by %s",
-                        review_id, open_count, self.user.id,
-                    )
-                else:
-                    action_label = "approve" if decision == "approved" else "conditionally approve"
-                    logger.warning(
-                        "[DEBUG] BLOCKED approve due to open obligations: review=%s open_count=%s user=%s",
-                        review_id, open_count, self.user.id,
-                    )
-                    raise ConflictError(
-                        message=(
-                            f"Cannot {action_label}: {open_count} obligation(s) are still open. "
-                            "Complete or close all obligations before approving, or add 'override:' to your comments to bypass."
-                        ),
-                        details={"open_obligation_count": open_count},
-                    )
+            # Open obligations do NOT block approval.
+            # Per enterprise CLM best practice, obligations are future commitments
+            # that remain open after approval and are tracked during the active phase.
+            # Only contract closure is blocked by open obligations.
 
         new_status = ReviewStatus.APPROVED if decision == "approved" else ReviewStatus.REJECTED
         if decision == "conditionally_approved":
@@ -1890,6 +1898,9 @@ class ReviewService:
                     ).values(status=RedlineStatus.SUPERSEDED.value)
                 )
 
+        # Bump review revision number (R1 → R2, etc.)
+        new_review_number = await self.review_repo.bump_review_revision(review_id, self.tenant_id)
+
         # Log status change
         from app.domains.review.models import ReviewStatusHistory
         self.review_repo.session.add(ReviewStatusHistory(
@@ -1999,6 +2010,15 @@ class ReviewService:
                     "If you need to remove this contract, go to Ingestion and delete it from there."
                 )
 
+        # If the caller's reason indicates an archive intent, perform a
+        # status transition to `archived` instead of hard-marking the row
+        # as deleted. This preserves the review for listing and activity
+        # history while keeping the terminal `archived` state.
+        if reason and "archive" in reason.lower():
+            await self.update_status(review_id, "archived", reason)
+            return True
+
+        # Otherwise perform a true soft-delete (is_deleted flag).
         await self.review_repo.session.execute(
             update(ContractReview).where(
                 ContractReview.review_id == review_id,
@@ -2082,9 +2102,19 @@ class ReviewService:
             elif source_chunk and source_chunk.page_numbers:
                 page_number = source_chunk.page_numbers[0]
 
+            # Generate business ID for the finding
+            try:
+                from app.kernel.utils.business_id import generate_business_id
+                finding_number = await generate_business_id(
+                    self.review_repo.session, self.tenant_id, "finding",
+                )
+            except Exception:
+                finding_number = None
+
             rf = ReviewFinding(
                 review_id=review_id, upload_id=finding.upload_id,
                 tenant_id=finding.tenant_id, ai_finding_id=finding.finding_id,
+                finding_number=finding_number,
                 clause_type=finding.clause_type, severity=finding.severity.value,
                 title=finding.title, description=finding.description,
                 recommendation=finding.recommendation, confidence=finding.confidence,
@@ -3342,7 +3372,8 @@ class ReviewService:
 
         findings_sql = sa_text("""
             SELECT finding_id, clause_type, severity, title, description,
-                   recommendation, resolution, rule_id, playbook_id, evaluation_id
+                   recommendation, resolution, rule_id, playbook_id,
+                   playbook_version_id, evaluation_id
             FROM review_findings
             WHERE tenant_id = :tenant_id AND review_id = CAST(:review_id AS uuid)
         """)
@@ -3355,7 +3386,8 @@ class ReviewService:
 
         rules_sql = sa_text("""
             SELECT rule_id, playbook_id, name, description, priority, is_mandatory,
-                   effect, target_category, conditions, target_clause_id
+                   effect, target_category, conditions, target_clause_id,
+                   keyword_patterns
             FROM policy_rules
             WHERE tenant_id = :tenant_id AND is_active = TRUE
             ORDER BY priority ASC
@@ -3403,7 +3435,8 @@ class ReviewService:
                 clause_by_category[cat] = dict(row._mapping)
 
         playbook_sql = sa_text("""
-            SELECT lp.playbook_id, lp.name, lp.created_by, pv.version_label
+            SELECT lp.playbook_id, lp.name, lp.created_by, lp.active_version_id,
+                   pv.version_label
             FROM legal_playbooks lp
             LEFT JOIN playbook_versions pv ON pv.version_id = lp.active_version_id
             WHERE lp.tenant_id = :tenant_id
@@ -3420,10 +3453,12 @@ class ReviewService:
 
             clause_std = clause_by_category.get(normalize_clause_category(f.get("clause_type")))
             pb = playbooks.get(str(rule["playbook_id"])) if rule.get("playbook_id") else None
+            playbook_version_id = str(pb["active_version_id"]) if pb and pb.get("active_version_id") else None
 
             update_sql = sa_text("""
                 UPDATE review_findings
                 SET playbook_id = CAST(:playbook_id AS uuid),
+                    playbook_version_id = CAST(:playbook_version_id AS uuid),
                     rule_id = CAST(:rule_id AS uuid),
                     evaluation_id = CAST(:evaluation_id AS uuid),
                     clause_standard_id = CAST(:clause_standard_id AS uuid),
@@ -3437,6 +3472,7 @@ class ReviewService:
                     "finding_id": str(f["finding_id"]),
                     "tenant_id": self.tenant_id,
                     "playbook_id": str(rule["playbook_id"]) if rule.get("playbook_id") else None,
+                    "playbook_version_id": playbook_version_id,
                     "rule_id": str(rule["rule_id"]),
                     "evaluation_id": str(evaluation_id) if evaluation_id else None,
                     "clause_standard_id": str(clause_std["clause_id"]) if clause_std else None,
@@ -3446,6 +3482,7 @@ class ReviewService:
 
             f["rule_id"] = rule["rule_id"]
             f["playbook_id"] = rule.get("playbook_id")
+            f["playbook_version_id"] = playbook_version_id
             f["evaluation_id"] = evaluation_id
             f["clause_standard_id"] = clause_std["clause_id"] if clause_std else None
 
@@ -3473,15 +3510,18 @@ class ReviewService:
         if not evaluation_id and (deviations or eval_results):
             evaluation_id = _uuid.uuid4()
             primary_playbook = str(rules[0]["playbook_id"]) if rules else None
+            primary_version = str(rules[0].get("playbook_version_id")) if rules and rules[0].get("playbook_version_id") else None
             insert_eval = sa_text("""
                 INSERT INTO policy_evaluations
-                    (evaluation_id, tenant_id, upload_id, review_id, playbook_id, status,
+                    (evaluation_id, tenant_id, upload_id, review_id, playbook_id,
+                     playbook_version_id, status,
                      total_rules_evaluated, rules_passed, rules_failed,
                      deviations_found, mandatory_blocks, approval_required,
                      results, deviations, recommendations)
                 VALUES
                     (CAST(:evaluation_id AS uuid), :tenant_id, :upload_id,
-                     CAST(:review_id AS uuid), CAST(:playbook_id AS uuid), 'completed',
+                     CAST(:review_id AS uuid), CAST(:playbook_id AS uuid),
+                     CAST(:playbook_version_id AS uuid), 'completed',
                      :total, 0, :failed, :deviations_found, 0, 0,
                      CAST(:results AS jsonb), CAST(:deviations AS jsonb), '[]'::jsonb)
             """)
@@ -3493,6 +3533,7 @@ class ReviewService:
                     "upload_id": str(upload_id),
                     "review_id": review_id,
                     "playbook_id": primary_playbook,
+                    "playbook_version_id": primary_version,
                     "total": len(eval_results),
                     "failed": len(deviations),
                     "deviations_found": len(deviations),
@@ -3929,12 +3970,13 @@ class ReviewService:
               AND (
                 entity_id = CAST(:review_id AS uuid)
                 OR metadata->>'review_id' = :review_id2
+                OR metadata->>'contract_id' = :review_id3
               )
             ORDER BY created_at DESC
             LIMIT 50
         """)
         result = await self.review_repo.session.execute(
-            gov_sql, {"tenant_id": self.tenant_id, "review_id": review_id, "review_id2": review_id}
+            gov_sql, {"tenant_id": self.tenant_id, "review_id": review_id, "review_id2": review_id, "review_id3": review_id}
         )
         gov_events = []
         for row in result.fetchall():

@@ -15,6 +15,7 @@ const typeIcons: Record<string, React.ReactNode> = {
 
 export function AuditCenter({ events, compliance }: { events: AuditEvent[]; compliance: ComplianceCheck[] }) {
   const [filter, setFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "success" | "failure" | "blocked">("all");
 
   const typeCounts = events.reduce((acc, e) => {
     acc[e.type] = (acc[e.type] || 0) + 1;
@@ -23,7 +24,8 @@ export function AuditCenter({ events, compliance }: { events: AuditEvent[]; comp
 
   const chartData = Object.entries(typeCounts).map(([type, count]) => ({ name: type, count }));
 
-  const filtered = filter === "all" ? events : events.filter((e) => e.type === filter);
+  const filtered = (filter === "all" ? events : events.filter((e) => e.type === filter))
+    .filter((e) => statusFilter === "all" || e.status === statusFilter);
 
   return (
     <div className="space-y-4">
@@ -50,7 +52,11 @@ export function AuditCenter({ events, compliance }: { events: AuditEvent[]; comp
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
           <FileSearch className="w-4 h-4 text-navy-700" /><h3 className="text-xs font-semibold text-navy-900">Audit Event Log</h3>
-          <div className="flex gap-1 ml-auto">
+          <div className="flex gap-1 ml-auto flex-wrap justify-end">
+            {["all", "success", "failure", "blocked"].map((s) => (
+              <button key={s} onClick={() => setStatusFilter(s as typeof statusFilter)}
+                className={`text-[9px] font-medium px-2 py-0.5 rounded-full transition-colors ${statusFilter === s ? "bg-emerald-700 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>{s}</button>
+            ))}
             {["all", "user", "auth", "ai", "security", "workflow", "integration"].map((t) => (
               <button key={t} onClick={() => setFilter(t)}
                 className={`text-[9px] font-medium px-2 py-0.5 rounded-full transition-colors ${filter === t ? "bg-navy-700 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>{t}</button>

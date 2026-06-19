@@ -284,6 +284,23 @@ class PlaybookService:
                               change_summary=f"Updated rule '{rule.name}'")
         return self._rule_to_dict(rule) if rule else None
 
+    async def toggle_rule(self, rule_id: str, enabled: bool) -> Optional[dict]:
+        """Activate or deactivate a policy rule.
+
+        Records a dedicated ``rule.activated`` / ``rule.deactivated`` audit
+        event so that rule state changes are fully traceable.
+        """
+        rule = await self.repo.update_rule(rule_id, self.tenant_id, is_active=enabled)
+        if not rule:
+            return None
+        event_type = "rule.activated" if enabled else "rule.deactivated"
+        state_label = "activated" if enabled else "deactivated"
+        await self._audit(
+            event_type, "rule", rule_id,
+            change_summary=f"{state_label.capitalize()} rule '{rule.name}'",
+        )
+        return self._rule_to_dict(rule)
+
     # ── Approval Thresholds ────────────────────────────────────────
 
     async def create_threshold(self, playbook_id: str, data: ApprovalThresholdCreate) -> Optional[dict]:
@@ -386,8 +403,14 @@ class PlaybookService:
                 correlation_id=correlation_id,
             )
 
-            # Run policy engine
-            result: EvaluationResult = PolicyEngine.evaluate(rules, standards, thresholds, ctx)
+            # Run policy engine with playbook-level config
+            dt = dict(playbook.deviation_thresholds or {}) if playbook.deviation_thresholds else None
+            rw = dict(playbook.risk_weights or {}) if playbook.risk_weights else None
+            rl = dict(playbook.risk_levels or {}) if playbook.risk_levels else None
+            result: EvaluationResult = PolicyEngine.evaluate(
+                rules, standards, thresholds, ctx,
+                deviation_thresholds=dt, risk_weights=rw, risk_levels=rl,
+            )
 
             # Store clause recommendations
             if result.recommendations:
@@ -534,7 +557,13 @@ class PlaybookService:
             correlation_id=correlation_id,
         )
 
-        result: EvaluationResult = PolicyEngine.evaluate(rules, standards, thresholds, ctx)
+        dt = dict(playbook.deviation_thresholds or {}) if playbook.deviation_thresholds else None
+        rw = dict(playbook.risk_weights or {}) if playbook.risk_weights else None
+        rl = dict(playbook.risk_levels or {}) if playbook.risk_levels else None
+        result: EvaluationResult = PolicyEngine.evaluate(
+            rules, standards, thresholds, ctx,
+            deviation_thresholds=dt, risk_weights=rw, risk_levels=rl,
+        )
 
         now = datetime.utcnow()
         return {
@@ -785,7 +814,10 @@ class PlaybookService:
             "active_version_id": str(p.active_version_id) if p.active_version_id else None,
             "version_count": p.version_count,
             "tags": list(p.tags) if p.tags else [],
-            "metadata": p.metadata if p.metadata else {},
+            "metadata": dict(p.document_metadata) if p.document_metadata else {},
+            "deviation_thresholds": dict(p.deviation_thresholds) if p.deviation_thresholds else None,
+            "risk_weights": dict(p.risk_weights) if p.risk_weights else None,
+            "risk_levels": dict(p.risk_levels) if p.risk_levels else None,
             "created_by": p.created_by,
             "created_at": p.created_at,
             "updated_at": p.updated_at,
@@ -854,6 +886,7 @@ class PlaybookService:
             "effective_date": r.effective_date,
             "expiration_date": r.expiration_date,
             "tags": list(r.tags or []),
+            "keyword_patterns": list(r.keyword_patterns or []),
             "created_by": r.created_by,
             "created_at": r.created_at,
             "updated_at": r.updated_at,

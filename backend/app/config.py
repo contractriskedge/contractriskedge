@@ -91,9 +91,9 @@ class Settings(BaseSettings):
     """Max copilot suggest requests per user per window."""
     ai_rate_limit_copilot_per_tenant: int = 200
     """Max copilot suggest requests per tenant per hour."""
-    ai_max_concurrent_analyses: int = 5
+    ai_max_concurrent_analyses: int = 1
     """Max simultaneous AI analyses per tenant across all workers.
-    Development default: 5. Production override: 3 (set via env var)."""
+    Default 1 fits OpenAI Tier-1 TPM (30k). Raise via AI_MAX_CONCURRENT_ANALYSES when limits increase."""
     ai_concurrency_retry_seconds: int = 30
     """Max retry delay (seconds) when concurrent analysis limit reached.
     Actual delay uses exponential backoff: 5s, 10s, 20s, capped at this value."""
@@ -201,7 +201,13 @@ class Settings(BaseSettings):
     default_embedding_model: str = "text-embedding-3-small"
     """Default OpenAI embedding model. Override via DEFAULT_EMBEDDING_MODEL env var."""
 
-    ai_allowed_models: list[str] = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]
+    embedding_max_concurrent: int = 2
+    """Max parallel OpenAI embedding API calls per tenant (all workers/threads)."""
+
+    dev_inline_ingestion_max_concurrent: int = 2
+    """Max parallel inline ingestion threads in development mode."""
+
+    ai_allowed_models: list[str] = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "deepseek-v4-flash", "deepseek-v4-pro"]
     """List of allowed AI models for analysis. Override via AI_ALLOWED_MODELS env var."""
 
     ai_max_tokens: int = 128000
@@ -222,14 +228,30 @@ class Settings(BaseSettings):
     ai_min_confidence_threshold: float = 0.3
     """Minimum confidence threshold for AI responses. Override via AI_MIN_CONFIDENCE_THRESHOLD env var."""
 
-    ai_provider_fallback_order: list[str] = ["openai", "anthropic", "azure"]
+    ai_provider_fallback_order: list[str] = ["openai"]
     """Provider fallback priority. Override via AI_PROVIDER_FALLBACK_ORDER env var."""
+
+    deepseek_api_key: str = ""
+    """DeepSeek API key for bulk ingestion. Override via DEEPSEEK_API_KEY env var."""
+
+    deepseek_default_model: str = "deepseek-chat"
+    """Default DeepSeek model. Override via DEEPSEEK_DEFAULT_MODEL env var."""
+
+    ai_hybrid_routing: bool = False
+    """When True, route risk analysis to DeepSeek and redlines to GPT-4o.
+    Override via AI_HYBRID_ROUTING env var."""
 
     ai_feature_flags: list[str] = ["risk_analysis", "redline_generation", "clause_classification"]
     """Enabled AI feature flags. Override via AI_FEATURE_FLAGS env var."""
 
-    ai_default_token_budget: int = 4096
+    ai_default_token_budget: int = 16384
     """Default completion token budget for AI analysis. Override via AI_DEFAULT_TOKEN_BUDGET env var."""
+
+    ai_analysis_max_chunks: int = 20
+    """Max document chunks sent to risk-analysis prompt (controls input TPM)."""
+
+    ai_analysis_max_chunk_chars: int = 1200
+    """Max characters per chunk in risk-analysis prompt."""
 
     # ── S3 / MinIO ─────────────────────────────────────────────────
     s3_endpoint: str = "http://localhost:9000"

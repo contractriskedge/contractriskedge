@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, Query, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, HTTPException, UploadFile, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.obligations.schemas import (
@@ -24,6 +24,9 @@ from app.dependencies import get_db, get_tenant_id, get_current_user
 from app.kernel.security.auth import UserContext
 from app.kernel.security.rbac import require_permission
 from app.kernel.security.permissions import Permissions
+from app.domains.notify.service import NotificationService
+from app.domains.notify.repository import NotificationRepository
+from app.kernel.events.bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +37,21 @@ async def get_obligation_service(
     session: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
     user: UserContext = Depends(get_current_user),
+    request: Request = None,
 ) -> ObligationService:
-    return ObligationService(session, tenant_id, user_role=user.role)
+    event_bus = getattr(request.app.state, "event_bus", None) if request else None
+    if event_bus is None:
+        event_bus = EventBus()
+    notify_service = NotificationService(
+        repo=NotificationRepository(session, tenant_id=tenant_id),
+        event_bus=event_bus,
+        tenant_id=tenant_id,
+    )
+    return ObligationService(
+        session, tenant_id, user_role=user.role,
+        user_id=user.id,
+        notify_service=notify_service,
+    )
 
 
 @router.get("", response_model=None, include_in_schema=False)

@@ -37,6 +37,9 @@ class NotificationType(str, PyEnum):
     AI_ANALYSIS_COMPLETE = "ai.analysis_complete"
     UPLOAD_COMPLETE = "upload.complete"
     INGESTION_FAILED = "ingestion.failed"
+    OBLIGATION_CREATED = "obligation.created"
+    OBLIGATION_COMPLETED = "obligation.completed"
+    CONTRACT_CLOSED = "contract.closed"
 
 
 class NotificationChannel(str, PyEnum):

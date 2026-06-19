@@ -1,7 +1,7 @@
 /**
  * UserPicker — DB-backed user/assignee chooser for the contract review platform.
  *
- * Pulls active tenant users from `/admin/users` and renders a search-first
+ * Pulls active tenant users from `/reviews/assignees` and renders a search-first
  * combobox with role grouping, avatars, and contextual metadata
  * (email, role, active-review workload when available).
  *
@@ -79,6 +79,7 @@ const ROLE_LABELS: Record<string, string> = {
   tenant_admin: "Tenant Admin",
   admin: "Administrator",
   legal_ops: "Legal Ops",
+  legal_reviewer: "Legal Reviewer",
   reviewer: "Reviewer",
   compliance: "Compliance",
   executive: "Executive",
@@ -92,6 +93,7 @@ const ROLE_ORDER: string[] = [
   "tenant_admin",
   "executive",
   "legal_ops",
+  "legal_reviewer",
   "compliance",
   "reviewer",
   "admin",
@@ -107,6 +109,7 @@ function RoleIcon({ role, className }: { role: string; className?: string }) {
     case "tenant_admin": return <Crown className={cls} />;
     case "executive": return <Crown className={cls} />;
     case "legal_ops": return <GavelIcon className={cls} />;
+    case "legal_reviewer": return <GavelIcon className={cls} />;
     case "compliance": return <Shield className={cls} />;
     case "reviewer": return <UserCog className={cls} />;
     case "admin": return <Briefcase className={cls} />;
@@ -145,9 +148,9 @@ export function UserPicker({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Fetch users from DB-backed /admin/users endpoint
+  // Fetch assignable users — workflows:write (reviewers) not users:read (admin only).
   const { data: users = [], isLoading, error } = useQuery({
-    queryKey: ["admin", "users", "picker", allowedRoles?.slice().sort().join(",")],
+    queryKey: ["reviews", "assignees", "picker", allowedRoles?.slice().sort().join(",")],
     queryFn: async () => {
       const res = await api.get<Array<{
         user_id: string;
@@ -156,7 +159,7 @@ export function UserPicker({
         role: string;
         business_unit: string | null;
         is_active: boolean;
-      }>>("/admin/users");
+      }>>("/reviews/assignees");
       return res.map((u) => ({
         user_id: u.user_id,
         email: u.email,

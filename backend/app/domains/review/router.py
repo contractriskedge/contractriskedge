@@ -18,7 +18,7 @@ from app.kernel.security.permissions import Permissions
 from app.kernel.web.pagination import PaginatedResponse, PaginationMeta
 from app.domains.review.schemas import (
     ReviewDetail, ReviewFilterParams, FindingItem, RedlineItem,
-    CommentItem, CommentCreate, AssignRequest, RedlineAssignRequest,
+    CommentItem, CommentCreate, AssignRequest, AssigneeItem, RedlineAssignRequest,
     FavoriteToggleRequest, EscalateRequest,
     ApproveRequest, FindingResolveRequest, RedlineUpdateRequest,
     GenerateMitigationRedlineRequest, GenerateMitigationRedlineResponse,
@@ -208,6 +208,34 @@ async def get_review_dashboard(
         recent_activity=activity,
         sla_at_risk=stats_data.get("sla_at_risk", 0),
     )
+
+
+@router.get("/assignees", response_model=list[AssigneeItem])
+async def list_assignees(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _: None = Depends(require_permission(Permissions.WORKFLOWS_WRITE)),
+):
+    """List active tenant users for workflow assignment pickers.
+
+    Requires workflows:write (reviewers can assign) rather than users:read (admin only).
+    """
+    from app.domains.admin.repository import AdminRepository
+
+    repo = AdminRepository(db, tenant_id=tenant_id)
+    users = await repo.list_users(tenant_id)
+    return [
+        AssigneeItem(
+            user_id=u.user_id,
+            email=u.email,
+            name=u.name or u.email,
+            role=u.role,
+            business_unit=u.business_unit,
+            is_active=u.is_active,
+        )
+        for u in users
+        if u.is_active
+    ]
 
 
 @router.get("/governance-analytics")
@@ -985,7 +1013,8 @@ async def list_findings(
 
     data = [
         FindingItem(
-            finding_id=str(f.finding_id), clause_type=f.clause_type,
+            finding_id=str(f.finding_id), finding_number=f.finding_number,
+            clause_type=f.clause_type,
             severity=f.severity, title=f.title, description=f.description,
             recommendation=f.recommendation, confidence=f.confidence,
             risk_score=f.risk_score,

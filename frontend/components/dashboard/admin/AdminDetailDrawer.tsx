@@ -173,10 +173,10 @@ function AiTab() {
         <p className="text-[10px] font-semibold text-purple-700 uppercase mb-1">AI Usage Summary</p>
         <div className="space-y-1.5">
           {[
-            { label: "Total AI Queries", value: "342" },
-            { label: "Avg Confidence", value: "91%" },
-            { label: "Flagged Queries", value: "3" },
-            { label: "Preferred Model", value: "gpt-4o" },
+            { label: "Total AI Queries", value: "—" },
+            { label: "Avg Confidence", value: "—" },
+            { label: "Flagged Queries", value: "—" },
+            { label: "Preferred Model", value: "—" },
           ].map((item) => (
             <div key={item.label} className="flex justify-between text-xs"><span className="text-gray-600">{item.label}</span><span className="font-medium text-gray-800">{item.value}</span></div>
           ))}

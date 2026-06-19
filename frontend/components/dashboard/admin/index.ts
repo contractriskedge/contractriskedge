@@ -2,6 +2,7 @@ export { AdminKpiCards } from "./AdminKpiCards";
 export { UserManagement } from "./UserManagement";
 export { AiGovernanceCenter } from "./AiGovernanceCenter";
 export { AuditCenter } from "./AuditCenter";
+export { AuditReportsPanel } from "./AuditReportsPanel";
 export { SystemHealth } from "./SystemHealth";
 export { IntegrationsHub } from "./IntegrationsHub";
 export { SecurityCenter } from "./SecurityCenter";

@@ -497,7 +497,7 @@ export function ReviewMoreActionsMenu({
               <UserPicker
                 value={assigneeId}
                 onChange={setAssigneeId}
-                allowedRoles={["tenant_admin", "reviewer", "legal_ops", "compliance", "executive", "admin"]}
+                allowedRoles={["tenant_admin", "reviewer", "legal_ops", "legal_reviewer", "compliance", "executive", "admin"]}
                 placeholder="Search by name, email, or role…"
                 size="sm"
                 allowNone

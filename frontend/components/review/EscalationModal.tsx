@@ -263,7 +263,7 @@ export function EscalationModal({
               value={assignee}
               onChange={setAssignee}
               onSelectUser={(user) => setAssigneeName(user?.name ?? "")}
-              allowedRoles={["tenant_admin", "reviewer", "legal_ops", "compliance", "executive", "admin"]}
+              allowedRoles={["tenant_admin", "reviewer", "legal_ops", "legal_reviewer", "compliance", "executive", "admin"]}
               placeholder="Search by name, email, or role…"
               size="md"
               allowNone

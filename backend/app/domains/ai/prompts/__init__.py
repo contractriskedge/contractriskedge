@@ -459,3 +459,66 @@ prompt_registry.register(PromptTemplate(
 ))
 
 logger.info("Registered core prompt templates: risk_analysis (1.0.0), redline_generation (4.0.0)")
+
+# ── Batched redline generation — all findings in a single GPT call ──────
+
+_REDLINE_BATCH_TEMPLATE = """You are a senior contract negotiation specialist. Review ALL of the following risk findings
+and suggest legally sound redlines for each one in a single response.
+
+{% for finding in findings %}
+--- Finding {{ loop.index }} ---
+Clause type: {{ finding.clause_type }}
+Contract excerpt:
+{{ finding.original_text }}
+
+Risk context:
+Risk: {{ finding.title }}
+Description: {{ finding.description }}
+
+{% if finding.playbook_context %}
+{{ finding.playbook_context }}
+{% endif %}
+
+{% endfor %}
+
+For EACH finding above, choose exactly one operation:
+- "insert" — clause is MISSING; add new language without deleting unrelated text
+- "modification" — change a specific phrase/sentence inside an existing clause
+- "replace" — replace one bounded clause with another
+- "delete" — remove unsafe language
+
+CRITICAL RULES FOR NUMBERING:
+- NEVER add section numbers, article numbers, or subsection numbers to proposed_text.
+- For "insert": Begin proposed_text with the clause title as a plain label only.
+- Numbering is assigned by the document editor during export. The AI must never assign numbers.
+
+DRAFTING RULES:
+1. For "insert": set original_text to "" and provide anchor_text (10–80 chars) marking WHERE to insert after.
+2. For "modification" or "replace": original_text must be the MINIMAL exact span being changed (under 400 characters).
+3. Never delete title, party names, or recitals when adding a missing clause.
+4. proposed_text must be plain text (not JSON).
+
+RISK TRACEABILITY — for each finding also return:
+- detected_risk: One sentence describing the specific legal risk detected.
+- business_impact: One sentence on the business consequence.
+- mitigation_strategy: One sentence on how the proposed clause mitigates it.
+
+Respond in JSON with a single object containing a "redlines" array.
+Each element in the array must have keys:
+finding_index (integer, 1-based matching the findings above),
+operation, anchor_text, original_text, proposed_text, rationale, risk_level, confidence,
+detected_risk, business_impact, mitigation_strategy
+"""
+
+prompt_registry.register(PromptTemplate(
+    key="redline_generation_batch",
+    semver="1.0.0",
+    system_prompt="You are a senior contract negotiation specialist. Analyze ALL findings and return redlines for each in a single JSON response. NEVER include section numbers in proposed_text. Always respond in valid JSON.",
+    template=_REDLINE_BATCH_TEMPLATE,
+    default_model="gpt-4o",
+    default_temperature=0.2,
+    default_max_tokens=8192,
+    status=PromptStatus.ACTIVE,
+))
+
+logger.info("Registered batched redline prompt: redline_generation_batch (1.0.0)")

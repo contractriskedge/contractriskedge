@@ -10,6 +10,7 @@
 import React, { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
+import { useRouter } from "next/navigation";
 import {
   Bell, BellRing, CheckCheck, X, AlertTriangle, Info,
   ArrowRight, Loader2, Mail, MailOpen,
@@ -110,6 +111,7 @@ const severityStyles: Record<string, { dot: string; bg: string; icon: React.Reac
 // ── Notification Bell Button ─────────────────────────────────────
 
 export function NotificationBell() {
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const { data: unreadCount } = useUnreadCount();
   const { data: notifData, isLoading } = useNotifications();
@@ -121,6 +123,48 @@ export function NotificationBell() {
   const handleMarkRead = useCallback((id: string) => {
     markAsRead.mutate(id);
   }, [markAsRead]);
+
+  /** Navigate to the notification's target within the SPA.
+   *  The backend sends action_url like "/reviews/{review_id}".
+   *  Instead of <a href> (which causes a 404 since there's no
+   *  Next.js route for /reviews/[id]), we dispatch a custom event
+   *  that the DashboardLayout listens for, or navigate via router. */
+  const handleView = useCallback((notif: NotificationItem) => {
+    if (!notif.action_url) return;
+
+    // Mark as read
+    if (!notif.is_read) {
+      markAsRead.mutate(notif.notification_id);
+    }
+
+    // Parse the action URL to determine navigation target
+    const url = notif.action_url;
+    setIsOpen(false);
+
+    // Match /reviews/{reviewId} → navigate within SPA via custom event
+    const reviewMatch = url.match(/^\/reviews\/([^/]+)/);
+    if (reviewMatch) {
+      const reviewId = reviewMatch[1];
+      window.dispatchEvent(
+        new CustomEvent("navigate-to-review", { detail: { reviewId } })
+      );
+      return;
+    }
+
+    // Match /contracts/{contractId} → use Next.js router
+    const contractMatch = url.match(/^\/contracts\/([^/]+)/);
+    if (contractMatch) {
+      router.push(`/contracts/${contractMatch[1]}`);
+      return;
+    }
+
+    // For other URLs, try router push or fall back to window location
+    try {
+      router.push(url);
+    } catch {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  }, [markAsRead, router]);
 
   const count = typeof unreadCount === 'number' ? unreadCount : 0;
 
@@ -226,12 +270,12 @@ export function NotificationBell() {
                                 {formatTimeAgo(notif.created_at)}
                               </span>
                               {notif.action_url && (
-                                <a
-                                  href={notif.action_url}
+                                <button
+                                  onClick={() => handleView(notif)}
                                   className="inline-flex items-center gap-0.5 text-[9px] font-medium text-blue-600 hover:text-blue-700"
                                 >
                                   View <ArrowRight className="w-2.5 h-2.5" />
-                                </a>
+                                </button>
                               )}
                             </div>
                           </div>

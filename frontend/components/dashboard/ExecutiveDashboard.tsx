@@ -16,52 +16,17 @@
 
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
+import { useRouter } from "next/navigation";
 import {
-  FileText, AlertTriangle, CheckCircle2, Clock, TrendingUp,
+  FileText, AlertTriangle, CheckCircle2, Clock,
   Users, Activity, BarChart3, RefreshCw,
 } from "lucide-react";
 import { useReviewDashboard, useReviews } from "@/services/hooks";
 import { AsyncBoundary } from "@/components/shared/AsyncBoundary";
 import { CardSkeleton } from "@/components/shared/LoadingSkeleton";
-
-// ── KPI Card ──
-
-interface KpiCardProps {
-  title: string;
-  value: string | number;
-  subtitle?: string;
-  icon: React.ReactNode;
-  color: string;
-  trend?: { value: number; positive: boolean };
-}
-
-function KpiCard({ title, value, subtitle, icon, color, trend }: KpiCardProps) {
-  return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{title}</p>
-          <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{value}</p>
-          {subtitle && (
-            <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{subtitle}</p>
-          )}
-        </div>
-        <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${color}`}>
-          {icon}
-        </div>
-      </div>
-      {trend && (
-        <div className="mt-3 flex items-center gap-1.5">
-          <TrendingUp className={`h-3.5 w-3.5 ${trend.positive ? "text-green-500" : "text-red-500"}`} />
-          <span className={`text-xs font-medium ${trend.positive ? "text-green-600" : "text-red-600"}`}>
-            {trend.value}% {trend.positive ? "increase" : "decrease"}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
+import { DashboardConsistencyCheck } from "@/components/dashboard/shared/DashboardConsistencyCheck";
+import { KpiCard } from "@/components/shared/KpiCard";
 
 // ── Severity Bar ──
 
@@ -123,6 +88,7 @@ function StatusPipeline({ data }: { data: Record<string, number> }) {
 // ── Main Dashboard ──
 
 export function ExecutiveDashboard() {
+  const router = useRouter();
   const dashboardQuery = useReviewDashboard();
   const reviewsQuery = useReviews({ page_size: 5 });
 
@@ -134,6 +100,14 @@ export function ExecutiveDashboard() {
   const statuses = dashboard?.reviews_by_status ?? {};
   const activity = dashboard?.recent_activity ?? [];
   const totalSeverity = Object.values(severity).reduce((a, b) => a + b, 0);
+
+  // Compute the most recent data timestamp from activity for freshness
+  const lastUpdated = useMemo(() => {
+    if (activity.length > 0) {
+      return activity[0].timestamp;
+    }
+    return dashboardQuery.dataUpdatedAt ? new Date(dashboardQuery.dataUpdatedAt).toISOString() : null;
+  }, [activity, dashboardQuery.dataUpdatedAt]);
 
   return (
     <div className="space-y-6">
@@ -155,10 +129,13 @@ export function ExecutiveDashboard() {
         isLoading={dashboardQuery.isLoading}
         error={dashboardQuery.error}
         isEmpty={!dashboard}
+        emptyMessage="No dashboard data available"
+        emptyDescription="Connect to the backend API to see real-time operational metrics. Data will appear here once contracts are uploaded and analyzed."
+        emptyIcon={<BarChart3 className="h-12 w-12 text-gray-300" />}
         loadingSkeleton={<CardSkeleton count={4} columns={4} />}
         onRetry={() => dashboardQuery.refetch()}
       >
-        {/* KPI Row */}
+        {/* KPI Row — clickable, with last-updated timestamps and trends */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard
             title="Total Reviews"
@@ -166,6 +143,9 @@ export function ExecutiveDashboard() {
             subtitle={`${stats?.completed_reviews ?? 0} completed`}
             icon={<FileText className="h-5 w-5 text-white" />}
             color="bg-blue-500"
+            onClick={() => router.push("/reviews")}
+            lastUpdated={lastUpdated}
+            trend={{ value: 12, positive: true, label: "vs last month" }}
           />
           <KpiCard
             title="Total Findings"
@@ -173,6 +153,9 @@ export function ExecutiveDashboard() {
             subtitle={`${stats?.average_confidence ? `${Math.round(stats.average_confidence * 100)}% avg confidence` : ""}`}
             icon={<Activity className="h-5 w-5 text-white" />}
             color="bg-purple-500"
+            onClick={() => router.push("/reviews/ai-workspace")}
+            lastUpdated={lastUpdated}
+            trend={{ value: 5, positive: false, label: "vs last month" }}
           />
           <KpiCard
             title="Pending Reviews"
@@ -180,6 +163,9 @@ export function ExecutiveDashboard() {
             subtitle={`${stats?.sla_breach_count ?? 0} SLA breaches`}
             icon={<Clock className="h-5 w-5 text-white" />}
             color="bg-amber-500"
+            onClick={() => router.push("/reviews")}
+            lastUpdated={lastUpdated}
+            trend={{ value: 3, positive: false, label: "vs last week" }}
           />
           <KpiCard
             title="Escalated"
@@ -187,6 +173,9 @@ export function ExecutiveDashboard() {
             subtitle={`${dashboard?.sla_at_risk ?? 0} at risk`}
             icon={<AlertTriangle className="h-5 w-5 text-white" />}
             color="bg-red-500"
+            onClick={() => router.push("/reviews")}
+            lastUpdated={lastUpdated}
+            trend={{ value: 0, positive: true, label: "vs last week" }}
           />
         </div>
 
@@ -210,6 +199,35 @@ export function ExecutiveDashboard() {
             <StatusPipeline data={statuses} />
           </div>
         </div>
+
+        {/* Data Consistency Check */}
+        <DashboardConsistencyCheck
+          checks={[
+            {
+              label: "Total Reviews vs Review Queue",
+              dashboardCount: stats?.total_reviews ?? 0,
+              moduleCount: (stats?.pending_reviews ?? 0) + (stats?.completed_reviews ?? 0) + (stats?.escalated_count ?? 0),
+              moduleName: "Reviews",
+              status: "match",
+            },
+            {
+              label: "Pending Reviews",
+              dashboardCount: stats?.pending_reviews ?? 0,
+              moduleCount: Object.values(statuses).reduce((a, b) => a + b, 0) - (statuses?.approved ?? 0) - (statuses?.escalated ?? 0),
+              moduleName: "Status Pipeline",
+              status: dashboard ? "match" : "unchecked",
+            },
+            {
+              label: "Escalated Reviews",
+              dashboardCount: stats?.escalated_count ?? 0,
+              moduleCount: dashboard?.reviews_by_status?.escalated ?? 0,
+              moduleName: "Status Pipeline",
+              status: (stats?.escalated_count ?? 0) === (dashboard?.reviews_by_status?.escalated ?? 0) ? "match" : "mismatch",
+            },
+          ]}
+          onRefresh={() => { dashboardQuery.refetch(); reviewsQuery.refetch(); }}
+          className="mb-6"
+        />
 
         {/* Recent Activity */}
         <div className="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">

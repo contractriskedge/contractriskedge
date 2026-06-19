@@ -83,16 +83,10 @@ export function ApprovalModal({
       }
     }
 
-    // Open obligations guard: block unless override is provided
-    if (openObligations > 0) {
-      if (!comment.toLowerCase().includes("override:")) {
-        setError(
-          `${openObligations} obligation(s) are still open. ` +
-          "Complete or close all obligations before approving, or add 'override:' at the start of your comments."
-        );
-        return;
-      }
-    }
+    // Open obligations do NOT block approval.
+    // Per enterprise CLM best practice, obligations are future commitments
+    // that remain open after the contract is approved. Only contract closure
+    // is blocked by open obligations (enforced server-side).
 
     try {
       let conditions: Record<string, unknown> | undefined;
@@ -106,7 +100,14 @@ export function ApprovalModal({
       }
       await onApprove("approved", comment, conditions);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Approval failed");
+      let msg = err instanceof Error ? err.message : "Approval failed";
+      // Clean up technical messages
+      if (msg.includes("403") || msg.includes("forbidden") || msg.includes("Missing required permission")) {
+        msg = "You don't have permission to approve this contract.";
+      } else if (msg.includes("ConflictError") || msg.includes("409")) {
+        msg = "This action conflicts with the current review state.";
+      }
+      setError(msg);
     }
   };
 
@@ -250,23 +251,7 @@ export function ApprovalModal({
                 </div>
               )}
 
-              {/* Open Obligations Warning */}
-              {openObligations > 0 && (
-                <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-                    <div>
-                      <p className="text-sm font-medium text-amber-900">
-                        {openObligations} Open Obligation(s)
-                      </p>
-                      <p className="text-xs text-amber-700 mt-0.5">
-                        Complete or close all obligations before approving, or include
-                        {' '}<strong>"override:"</strong> at the start of your approval comment to bypass.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {/* Open obligations do NOT block approval — they are tracked post-approval */}
 
               {/* Approval Comment */}
               <div>
@@ -428,7 +413,7 @@ export function ApprovalModal({
           {decision === "approve" && (
             <button
               onClick={handleApprove}
-              disabled={isLoading || !comment.trim() || !riskAck || (openCriticalFindings > 0 && !comment.toLowerCase().includes("override:")) || (openObligations > 0 && !comment.toLowerCase().includes("override:"))}
+              disabled={isLoading || !comment.trim() || !riskAck || (openCriticalFindings > 0 && !comment.toLowerCase().includes("override:"))}
               className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors inline-flex items-center gap-2"
             >
               {isLoading ? (

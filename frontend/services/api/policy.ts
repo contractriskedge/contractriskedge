@@ -191,8 +191,15 @@ export const policyService = {
     api.post<PolicyDefinition>("/playbooks/", body, { idempotencyKey: api.generateIdempotencyKey() }),
 
   /** Update an existing policy — maps to playbooks update endpoint */
-  update: (policyId: string, body: Partial<PolicyCreateRequest>) =>
+  update: (policyId: string, body: Record<string, unknown>) =>
     api.patch<PolicyDefinition>(`/playbooks/${policyId}`, body),
+
+  /** Publish a new version of a playbook */
+  publish: (playbookId: string, versionLabel?: string, changeNotes?: string) =>
+    api.post<PolicyVersion>(`/playbooks/${playbookId}/publish`, {
+      version_label: versionLabel,
+      change_notes: changeNotes,
+    }),
 
   /** List all policy rules across playbooks for the tenant */
   listRules: (params?: {
@@ -234,9 +241,9 @@ export const policyService = {
   /** Delete a policy — maps to playbooks archive endpoint */
   delete: (policyId: string) => api.post(`/playbooks/${policyId}/archive`),
 
-  /** Toggle policy enabled/disabled */
-  toggle: (policyId: string, enabled: boolean) =>
-    api.post<PolicyDefinition>(`/playbooks/${policyId}/toggle`, { enabled }),
+  /** Toggle rule enabled/disabled — activates or deactivates a specific rule */
+  toggleRule: (ruleId: string, enabled: boolean) =>
+    api.post<PolicyDefinition>(`/playbooks/rules/${ruleId}/toggle?enabled=${enabled}`),
 
   /** Evaluate a policy against a contract (live) — maps to playbooks evaluate endpoint */
   evaluate: (body: PolicyEvaluationRequest) =>

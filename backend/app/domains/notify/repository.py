@@ -150,6 +150,23 @@ class NotificationRepository(BaseRepository):
         row = result.fetchone()
         return row.email if row else None
 
+    async def get_user_name(self, tenant_id: str, user_id: str) -> Optional[str]:
+        """Resolve a platform user_id to a display name for email greetings."""
+        from sqlalchemy import text as sa_text
+
+        if "@" in user_id:
+            return user_id.split("@")[0].replace(".", " ").replace("-", " ").title()
+        result = await self.session.execute(
+            sa_text("""
+                SELECT name FROM admin_users
+                WHERE tenant_id = :tid AND user_id = :uid AND is_active = true
+                LIMIT 1
+            """),
+            {"tid": tenant_id, "uid": user_id},
+        )
+        row = result.fetchone()
+        return row.name if row and row.name else None
+
     async def get_email_redirect(self, tenant_id: str) -> tuple[bool, Optional[str]]:
         """Return tenant email redirect settings."""
         from sqlalchemy import text as sa_text

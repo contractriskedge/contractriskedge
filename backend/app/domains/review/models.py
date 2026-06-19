@@ -94,9 +94,9 @@ class ReviewStatus(str, PyEnum):
             cls.DRAFT: {cls.ANALYZING, cls.AI_ANALYZED, cls.ESCALATED, cls.CLOSED},
             cls.UPLOADED: {cls.ANALYZING, cls.AI_ANALYZED, cls.ARCHIVED, cls.ESCALATED, cls.CLOSED},
             cls.ANALYZING: {cls.AI_ANALYZED, cls.AI_REVIEWED, cls.UPLOADED, cls.ESCALATED, cls.CLOSED},
-            cls.AI_ANALYZED: {cls.AI_REVIEWED, cls.REVIEW_READY, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.IN_REVIEW, cls.ESCALATED, cls.CLOSED},
-            cls.AI_REVIEWED: {cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.IN_REVIEW, cls.ESCALATED, cls.CLOSED},
-            cls.REVIEW_READY: {cls.IN_REVIEW, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.ESCALATED, cls.CLOSED},
+            cls.AI_ANALYZED: {cls.AI_REVIEWED, cls.REVIEW_READY, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.IN_REVIEW, cls.ESCALATED, cls.ARCHIVED, cls.CLOSED},
+            cls.AI_REVIEWED: {cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.IN_REVIEW, cls.ESCALATED, cls.ARCHIVED, cls.CLOSED},
+            cls.REVIEW_READY: {cls.IN_REVIEW, cls.PROCUREMENT_REVIEW, cls.LEGAL_REVIEW, cls.ESCALATED, cls.ARCHIVED, cls.CLOSED},
             cls.PROCUREMENT_REVIEW: {
                 cls.LEGAL_REVIEW, cls.SECURITY_REVIEW, cls.NEGOTIATION,
                 cls.REJECTED, cls.ESCALATED, cls.CLOSED,
@@ -229,8 +229,10 @@ class ContractReview(Base):
     # Favorites — per-user bookmarking for quick access
     is_favorite = Column(Boolean, nullable=False, default=False)
 
-    # Human-readable review number (e.g. "CRev-202606-1")
-    review_number = Column(String(50), nullable=False, default="")
+    # Human-readable review number (e.g. "NDAREV-202606-0001-R1")
+    # Format: {TYPE}REV-YYYYMM-NNNN-R#
+    # Unique per tenant for display/search purposes.
+    review_number = Column(String(50), nullable=False, default="", index=True)
 
 
 class ReviewFinding(Base):
@@ -238,6 +240,7 @@ class ReviewFinding(Base):
     __tablename__ = "review_findings"
 
     finding_id = Column(UUID, primary_key=True, default=uuid.uuid4)
+    finding_number = Column(String(50), nullable=True, index=True)
     review_id = Column(UUID, ForeignKey("contract_reviews.review_id", ondelete="CASCADE"), nullable=False, index=True)
     upload_id = Column(UUID, ForeignKey("upload_sessions.upload_id", ondelete="CASCADE"), nullable=False)
     tenant_id = Column(UUID, ForeignKey("tenants.tenant_id", ondelete="CASCADE"), nullable=False)
@@ -273,6 +276,7 @@ class ReviewFinding(Base):
 
     # Policy engine linkage — persisted when findings match policy rules
     playbook_id = Column(UUID, ForeignKey("legal_playbooks.playbook_id", ondelete="SET NULL"), nullable=True, index=True)
+    playbook_version_id = Column(UUID, ForeignKey("playbook_versions.version_id", ondelete="SET NULL"), nullable=True, index=True)
     rule_id = Column(UUID, ForeignKey("policy_rules.rule_id", ondelete="SET NULL"), nullable=True, index=True)
     evaluation_id = Column(UUID, ForeignKey("policy_evaluations.evaluation_id", ondelete="SET NULL"), nullable=True)
     clause_standard_id = Column(UUID, nullable=True)

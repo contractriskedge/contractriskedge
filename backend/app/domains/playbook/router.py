@@ -666,6 +666,28 @@ async def update_rule(
     return result
 
 
+@router.post("/rules/{rule_id}/toggle", response_model=PolicyRuleItem
+)
+async def toggle_rule(
+    rule_id: str,
+    enabled: bool = Query(..., description="True to activate, False to deactivate"),
+    service: PlaybookService = Depends(get_playbook_service)
+,
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Activate or deactivate a policy rule.
+
+    Records a ``rule.activated`` / ``rule.deactivated`` audit event for
+    full traceability of rule state changes.
+    """
+    result = await service.toggle_rule(rule_id, enabled
+)
+    if not result:
+        raise NotFoundError(f"Rule {rule_id} not found"
+)
+    return result
+
+
 # ── Approval Thresholds ─────────────────────────────────────────────
 
 

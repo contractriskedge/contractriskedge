@@ -56,6 +56,11 @@ export interface UploadSummary {
   ingestion_state: string;
   created_at: string;
   contract_number?: string;
+  ai_confidence?: number;
+  ocr_accuracy?: number;
+  classification_score?: number;
+  extraction_score?: number;
+  risk_score?: number;
 }
 
 export interface RetryResponse {

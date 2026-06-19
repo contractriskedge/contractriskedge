@@ -14,10 +14,27 @@ from app.domains.ai.policy import AIPolicyEngine, AIPolicyContext, AIPolicyDecis
 from app.domains.ai.providers.registry import llm_registry
 from app.domains.ai.types import AIExecutionOutcome, LLMRequest
 from app.domains.ai.guardrails import GuardrailEngine
-from app.domains.ai.llm import StructuredOutputParser
+from app.domains.ai.llm import StructuredOutputParser, RateLimitError, LLMProviderError
 from app.domains.ai.schemas import AnalysisResult
 
+from app.kernel.database.session_utils import release_session_before_io
+
 logger = logging.getLogger(__name__)
+
+
+def _is_registry_miss(exc: Exception) -> bool:
+    return isinstance(exc, ValueError) and "No healthy LLM providers are available" in str(exc)
+
+
+def _prefer_exception(current: Exception | None, candidate: Exception) -> Exception:
+    """Keep API/rate-limit errors over registry miss noise from unregistered fallbacks."""
+    if current is None:
+        return candidate
+    if _is_registry_miss(current) and not _is_registry_miss(candidate):
+        return candidate
+    if isinstance(candidate, (RateLimitError, LLMProviderError)) and _is_registry_miss(current):
+        return candidate
+    return current
 
 
 class AIExecutionOrchestrator:
@@ -71,15 +88,17 @@ class AIExecutionOrchestrator:
             )
             raise AIPolicyViolation("; ".join(policy_decision.violations))
 
-        # Build the provider selection chain: primary + fallbacks
+        # Build the provider selection chain: primary + registered fallbacks only
         provider_chain = [envelope.execution_plan.provider_name]
         if envelope.execution_plan.fallback_chain.providers:
+            registered = set(llm_registry.registered_names())
             for p in envelope.execution_plan.fallback_chain.providers:
-                if p not in provider_chain:
+                if p not in provider_chain and p in registered:
                     provider_chain.append(p)
 
-        last_exception = None
+        last_exception: Exception | None = None
         selected_provider = None
+        result = None
 
         for provider_name in provider_chain:
             try:
@@ -116,6 +135,7 @@ class AIExecutionOrchestrator:
                     raise AIPolicyViolation("Critical guardrail violation prevented execution")
 
                 cost_estimator = AICostEstimator()
+                await release_session_before_io(self.session)
                 start = time.monotonic()
                 try:
                     result = await selected_provider.complete(llm_request)
@@ -147,7 +167,7 @@ class AIExecutionOrchestrator:
                         exc,
                         len(provider_chain) - provider_chain.index(provider_name) - 1,
                     )
-                    last_exception = exc
+                    last_exception = _prefer_exception(last_exception, exc)
                     continue  # Try next provider in chain
 
                 # Success — break out of provider chain
@@ -159,10 +179,10 @@ class AIExecutionOrchestrator:
                     provider_name,
                     exc,
                 )
-                last_exception = exc
+                last_exception = _prefer_exception(last_exception, exc)
                 continue
 
-        if selected_provider is None or last_exception is not None and 'result' not in dir():
+        if result is None:
             # All providers in chain failed
             logger.error(
                 "All providers failed for trace_id=%s chain=%s last_error=%s",

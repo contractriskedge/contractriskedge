@@ -21,27 +21,23 @@ def rule_matches_finding(finding: dict, rule: dict) -> bool:
         cond_cat = normalize_clause_category(cond.get("clause_category"))
         if cond_cat and cond_cat == clause:
             return True
-    name = (rule.get("name") or "").lower()
-    name_map = {
-        "ip_ownership": "intellectual_property",
-        "intellectual_property": "intellectual_property",
-        "liability_cap": "liability",
-        "liability": "liability",
-        "limitation_of_liability": "liability",
-        "indemnification": "indemnification",
-        "data_privacy": "data_privacy",
-        "data_protection": "data_privacy",
-        "data subject": "data_privacy",
-        "gdpr": "data_privacy",
-        "gdpr_compliance": "data_privacy",
-    }
-    for keyword, mapped in name_map.items():
-        if keyword in name and mapped == clause:
-            return True
-    if keyword := (finding.get("title") or "").lower():
-        for kw, mapped in name_map.items():
-            if kw in keyword and mapped == clause:
+
+    # DB-driven keyword pattern matching — replaces the old hardcoded name_map.
+    # Each rule can store keyword_patterns as a JSONB list of strings.
+    # If any pattern is found in the rule name or finding title, and the
+    # pattern maps to the finding's clause type, the rule matches.
+    keyword_patterns: list = rule.get("keyword_patterns") or []
+    if keyword_patterns:
+        name = (rule.get("name") or "").lower()
+        title = (finding.get("title") or "").lower()
+        for pattern in keyword_patterns:
+            pattern_str = normalize_clause_category(str(pattern))
+            if pattern_str == clause:
+                # Direct clause-type match via pattern
                 return True
+            if pattern_str in name or pattern_str in title:
+                return True
+
     return False
 
 

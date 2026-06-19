@@ -184,7 +184,7 @@ class TestProviderFallbackChain:
         assert outcome.response.provider == "anthropic"
 
     async def test_all_providers_fail_raises(self, orchestrator, base_envelope, mock_session):
-        """When all providers in the chain fail, the last exception should propagate."""
+        """When all providers in the chain fail, the primary provider error should propagate."""
         primary = MockProvider("openai", should_fail=True)
         fallback = MockProvider("anthropic", should_fail=True)
         llm_registry.register(primary)
@@ -195,7 +195,7 @@ class TestProviderFallbackChain:
         with patch.object(orchestrator.policy_engine, "validate", return_value=MagicMock(allowed=True, violations=[])):
             with patch.object(orchestrator.guardrail_engine, "evaluate_prompt", return_value=[]):
                 with patch.object(orchestrator.guardrail_engine, "has_critical_violation", return_value=False):
-                    with pytest.raises(RuntimeError, match="anthropic failed"):
+                    with pytest.raises(RuntimeError, match="openai failed"):
                         await orchestrator.execute(base_envelope)
 
     async def test_fallback_not_in_registry_skipped(self, orchestrator, base_envelope, mock_session):

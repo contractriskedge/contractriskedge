@@ -38,7 +38,11 @@ class EmbeddingProviderError(Exception):
 
 
 class RateLimitError(EmbeddingProviderError):
-    """Provider rate limit exceeded."""
+    """Provider rate limit exceeded (transient)."""
+
+
+class QuotaExceededError(EmbeddingProviderError):
+    """Provider billing quota exhausted (not retryable)."""
 
 
 class TimeoutError(EmbeddingProviderError):
@@ -85,9 +89,10 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     MAX_RETRIES = 3
     TIMEOUT_SECONDS = 30
 
-    def __init__(self, api_key: str, default_model: str = "text-embedding-3-large"):
+    def __init__(self, api_key: str, default_model: str = "text-embedding-3-large", tenant_id: str = "global"):
         self._api_key = api_key
         self._default_model = default_model
+        self._tenant_id = tenant_id
         self._client = None
 
     @property
@@ -105,29 +110,35 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             self._client = AsyncOpenAI(
                 api_key=self._api_key,
                 http_client=AsyncClient(timeout=Timeout(self.TIMEOUT_SECONDS, connect=10.0)),
+                max_retries=0,
             )
         return self._client
 
     @retry(
         stop=stop_after_attempt(MAX_RETRIES),
-        wait=wait_exponential(multiplier=1, min=2, max=30),
+        wait=wait_exponential(multiplier=2, min=5, max=90),
         retry=retry_if_exception_type((RateLimitError, TimeoutError)),
     )
     async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
+        from app.domains.vectors.embedding_throttle import embedding_slot
+
         client = await self._get_client()
         start = time.monotonic()
 
-        try:
-            response = await client.embeddings.create(
-                model=request.model or self._default_model,
-                input=request.text,
-                dimensions=request.dimensions,
-            )
-        except Exception as exc:
-            error_str = str(exc).lower()
-            if "rate" in error_str and "limit" in error_str:
-                raise RateLimitError(f"OpenAI rate limit: {exc}")
-            raise EmbeddingProviderError(f"OpenAI embedding failed: {exc}")
+        async with embedding_slot(self._tenant_id):
+            try:
+                response = await client.embeddings.create(
+                    model=request.model or self._default_model,
+                    input=request.text,
+                    dimensions=request.dimensions,
+                )
+            except Exception as exc:
+                error_str = str(exc).lower()
+                if "insufficient_quota" in error_str or "exceeded your current quota" in error_str:
+                    raise QuotaExceededError(f"OpenAI quota exceeded: {exc}")
+                if "rate" in error_str and "limit" in error_str:
+                    raise RateLimitError(f"OpenAI rate limit: {exc}")
+                raise EmbeddingProviderError(f"OpenAI embedding failed: {exc}")
 
         latency_ms = int((time.monotonic() - start) * 1000)
         data = response.data[0]
@@ -156,23 +167,28 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         return results
 
     async def _embed_batch_single(self, requests: list[EmbeddingRequest]) -> list[EmbeddingResponse]:
+        from app.domains.vectors.embedding_throttle import embedding_slot
+
         client = await self._get_client()
         start = time.monotonic()
         texts = [r.text for r in requests]
         model = requests[0].model if requests else self._default_model
         dims = requests[0].dimensions if requests else 1536
 
-        try:
-            response = await client.embeddings.create(
-                model=model,
-                input=texts,
-                dimensions=dims,
-            )
-        except Exception as exc:
-            error_str = str(exc).lower()
-            if "rate" in error_str and "limit" in error_str:
-                raise RateLimitError(f"OpenAI rate limit: {exc}")
-            raise EmbeddingProviderError(f"OpenAI batch embedding failed: {exc}")
+        async with embedding_slot(self._tenant_id):
+            try:
+                response = await client.embeddings.create(
+                    model=model,
+                    input=texts,
+                    dimensions=dims,
+                )
+            except Exception as exc:
+                error_str = str(exc).lower()
+                if "insufficient_quota" in error_str or "exceeded your current quota" in error_str:
+                    raise QuotaExceededError(f"OpenAI quota exceeded: {exc}")
+                if "rate" in error_str and "limit" in error_str:
+                    raise RateLimitError(f"OpenAI rate limit: {exc}")
+                raise EmbeddingProviderError(f"OpenAI batch embedding failed: {exc}")
 
         latency_ms = int((time.monotonic() - start) * 1000)
         usage = response.usage

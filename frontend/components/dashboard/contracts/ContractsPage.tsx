@@ -227,10 +227,8 @@ export function ContractsPage() {
                     const archiveReason = prompt(`Reason for archiving ${ids.length} contracts? (min 5 characters)`);
                     if (!archiveReason || archiveReason.trim().length < 5) return;
                     Promise.allSettled(ids.map((id) =>
-                      fetch(`/api/v1/reviews/${id}`, {
-                        method: "DELETE",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ reason: archiveReason.trim() }),
+                      fetch(`/api/v1/reviews/${id}/status?status=closed&reason=${encodeURIComponent(archiveReason.trim())}`, {
+                        method: "POST",
                       }).then((res) => {
                         if (!res.ok) return res.text().then((text) => { throw new Error(text || `Archive failed (${res.status})`); });
                         return res;
@@ -275,10 +273,8 @@ export function ContractsPage() {
                 {
                   const archiveReason = prompt("Reason for archiving this contract? (min 5 characters)");
                   if (!archiveReason || archiveReason.trim().length < 5) break;
-                  fetch(`/api/v1/reviews/${contractId}`, {
-                    method: "DELETE",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ reason: archiveReason.trim() }),
+                  fetch(`/api/v1/reviews/${contractId}/status?status=closed&reason=${encodeURIComponent(archiveReason.trim())}`, {
+                    method: "POST",
                   }).then((res) => {
                     if (!res.ok) {
                       return res.text().then((text) => { throw new Error(text || `Archive failed (${res.status})`); });

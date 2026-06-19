@@ -10,7 +10,7 @@ import { NegotiationIntelPanel, VendorBenchmarkTable } from "./NegotiationIntel"
 import { BenchmarkDetailDrawer } from "./BenchmarkDetailDrawer";
 import { BenchmarkFilterBar } from "./BenchmarkFilterBar";
 import { useBenchmarkDashboard } from "@/services/hooks/useBenchmarks";
-import type { ClauseBenchmark, BenchmarkFilterState } from "./types";
+import type { ClauseBenchmark, BenchmarkFilterState, MarketInsight, VendorBenchmark, NegotiationIntel, ComplianceBenchmark, ClauseLibrary } from "./types";
 
 const defaultFilters: BenchmarkFilterState = {
   industry: "", geography: "", contractType: "", clauseCategory: "", vendorType: "", companySize: "", regulation: "", dateRange: "",
@@ -24,11 +24,54 @@ export function BenchmarkPage() {
   const benchmarkKpis = dashboardData?.kpis ?? [];
   const clauseBenchmarks = dashboardData?.clause_benchmarks ?? [];
   const industryComparisons = dashboardData?.industry_corpora ?? [];
-  const marketInsights = [];
-  const vendorBenchmarks = [];
-  const negotiationIntel = [];
-  const complianceBenchmarks = [];
-  const clauseLibrary = [];
+  // Derive market insights from clause benchmarks when no dedicated endpoint
+  const marketInsights: MarketInsight[] = clauseBenchmarks.length > 0
+    ? clauseBenchmarks
+        .filter((cb) => cb.deviation > 15)
+        .map((cb) => ({
+          id: `insight-${cb.clauseType}`,
+          title: `${cb.clauseType} — ${cb.deviationPercent > 0 ? "Above" : "Below"} Market`,
+          description: `Your ${cb.clauseType} clause scores ${cb.yourScore} vs market median ${cb.marketMedian} (${cb.deviationPercent > 0 ? "+" : ""}${cb.deviationPercent}% deviation)`,
+          severity: cb.deviationPercent > 30 ? "critical" : cb.deviationPercent > 15 ? "warning" : "info",
+          confidence: cb.confidence,
+          percentile: cb.percentile,
+          affectedClauses: [cb.clauseType],
+          recommendation: cb.deviationPercent > 0
+            ? `Consider negotiating ${cb.clauseType} terms closer to market median (${cb.marketMedian})`
+            : `Your ${cb.clauseType} terms are favorable — ensure they remain competitive`,
+          category: cb.category,
+          quickActions: [{ label: "View Details", action: `view-${cb.clauseType}` }],
+        }))
+    : [];
+  const vendorBenchmarks: VendorBenchmark[] = [];
+  const negotiationIntel: NegotiationIntel[] = clauseBenchmarks.length > 0
+    ? clauseBenchmarks.slice(0, 5).map((cb) => ({
+        clauseType: cb.clauseType,
+        leverageScore: Math.round((1 - Math.abs(cb.deviationPercent) / 100) * 100),
+        marketPosition: cb.deviation > 0
+          ? `Your ${cb.clauseType} is ${cb.deviationPercent}% above market median`
+          : `Your ${cb.clauseType} is ${Math.abs(cb.deviationPercent)}% below market median`,
+        recommendedPosition: `Target ${cb.clauseType} terms near P${Math.min(75, cb.percentile + 10)} market level`,
+        fallbackPositions: [
+          `Accept market median of ${cb.marketMedian}`,
+          `Propose ${Math.round((cb.yourScore + cb.marketMedian) / 2)} as compromise`,
+        ],
+        vendorFavorability: cb.direction === "above_market" || cb.direction === "far_above" ? 75 : 40,
+        confidence: cb.confidence,
+      }))
+    : [];
+  const complianceBenchmarks: ComplianceBenchmark[] = [];
+  const clauseLibrary: ClauseLibrary[] = clauseBenchmarks.length > 0
+    ? clauseBenchmarks.map((cb) => ({
+        clauseType: cb.clauseType,
+        frequency: cb.sampleSize,
+        trend: cb.trend,
+        riskScore: Math.round((1 - cb.percentile / 100) * 10),
+        industryStandard: cb.marketMedian.toString(),
+        commonVariations: Math.max(1, Math.round(cb.sampleSize / 10)),
+        lastUpdated: new Date().toISOString().split("T")[0],
+      }))
+    : [];
 
   const handleFilterChange = useCallback((key: keyof BenchmarkFilterState, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));

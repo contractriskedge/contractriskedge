@@ -62,22 +62,28 @@ class ReviewRepository(BaseRepository):
         return items, total or 0
 
     async def create_review(self, upload_id: str, tenant_id: str, created_by: str) -> ContractReview:
-        # Generate human-readable identifiers:
-        #   contract_number: C-202606-1
-        #   review_number:   CRev-202606-1
-        # Both share the same running number (x) so they stay in sync.
-        now = datetime.utcnow()
-        # Count existing contracts this month to derive running number
-        count_stmt = select(func.count()).select_from(ContractReview).where(
-            ContractReview.tenant_id == tenant_id,
-            ContractReview.created_at >= now.replace(day=1, hour=0, minute=0, second=0, microsecond=0),
-        )
-        running = (await self.session.scalar(count_stmt)) + 1
-        ym = now.strftime("%Y%m")
-        contract_number = f"C-{ym}-{running}"
-        review_number = f"CRev-{ym}-{running}"
+        """Create a review with a business-friendly contract number.
 
-        metadata = {"contract_number": contract_number}
+        Contract number format: {TYPE}-{YYYYMM}-{RUNNING:04d}
+        Review number format:   {TYPE}REV-{YYYYMM}-{RUNNING:04d}-R1
+
+        Running numbers are PER TYPE (not global), using the business_id_sequences
+        table for atomic increment under concurrent uploads.
+        """
+        now = datetime.utcnow()
+        ym = now.strftime("%Y%m")
+
+        # Derive contract type prefix from the upload filename (initial guess)
+        prefix = await self._derive_contract_prefix(upload_id, tenant_id)
+
+        # Get per-type running number using atomic sequence
+        running = await self._next_contract_sequence(tenant_id, prefix, ym)
+        running_padded = f"{running:04d}"
+
+        contract_number = f"{prefix}-{ym}-{running_padded}"
+        review_number = f"{prefix}REV-{ym}-{running_padded}-R1"
+
+        metadata = {"contract_number": contract_number, "contract_type_prefix": prefix}
         review = ContractReview(
             upload_id=upload_id,
             tenant_id=tenant_id,
@@ -88,6 +94,181 @@ class ReviewRepository(BaseRepository):
         self.session.add(review)
         await self.session.flush()
         return review
+
+    async def _next_contract_sequence(self, tenant_id: str, prefix: str, ym: str) -> int:
+        """Atomically get the next running number for a contract type prefix.
+
+        Uses the business_id_sequences table with ON CONFLICT for thread-safe increment.
+        Sequence key format: CNT-{prefix}-{tenant_id}-{ym}
+        """
+        seq_key = f"CNT-{prefix}-{tenant_id}-{ym}"
+        try:
+            result = await self.session.execute(
+                text("""
+                    INSERT INTO business_id_sequences (sequence_key, tenant_id, current_value)
+                    VALUES (:key, :tid, 1)
+                    ON CONFLICT (sequence_key) DO UPDATE
+                        SET current_value = business_id_sequences.current_value + 1
+                    RETURNING current_value
+                """),
+                {"key": seq_key, "tid": tenant_id},
+            )
+            row = result.fetchone()
+            return row[0] if row else 1
+        except Exception:
+            # Fallback: count existing
+            logger.warning("business_id_sequences not available, using COUNT fallback")
+            count_stmt = select(func.count()).select_from(ContractReview).where(
+                ContractReview.tenant_id == tenant_id,
+                ContractReview.created_at >= datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0),
+                ContractReview.document_metadata["contract_number"].astext.ilike(f"{prefix}-{ym}%"),
+            )
+            return (await self.session.scalar(count_stmt)) + 1
+
+    async def update_contract_type(self, review_id: str, tenant_id: str, new_prefix: str) -> tuple[str, str]:
+        """Update contract number when AI detects a different contract type.
+
+        Called AFTER AI analysis completes and detects the actual contract type.
+        If the prefix has changed (e.g. CNTRCT → NDA), regenerates the contract
+        and review numbers with the correct prefix.
+
+        Returns: (new_contract_number, new_review_number)
+        """
+        review = await self.get_review(review_id, tenant_id)
+        if not review:
+            return ("", "")
+
+        old_prefix = (review.document_metadata or {}).get("contract_type_prefix", "")
+        if old_prefix == new_prefix:
+            # Already correct — nothing to do
+            cn = (review.document_metadata or {}).get("contract_number", "")
+            return (cn, review.review_number or "")
+
+        now = datetime.utcnow()
+        ym = now.strftime("%Y%m")
+        running = await self._next_contract_sequence(tenant_id, new_prefix, ym)
+        running_padded = f"{running:04d}"
+
+        new_contract_number = f"{new_prefix}-{ym}-{running_padded}"
+        # Preserve the revision number from the old review_number
+        import re as _re
+        old_rev = review.review_number or ""
+        rev_match = _re.search(r"(R\d+)$", old_rev)
+        rev_suffix = rev_match.group(1) if rev_match else "R1"
+        new_review_number = f"{new_prefix}REV-{ym}-{running_padded}-{rev_suffix}"
+
+        metadata = dict(review.document_metadata or {})
+        metadata["contract_number"] = new_contract_number
+        metadata["contract_type_prefix"] = new_prefix
+        metadata["previous_contract_number"] = (review.document_metadata or {}).get("contract_number", "")
+
+        stmt = (
+            update(ContractReview)
+            .where(ContractReview.review_id == review_id, ContractReview.tenant_id == tenant_id)
+            .values(
+                review_number=new_review_number,
+                document_metadata=metadata,
+                updated_at=func.now(),
+            )
+        )
+        await self.session.execute(stmt)
+        await self.session.flush()
+
+        logger.info(
+            "Contract type updated: review=%s old_prefix=%s new_prefix=%s old_cn=%s new_cn=%s",
+            review_id, old_prefix, new_prefix,
+            (review.document_metadata or {}).get("contract_number", ""),
+            new_contract_number,
+        )
+        return (new_contract_number, new_review_number)
+
+    async def bump_review_revision(self, review_id: str, tenant_id: str) -> str:
+        """Increment the revision number for a re-analyzed review.
+
+        Takes NDAREV-202606-0001-R1 → NDAREV-202606-0001-R2
+        Returns the new review_number.
+        """
+        review = await self.get_review(review_id, tenant_id)
+        if not review:
+            return ""
+
+        current = review.review_number or ""
+        import re as _re
+        match = _re.match(r"^(.+?-R)(\d+)$", current)
+        if match:
+            base = match.group(1)
+            rev_num = int(match.group(2)) + 1
+            new_number = f"{base}{rev_num}"
+        else:
+            # If no revision suffix, append -R2
+            new_number = f"{current}-R2" if current else ""
+
+        if new_number:
+            stmt = (
+                update(ContractReview)
+                .where(ContractReview.review_id == review_id, ContractReview.tenant_id == tenant_id)
+                .values(review_number=new_number, updated_at=func.now())
+            )
+            await self.session.execute(stmt)
+        return new_number
+
+    async def _derive_contract_prefix(self, upload_id: str, tenant_id: str) -> str:
+        """Derive contract type prefix from the upload filename.
+
+        Maps known filename patterns to type prefixes:
+          NDA-*, nda_* → NDA
+          MSA-*, msa_* → MSA
+          SOW-*, sow_* → SOW
+          DPA-*, dpa_* → DPA
+          EMP-*, emp_* → EMP
+          PUR-*, pur_* → PUR
+          SaaS-*, saas_* → SaaS
+          VEN-*, ven_*, vendor_* → VEN
+          LEASE-*, lease_*, lea_* → LEASE
+          AMEND-*, amend_*, amend_* → AMEND
+          Default → CNTRCT
+        """
+        try:
+            from app.domains.ingestion.models import UploadSession
+            result = await self.session.execute(
+                select(UploadSession.filename).where(
+                    UploadSession.upload_id == upload_id,
+                    UploadSession.tenant_id == tenant_id,
+                )
+            )
+            row = result.fetchone()
+            if not row or not row.filename:
+                return "CNTRCT"
+
+            name = row.filename.upper()
+            # Check prefixes in order
+            for pattern, pfx in [
+                ("NDA", "NDA"), ("MSA", "MSA"), ("SOW", "SOW"),
+                ("DPA", "DPA"), ("EMP_", "EMP"), ("PUR_", "PUR"),
+                ("SAAS", "SaaS"), ("VEN_", "VEN"), ("VENDOR_", "VEN"),
+                ("LEASE", "LEASE"), ("LEA_", "LEASE"),
+                ("AMEND", "AMEND"), ("AMED_", "AMEND"),
+            ]:
+                if name.startswith(pattern):
+                    return pfx
+            # Check if filename contains common keywords
+            for keyword, pfx in [
+                ("NON-DISCLOSURE", "NDA"), ("CONFIDENTIALITY", "NDA"),
+                ("MASTER SERVICE", "MSA"),
+                ("STATEMENT OF WORK", "SOW"), ("SCOPE OF WORK", "SOW"),
+                ("DATA PROCESSING", "DPA"),
+                ("EMPLOYMENT", "EMP"),
+                ("PURCHASE", "PUR"),
+                ("VENDOR", "VEN"),
+                ("SOFTWARE AS A SERVICE", "SaaS"),
+                ("LEASE", "LEASE"),
+                ("AMENDMENT", "AMEND"),
+            ]:
+                if keyword in name:
+                    return pfx
+            return "CNTRCT"
+        except Exception:
+            return "CNTRCT"
 
     async def get_review(self, review_id: str, tenant_id: str) -> Optional[ContractReview]:
         from app.domains.ingestion.models import UploadSession

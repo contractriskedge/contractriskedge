@@ -395,8 +395,25 @@ class RuleEvaluator:
 class DeviationDetector:
     """Detects deviations between contract clauses and playbook standards."""
 
-    @staticmethod
+    def __init__(self, deviation_thresholds: Optional[dict] = None):
+        """Configure with playbook-level thresholds.
+
+        Args:
+            deviation_thresholds: Dict with keys ``similarity`` (default 0.5)
+                and ``forbidden_similarity`` (default 0.3). Pass ``None`` to
+                use defaults.
+        """
+        self.similarity_threshold = (
+            deviation_thresholds.get("similarity", 0.5)
+            if deviation_thresholds else 0.5
+        )
+        self.forbidden_similarity_threshold = (
+            deviation_thresholds.get("forbidden_similarity", 0.3)
+            if deviation_thresholds else 0.3
+        )
+
     def detect_deviations(
+        self,
         clauses: list[ExtractedClause],
         standards: list[ClauseStandard],
         rule_results: list[RuleEvaluationResult],
@@ -424,7 +441,7 @@ class DeviationDetector:
             cat = clause.category
             if cat in standards_by_category:
                 for std in standards_by_category[cat]:
-                    deviation = DeviationDetector._compare_clause(clause, std)
+                    deviation = self._compare_clause(clause, std)
                     if deviation:
                         deviations.append(deviation)
 
@@ -433,7 +450,7 @@ class DeviationDetector:
                     continue
                 if _category(std) != cat:
                     continue
-                deviation = DeviationDetector._compare_clause(clause, std)
+                deviation = self._compare_clause(clause, std)
                 if deviation:
                     deviations.append(deviation)
 
@@ -447,14 +464,13 @@ class DeviationDetector:
                         expected=f"Rule: {result.rule_name}",
                         actual=f"Violation: {result.details or 'Rule conditions matched'}",
                         severity=result.deviation_severity,
-                        score=DeviationDetector._severity_to_score(result.deviation_severity),
+                        score=self._severity_to_score(result.deviation_severity),
                         rule_id=result.rule_id,
                     ))
 
         return deviations
 
-    @staticmethod
-    def _compare_clause(clause: ExtractedClause, standard: ClauseStandard) -> Optional[DeviationResult]:
+    def _compare_clause(self, clause: ExtractedClause, standard: ClauseStandard) -> Optional[DeviationResult]:
         """Compare an extracted clause against a clause standard."""
         # Simple text overlap comparison
         clause_text = clause.text.lower()
@@ -479,7 +495,7 @@ class DeviationDetector:
 
         # Check for forbidden language
         if std_type == "forbidden":
-            if jaccard > 0.3:  # Significant overlap with forbidden clause
+            if jaccard > self.forbidden_similarity_threshold:  # Configurable threshold
                 return DeviationResult(
                     clause_category=clause.category,
                     clause_text_snippet=clause.text_snippet[:200],
@@ -494,7 +510,7 @@ class DeviationDetector:
 
         # For approved/preferred clauses — check if contract clause matches
         if std_type in ("approved", "preferred"):
-            if jaccard < 0.5:  # Low similarity to standard
+            if jaccard < self.similarity_threshold:  # Configurable threshold
                 severity = "high" if standard.clause_type == "approved" else "medium"
                 return DeviationResult(
                     clause_category=clause.category,
@@ -509,8 +525,7 @@ class DeviationDetector:
 
         return None
 
-    @staticmethod
-    def _severity_to_score(severity: str) -> float:
+    def _severity_to_score(self, severity: str) -> float:
         mapping = {"critical": 0.9, "high": 0.7, "medium": 0.5, "low": 0.3, "info": 0.1}
         return mapping.get(severity, 0.5)
 
@@ -681,10 +696,24 @@ class ClauseRecommender:
 
 
 class RiskScorer:
-    """Calculates overall risk score from evaluation results."""
+    """Calculates overall risk score from evaluation results.
 
-    @staticmethod
+    Uses configurable severity weights and risk level thresholds from the
+    playbook configuration. Falls back to sensible defaults if not provided.
+    """
+
+    def __init__(self, risk_weights: Optional[dict] = None,
+                 risk_levels: Optional[dict] = None):
+        self.weights = dict(risk_weights or {
+            "critical": 5.0, "high": 3.0, "medium": 2.0,
+            "low": 1.0, "info": 0.1,
+        })
+        self.levels = dict(risk_levels or {
+            "critical": 8.0, "high": 5.0, "medium": 3.0,
+        })
+
     def calculate(
+        self,
         rule_results: list[RuleEvaluationResult],
         deviations: list[DeviationResult],
     ) -> tuple[Optional[float], Optional[str]]:
@@ -702,29 +731,15 @@ class RiskScorer:
         # Score from rule results
         for result in rule_results:
             if result.violation_triggered:
-                weight = 1.0
-                if result.deviation_severity == "critical":
-                    weight = 5.0
-                elif result.deviation_severity == "high":
-                    weight = 3.0
-                elif result.deviation_severity == "medium":
-                    weight = 2.0
-                elif result.deviation_severity == "low":
-                    weight = 1.0
-
+                sev = (result.deviation_severity or "low").lower()
+                weight = self.weights.get(sev, 1.0)
                 total_score += weight * 10.0  # Base score per violation
                 weights += weight
 
         # Score from deviations
         for deviation in deviations:
-            weight = 1.0
-            if deviation.severity == "critical":
-                weight = 5.0
-            elif deviation.severity == "high":
-                weight = 3.0
-            elif deviation.severity == "medium":
-                weight = 2.0
-
+            sev = (deviation.severity or "low").lower()
+            weight = self.weights.get(sev, 1.0)
             total_score += weight * deviation.score * 10.0
             weights += weight
 
@@ -733,12 +748,15 @@ class RiskScorer:
 
         normalized = total_score / weights
 
-        # Determine risk level
-        if normalized >= 8.0:
+        # Determine risk level from configurable thresholds
+        crit = self.levels.get("critical", 8.0)
+        hi = self.levels.get("high", 5.0)
+        med = self.levels.get("medium", 3.0)
+        if normalized >= crit:
             level = "critical"
-        elif normalized >= 5.0:
+        elif normalized >= hi:
             level = "high"
-        elif normalized >= 3.0:
+        elif normalized >= med:
             level = "medium"
         else:
             level = "low"
@@ -764,8 +782,24 @@ class PolicyEngine:
         standards: list[ClauseStandard],
         thresholds: list[ApprovalThreshold],
         ctx: EvaluationContext,
+        deviation_thresholds: Optional[dict] = None,
+        risk_weights: Optional[dict] = None,
+        risk_levels: Optional[dict] = None,
     ) -> EvaluationResult:
-        """Run full policy evaluation pipeline."""
+        """Run full policy evaluation pipeline.
+
+        Args:
+            rules: Active policy rules to evaluate.
+            standards: Clause standards for deviation detection.
+            thresholds: Approval thresholds.
+            ctx: Evaluation context with contract data.
+            deviation_thresholds: Optional playbook config for similarity
+                thresholds (keys: ``similarity``, ``forbidden_similarity``).
+            risk_weights: Optional playbook config for severity weights
+                (keys: ``critical``, ``high``, ``medium``, ``low``, ``info``).
+            risk_levels: Optional playbook config for risk level boundaries
+                (keys: ``critical``, ``high``, ``medium``).
+        """
         result = EvaluationResult()
 
         # 1. Sort rules by priority
@@ -789,8 +823,9 @@ class PolicyEngine:
             else:
                 result.rules_passed += 1
 
-        # 3. Detect deviations
-        result.deviations = DeviationDetector.detect_deviations(
+        # 3. Detect deviations with configurable thresholds
+        detector = DeviationDetector(deviation_thresholds)
+        result.deviations = detector.detect_deviations(
             ctx.clauses, standards, result.rule_results,
         )
 
@@ -804,8 +839,9 @@ class PolicyEngine:
         # 5. Generate clause recommendations
         result.recommendations = ClauseRecommender.recommend(result.deviations, standards)
 
-        # 6. Calculate risk score
-        result.risk_score, result.risk_level = RiskScorer.calculate(
+        # 6. Calculate risk score with configurable weights
+        scorer = RiskScorer(risk_weights, risk_levels)
+        result.risk_score, result.risk_level = scorer.calculate(
             result.rule_results, result.deviations,
         )
 

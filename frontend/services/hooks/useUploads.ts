@@ -36,7 +36,10 @@ export const uploadKeys = {
 
 // ── List Uploads ──────────────────────────────────────────────────
 
-export function useUploads(params?: { page?: number; page_size?: number }) {
+export function useUploads(
+  params?: { page?: number; page_size?: number },
+  options?: { forcePolling?: boolean },
+) {
   const terminalStates = ["review_ready", "failed", "cancelled", "quarantined"];
 
   return useQuery({
@@ -47,6 +50,7 @@ export function useUploads(params?: { page?: number; page_size?: number }) {
     refetchOnWindowFocus: true,
     retry: 2,
     refetchInterval: (query) => {
+      if (options?.forcePolling) return 3_000;
       const rows = query.state.data?.data ?? [];
       const hasActive = rows.some((u) => !terminalStates.includes(u.ingestion_state));
       return hasActive ? 3_000 : false;

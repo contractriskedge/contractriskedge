@@ -27,7 +27,7 @@ from app.domains.ai.schemas import (
 )
 from app.domains.ai.guardrails import GuardrailEngine
 from app.domains.ai.llm import (
-    OpenAIProvider, LLMRequest, LLMResponse,
+    OpenAIProvider, LLMRequest, LLMResponse, RateLimitError,
     StructuredOutputParser, llm_registry,
 )
 from app.domains.ai.orchestration import (
@@ -54,6 +54,7 @@ from app.domains.tenant_config.context_provider import TenantConfigContextProvid
 from app.domains.tenant_config.service import ScoringOverrideService
 from app.kernel.events.bus import EventBus
 from app.kernel.security.auth import UserContext
+from app.kernel.database.session_utils import release_session_before_io, safe_session_rollback
 
 logger = logging.getLogger(__name__)
 
@@ -264,19 +265,35 @@ class AIService:
         provider = OpenAIProvider(api_key=settings.openai_api_key)
         llm_registry.register(provider)
 
+        # Register DeepSeek as fallback if API key is configured
+        if settings.deepseek_api_key:
+            from app.domains.ai.llm import DeepSeekProvider
+            deepseek = DeepSeekProvider(api_key=settings.deepseek_api_key)
+            llm_registry.register(deepseek)
+            logger.info("DeepSeek provider registered for hybrid routing")
+
+        # Determine primary provider: use fallback order first entry if hybrid routing
+        fallback_order = getattr(settings, "ai_provider_fallback_order", [provider.provider_name])
+        primary_name = fallback_order[0] if fallback_order else provider.provider_name
+        primary = llm_registry.get(primary_name) or provider
+        logger.info(
+            "AI analysis primary provider: %s (fallback chain: %s)",
+            primary.provider_name, fallback_order,
+        )
+
         # 2. Retrieve chunks and render prompts for execution planning
         chunks = await self.vector_repo.get_chunks_by_upload(upload_id, self.tenant_id)
         if not chunks:
             raise ValueError(f"No chunks found for upload {upload_id}")
 
-        prompt_text, analysis_request, prompt_version = await self._build_risk_analysis_request(chunks, provider)
+        prompt_text, analysis_request, prompt_version = await self._build_risk_analysis_request(chunks, primary)
 
         planner = AIExecutionPlanner(tenant_id=self.tenant_id)
         execution_plan = planner.build(
             operation_type="risk_review",
             model=analysis_request.model or "gpt-4o",
-            provider_name=provider.provider_name,
-            preferred_fallbacks=getattr(settings, "ai_provider_fallback_order", [provider.provider_name]),
+            provider_name=primary.provider_name,
+            preferred_fallbacks=fallback_order,
             metadata={
                 "prompt_version": prompt_version,
                 "analysis_type": analysis_type,
@@ -300,6 +317,7 @@ class AIService:
         )
 
         orchestrator = AIExecutionOrchestrator(self.ai_repo.session, self.tenant_id, self.user.id if self.user else None)
+        await release_session_before_io(self.ai_repo.session)
         outcome = await orchestrator.execute(envelope)
         risk_result = outcome.response
 
@@ -329,8 +347,8 @@ class AIService:
             total_tokens = 0
             total_cost = 0.0
 
-            # 4. Execute risk analysis
-            risk_result = await provider.complete(analysis_request)
+            # 4. Use risk result from orchestrator (avoids duplicate GPT call)
+            risk_result = outcome.response
             total_tokens += risk_result.total_tokens if hasattr(risk_result, 'total_tokens') else 0
             total_cost += risk_result.cost_usd if hasattr(risk_result, 'cost_usd') else 0.0
 
@@ -396,7 +414,18 @@ class AIService:
             # 6. Generate redlines if full analysis
             if analysis_type == "full" or analysis_type == "redline_only":
                 try:
-                    redline_results = await self._generate_redlines(chunks, analysis_result.findings, provider)
+                    # Hybrid routing: use GPT-4o for redlines even if risk analysis
+                    # used DeepSeek, since redlines need higher quality.
+                    redline_provider = primary
+                    if settings.ai_hybrid_routing and primary.provider_name == "deepseek":
+                        gpt_provider = OpenAIProvider(api_key=settings.openai_api_key)
+                        llm_registry.register(gpt_provider)
+                        redline_provider = gpt_provider
+                        logger.info(
+                            "Hybrid routing: risk analysis used %s, redlines use GPT-4o",
+                            primary.provider_name,
+                        )
+                    redline_results = await self._generate_redlines(chunks, analysis_result.findings, redline_provider)
                     analysis_result.redlines = redline_results
                 except Exception as redline_err:
                     logger.error("Failed to generate redlines for upload %s: %s", upload_id, redline_err)
@@ -434,6 +463,7 @@ class AIService:
                     upload_id=upload_id,
                     run_id=str(run.run_id),
                     risk_score=analysis_result.risk_score,
+                    ai_confidence=analysis_result.confidence,
                     findings_count=len(analysis_result.findings),
                     redlines_count=len(analysis_result.redlines),
                 )
@@ -457,7 +487,7 @@ class AIService:
         except Exception as exc:
             logger.error("AI analysis failed for upload %s: %s", upload_id, exc, exc_info=True)
             try:
-                await self.ai_repo.session.rollback()
+                await safe_session_rollback(self.ai_repo.session)
                 await self.ai_repo.fail_run(run.run_id, str(exc))
                 await self.ai_repo.session.commit()
             except Exception as rollback_exc:
@@ -484,12 +514,20 @@ class AIService:
         upload_id: str,
         run,
     ) -> Optional[ContractReview]:
-        """Idempotent handoff: ensure a review exists for a completed AI run."""
+        """Idempotent handoff: ensure a review exists for a completed AI run.
+
+        Also runs contract type detection on existing reviews that may still have
+        a default CNTRCT prefix from initial creation before AI analysis.
+        """
         from app.domains.review.repository import ReviewRepository
 
         review_repo = ReviewRepository(self.ai_repo.session, tenant_id=self.tenant_id)
         existing = await review_repo.get_review_by_upload(upload_id, self.tenant_id)
         if existing:
+            # Run contract type detection on existing reviews that may still have
+            # the default CNTRCT prefix (e.g. from recovery daemon or prior runs
+            # that completed before type detection was added).
+            await self._apply_contract_type_detection(existing, str(run.run_id))
             await self._mark_review_ready_if_needed(upload_id)
             return existing
 
@@ -509,6 +547,50 @@ class AIService:
             upload_id, review.review_id,
         )
         return review
+
+    async def _apply_contract_type_detection(
+        self,
+        review: "ContractReview",
+        run_id: str,
+    ) -> None:
+        """Run contract type detection on an existing review using AI findings.
+
+        Extracted as a shared helper used by both _ensure_review_from_completed_run
+        and _populate_review_from_ai to avoid duplication.
+        """
+        try:
+            from app.domains.ai.models import AIFinding
+            from sqlalchemy import select
+
+            stmt = select(AIFinding).where(AIFinding.run_id == run_id)
+            ai_findings = (await self.ai_repo.session.execute(stmt)).scalars().all()
+            if not ai_findings:
+                return
+
+            old_prefix = (review.document_metadata or {}).get("contract_type_prefix", "")
+            detected_type = self._detect_contract_type(ai_findings)
+
+            if detected_type and detected_type != old_prefix:
+                from app.domains.review.repository import ReviewRepository as RR
+                rr = RR(self.ai_repo.session, tenant_id=self.tenant_id)
+                new_cn, new_rn = await rr.update_contract_type(
+                    str(review.review_id), self.tenant_id, detected_type,
+                )
+                if new_cn:
+                    review.document_metadata["contract_number"] = new_cn
+                    review.document_metadata["contract_type_prefix"] = detected_type
+                    review.review_number = new_rn
+                    logger.info(
+                        "Contract type updated (from _ensure_review_from_completed_run): "
+                        "review=%s %s → %s (%s)",
+                        review.review_id, old_prefix, detected_type, new_cn,
+                    )
+        except Exception as ct_exc:
+            logger.warning(
+                "Contract type detection failed in _ensure_review_from_completed_run "
+                "for review %s: %s",
+                review.review_id, ct_exc,
+            )
 
     async def _emit_review_ready(self, review: ContractReview, upload_id: str) -> None:
         """Broadcast that a review is ready for the review workspace."""
@@ -538,8 +620,9 @@ class AIService:
         upload_id: str,
         run_id: str,
         risk_score: float,
-        findings_count: int,
-        redlines_count: int,
+        ai_confidence: float = 0.0,
+        findings_count: int = 0,
+        redlines_count: int = 0,
     ) -> ContractReview:
         """Create or update a ContractReview and import AI findings/redlines.
 
@@ -730,6 +813,7 @@ class AIService:
         review.document_metadata = {
             **current_meta,
             "risk_score": risk_score,
+            "ai_confidence": ai_confidence,
             "last_analysis_run_id": run_id,
         }
 
@@ -761,7 +845,7 @@ class AIService:
                 tenant_id=self.tenant_id,
             )
             backfill = await review_svc.backfill_mitigation_redlines_for_gaps(str(review.review_id))
-            if backfill.get("backfilled"):
+            if isinstance(backfill, dict) and backfill.get("backfilled"):
                 review.redline_count = backfill["coverage_after"]["redlines"]
                 await self.ai_repo.session.flush()
                 logger.info(
@@ -776,7 +860,81 @@ class AIService:
                 review.review_id, backfill_exc,
             )
 
+        # ── Contract Type Detection & Number Update ────────────────────────
+        # After AI analysis, detect the contract type from findings and update
+        # the contract number prefix if it was a best-guess (e.g. CNTRCT → NDA).
+        try:
+            old_prefix = (review.document_metadata or {}).get("contract_type_prefix", "")
+            detected_type = self._detect_contract_type(ai_findings)
+
+            if detected_type and detected_type != old_prefix:
+                from app.domains.review.repository import ReviewRepository as RR
+                rr = RR(self.ai_repo.session, tenant_id=self.tenant_id)
+                new_cn, new_rn = await rr.update_contract_type(
+                    str(review.review_id), self.tenant_id, detected_type,
+                )
+                if new_cn:
+                    review.document_metadata["contract_number"] = new_cn
+                    review.document_metadata["contract_type_prefix"] = detected_type
+                    review.review_number = new_rn
+                    logger.info(
+                        "Contract type updated: review=%s %s → %s (%s)",
+                        review.review_id, old_prefix, detected_type, new_cn,
+                    )
+        except Exception as ct_exc:
+            logger.warning("Contract type detection failed for review %s: %s", review.review_id, ct_exc)
+
         return review
+
+    def _detect_contract_type(self, ai_findings: list) -> Optional[str]:
+        """Detect contract type from AI analysis findings.
+
+        Uses the clause types present in findings to infer the contract type.
+        Falls back to None if detection is uncertain.
+        """
+        if not ai_findings:
+            return None
+
+        # Collect unique clause types from findings
+        clause_types = set()
+        for f in ai_findings:
+            ct = getattr(f, "clause_type", None) or ""
+            clause_types.add(ct.lower().strip())
+
+        ct_str = " ".join(clause_types)
+
+        # Scoring-based detection
+        scores: dict[str, int] = {}
+        for keyword, ctype in [
+            ("non-disclosure", "NDA"), ("confidentiality", "NDA"),
+            ("mutual", "NDA"), ("nda", "NDA"),
+            ("master service", "MSA"), ("msa", "MSA"),
+            ("statement of work", "SOW"), ("sow", "SOW"), ("scope of work", "SOW"),
+            ("data processing", "DPA"), ("dpa", "DPA"),
+            ("employment", "EMP"), ("employee", "EMP"), ("emp_", "EMP"),
+            ("purchase", "PUR"), ("pur_", "PUR"), ("procurement", "PUR"),
+            ("vendor", "VEN"), ("ven_", "VEN"), ("supplier", "VEN"),
+            ("saas", "SaaS"), ("software as a service", "SaaS"), ("subscription", "SaaS"),
+            ("lease", "LEASE"), ("lease_", "LEASE"), ("rental", "LEASE"),
+            ("amendment", "AMEND"), ("amend_", "AMEND"), ("modification", "AMEND"),
+            ("service agreement", "MSA"), ("professional service", "SOW"),
+            ("license", "SaaS"), ("licensing", "SaaS"),
+            ("construction", "PUR"), ("supply", "PUR"),
+            ("non-compete", "EMP"), ("severance", "EMP"),
+        ]:
+            if keyword in ct_str:
+                scores[ctype] = scores.get(ctype, 0) + 1
+
+        if not scores:
+            return None
+
+        # Return the type with the highest score
+        best = max(scores, key=scores.get)
+        confidence = scores[best] / max(sum(scores.values()), 1)
+        # Only return if confidence is reasonable
+        if confidence >= 0.3 or scores[best] >= 2:
+            return best
+        return None
 
     async def _execute_risk_analysis(self, chunks: list, provider: OpenAIProvider) -> LLMResponse:
         """Execute risk analysis prompt against contract chunks."""
@@ -813,8 +971,8 @@ class AIService:
         into the LLM prompt so the AI evaluates clauses against company standards.
         """
         chunk_data = [
-            {"text": c.text[:2000], "page_numbers": c.page_numbers or [1]}
-            for c in chunks[:50]
+            {"text": c.text[: settings.ai_analysis_max_chunk_chars], "page_numbers": c.page_numbers or [1]}
+            for c in chunks[: settings.ai_analysis_max_chunks]
         ]
 
         # ── Tenant Configuration Injection ────────────────────────────
@@ -876,10 +1034,12 @@ class AIService:
         )
 
         template = prompt_registry.get("risk_analysis")
+        # Use provider-appropriate model name (DeepSeek uses deepseek-v4-flash, not gpt-4o)
+        provider_model = provider.supported_models[0] if provider.supported_models else "gpt-4o"
         request = LLMRequest(
             prompt=prompt,
             system_prompt=template.system_prompt if template else None,
-            model=template.default_model if template else "gpt-4o",
+            model=provider_model,
             temperature=template.default_temperature if template else 0.1,
             max_tokens=template.default_max_tokens if template else 4096,
             response_format={"type": "json_object"},
@@ -923,8 +1083,8 @@ class AIService:
     ) -> list[RedlineSuggestion]:
         """Generate redline suggestions for actionable findings (critical/high/medium).
 
-        Integrates with the Clause Playbook to inject approved/preferred/fallback
-        language into the AI prompt, ensuring redlines align with company standards.
+        Uses a batched prompt — ALL eligible findings are sent in a single GPT call
+        to dramatically reduce API usage and rate limit pressure.
         """
         eligible = _findings_eligible_for_redlines(findings)
         if not eligible and findings:
@@ -933,13 +1093,10 @@ class AIService:
                 len(findings),
                 sorted({f.severity for f in findings}),
             )
-        redlines = []
+        if not eligible:
+            return []
 
-        # Initialize playbook context provider for approved language injection
-        from app.domains.playbook.context_provider import PlaybookContextProvider
-        playbook_provider = PlaybookContextProvider(self.ai_repo.session, self.tenant_id)
-
-        # Load tenant config context for clause override injection
+        # Load tenant config context for clause override injection (shared across findings)
         tenant_clause_overrides: dict[str, str] = {}
         try:
             config_provider = TenantConfigContextProvider(
@@ -955,6 +1112,11 @@ class AIService:
                 exc,
             )
 
+        # Build batched finding data with playbook context per finding
+        from app.domains.playbook.context_provider import PlaybookContextProvider
+        playbook_provider = PlaybookContextProvider(self.ai_repo.session, self.tenant_id)
+
+        batched_findings = []
         for finding in eligible:
             relevant_text = _chunk_text_for_indices(chunks, finding.chunk_indices)
             if not relevant_text.strip():
@@ -966,7 +1128,7 @@ class AIService:
                 )
                 continue
 
-            # Fetch playbook context for this clause type (approved/preferred/fallback language)
+            # Fetch playbook context for this clause type
             playbook_context = ""
             try:
                 pb_ctx = await playbook_provider.get_context(
@@ -994,41 +1156,72 @@ class AIService:
                         "Use this language as the primary basis for your proposed_text."
                     )
 
-            # Use v4 prompt — playbook-aware, forbids section numbering, returns risk traceability
-            prompt = prompt_registry.render(
-                "redline_generation", version="4.0.0",
-                clause_type=finding.clause_type,
-                original_text=relevant_text[:2000],
-                context=f"Risk: {finding.title}\nDescription: {finding.description}",
-                playbook_context=playbook_context,
-            )
+            batched_findings.append({
+                "clause_type": finding.clause_type,
+                "original_text": relevant_text[:2000],
+                "title": finding.title,
+                "description": finding.description,
+                "playbook_context": playbook_context,
+                "_finding": finding,
+            })
 
-            template = prompt_registry.get("redline_generation", version="4.0.0")
-            request = LLMRequest(
-                prompt=prompt,
-                system_prompt=template.system_prompt if template else None,
-                model=template.default_model if template else "gpt-4o",
-                temperature=0.2,
-                response_format={"type": "json_object"},
-            )
+        if not batched_findings:
+            return []
 
-            try:
-                response = await provider.complete(request)
-                parsed = StructuredOutputParser.parse_json(response.content)
-                if parsed:
-                    proposed_text = _coerce_proposed_text(parsed.get("proposed_text", ""))
-                    rationale = parsed.get("rationale", "")
+        # Single batched GPT call for all findings
+        prompt = prompt_registry.render(
+            "redline_generation_batch", version=1,
+            findings=[
+                {
+                    "clause_type": bf["clause_type"],
+                    "original_text": bf["original_text"],
+                    "title": bf["title"],
+                    "description": bf["description"],
+                    "playbook_context": bf["playbook_context"],
+                }
+                for bf in batched_findings
+            ],
+        )
+
+        template = prompt_registry.get("redline_generation_batch", version=1)
+        request = LLMRequest(
+            prompt=prompt,
+            system_prompt=template.system_prompt if template else None,
+            model=template.default_model if template else "gpt-4o",
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+
+        redlines: list[RedlineSuggestion] = []
+        try:
+            await release_session_before_io(self.ai_repo.session)
+            response = await provider.complete(request)
+            parsed = StructuredOutputParser.parse_json(response.content)
+            if parsed and "redlines" in parsed:
+                for entry in parsed["redlines"]:
+                    finding_index = entry.get("finding_index", 1) - 1  # Convert 1-based to 0-based
+                    if finding_index < 0 or finding_index >= len(batched_findings):
+                        logger.warning("Batch redline finding_index %d out of range", finding_index + 1)
+                        continue
+
+                    bf = batched_findings[finding_index]
+                    finding = bf["_finding"]
+
+                    proposed_text = _coerce_proposed_text(entry.get("proposed_text", ""))
+                    rationale = entry.get("rationale", "")
                     if not isinstance(rationale, str):
                         rationale = _coerce_proposed_text(rationale)
-                    anchor_text = _coerce_proposed_text(parsed.get("anchor_text", ""))
-                    original_text = _coerce_proposed_text(parsed.get("original_text", ""))
-                    operation = normalize_operation(parsed.get("operation"))
+                    anchor_text = _coerce_proposed_text(entry.get("anchor_text", ""))
+                    original_text = _coerce_proposed_text(entry.get("original_text", ""))
+                    operation = normalize_operation(entry.get("operation"))
                     if not operation:
                         operation = infer_operation(
                             original_text,
                             proposed_text,
                             clause_type=finding.clause_type,
                         )
+
+                    relevant_text = bf["original_text"]
                     if (
                         operation == RedlineOperation.INSERT
                         or is_chunk_mistaken_as_original(original_text, proposed_text)
@@ -1052,23 +1245,19 @@ class AIService:
                             anchor_text = infer_anchor_from_context(
                                 full_corpus or relevant_text[:2000], proposed_text,
                             )
-                    # For modification/replace: if no anchor, use a snippet of original_text
                     if not anchor_text.strip() and original_text.strip():
                         anchor_text = original_text.strip()[:200]
 
-                    # Strip AI-hallucinated section numbers from insert proposed_text
                     if operation == RedlineOperation.INSERT:
                         proposed_text = _strip_section_numbers(proposed_text)
 
                     if not proposed_text.strip():
                         logger.warning(
-                            "Redline LLM returned empty proposed_text for %s",
-                            finding.clause_type,
+                            "Batch redline returned empty proposed_text for finding %d (%s)",
+                            finding_index + 1, finding.clause_type,
                         )
                         continue
 
-                    # Calibrated confidence — derived from operation quality signals,
-                    # not from the LLM's self-reported score (which is always ~0.85).
                     confidence = _calibrate_confidence(
                         operation=operation.value,
                         severity=str(finding.severity.value if hasattr(finding.severity, "value") else finding.severity),
@@ -1077,11 +1266,10 @@ class AIService:
                         original_text=original_text,
                     )
 
-                    # Capture risk traceability chain from v3 prompt output
                     traceability = RiskTraceability(
-                        detected_risk=str(parsed.get("detected_risk", "") or ""),
-                        business_impact=str(parsed.get("business_impact", "") or ""),
-                        mitigation_strategy=str(parsed.get("mitigation_strategy", "") or ""),
+                        detected_risk=str(entry.get("detected_risk", "") or ""),
+                        business_impact=str(entry.get("business_impact", "") or ""),
+                        mitigation_strategy=str(entry.get("mitigation_strategy", "") or ""),
                     )
 
                     redlines.append(RedlineSuggestion(
@@ -1098,12 +1286,26 @@ class AIService:
                         ),
                         traceability=traceability,
                     ))
-            except Exception as exc:
-                logger.warning("Redline generation failed for %s: %s", finding.clause_type, exc)
-                continue
+            else:
+                logger.warning(
+                    "Batch redline response missing 'redlines' array: %s",
+                    str(parsed)[:200] if parsed else "null",
+                )
+        except RateLimitError:
+            # Rate-limited during redline generation — re-raise so Celery's
+            # autoretry_for can re-queue the entire task, giving redlines
+            # another chance instead of silently completing with 0 redlines.
+            logger.warning(
+                "Batch redline generation rate-limited, re-raising for task retry "
+                "(%d findings eligible)",
+                len(eligible),
+            )
+            raise
+        except Exception as exc:
+            logger.error("Batch redline generation failed: %s", exc, exc_info=True)
 
         logger.info(
-            "Generated %d redlines from %d findings (%d eligible)",
+            "Generated %d redlines from %d findings (%d eligible) — batched into 1 GPT call",
             len(redlines),
             len(findings),
             len(eligible),

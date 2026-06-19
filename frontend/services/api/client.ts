@@ -563,6 +563,11 @@ export interface UploadStatusResponse {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  ai_confidence?: number;
+  ocr_accuracy?: number;
+  classification_score?: number;
+  extraction_score?: number;
+  risk_score?: number;
 }
 
 export interface UploadResponse {

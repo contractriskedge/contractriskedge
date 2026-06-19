@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from pydantic import BaseModel, ValidationError
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.domains.ai.providers.capabilities import ProviderHealth
 
@@ -90,7 +89,24 @@ class LLMProviderError(Exception):
 
 
 class RateLimitError(LLMProviderError):
-    """Provider rate limit exceeded."""
+    """Provider rate limit exceeded (transient — safe to retry)."""
+
+    def __init__(self, message: str, retry_after_seconds: float | None = None):
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
+def parse_openai_retry_after(error: str) -> float | None:
+    """Extract 'try again in Xs' hint from OpenAI rate-limit error messages."""
+    import re
+    match = re.search(r"try again in ([\d.]+)\s*s", error, re.IGNORECASE)
+    if match:
+        return float(match.group(1))
+    return None
+
+
+class QuotaExceededError(LLMProviderError):
+    """Provider billing/quota exhausted (not retryable)."""
 
 
 class OpenAIProvider(BaseLLMProvider):
@@ -126,15 +142,18 @@ class OpenAIProvider(BaseLLMProvider):
     async def _get_client(self):
         if self._client is None:
             from openai import AsyncOpenAI
-            self._client = AsyncOpenAI(api_key=self._api_key)
+            # Celery task layer handles retries; in-process SDK retries would hold
+            # DB connections open during backoff (idle_in_transaction timeout).
+            self._client = AsyncOpenAI(api_key=self._api_key, max_retries=0)
         return self._client
 
-    @retry(
-        stop=stop_after_attempt(MAX_RETRIES),
-        wait=wait_exponential(multiplier=1, min=2, max=30),
-        retry=retry_if_exception_type((RateLimitError,)),
-    )
     async def complete(self, request: LLMRequest) -> LLMResponse:
+        """Execute an LLM completion with the provider.
+
+        Note: Retry-on-rate-limit is handled by the Celery task layer
+        (``autoretry_for`` + ``retry_backoff``) so the worker is released
+        back to the pool during backoff instead of blocking.
+        """
         client = await self._get_client()
         start = time.monotonic()
 
@@ -168,8 +187,10 @@ class OpenAIProvider(BaseLLMProvider):
             response = await client.chat.completions.create(**kwargs)
         except Exception as exc:
             error = str(exc).lower()
+            if "insufficient_quota" in error or "exceeded your current quota" in error:
+                raise QuotaExceededError(str(exc))
             if "rate" in error and "limit" in error:
-                raise RateLimitError(str(exc))
+                raise RateLimitError(str(exc), retry_after_seconds=parse_openai_retry_after(str(exc)))
             raise LLMProviderError(f"OpenAI call failed: {exc}")
 
         latency_ms = int((time.monotonic() - start) * 1000)
@@ -220,6 +241,101 @@ class AzureOpenAIProvider(BaseLLMProvider):
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         raise NotImplementedError("AzureOpenAIProvider is not implemented yet.")
+
+
+class DeepSeekProvider(BaseLLMProvider):
+    """DeepSeek Chat provider — uses OpenAI-compatible API at a fraction of GPT-4o cost.
+
+    Pricing (per 1M tokens):
+      - deepseek-v4-flash:  ~$0.30 input / $1.10 output
+      - deepseek-v4-pro:    ~$0.50 input / $2.00 output
+
+    Suitable for bulk ingestion (risk analysis, chunking) where cost matters.
+    Uses deepseek-v4-flash as default for speed/cost.
+    """
+
+    RATES = {
+        "deepseek-v4-flash": {"input": 0.00000030, "output": 0.0000011},
+        "deepseek-v4-pro": {"input": 0.00000050, "output": 0.0000020},
+    }
+    DEFAULT_MODEL = "deepseek-v4-flash"
+    BASE_URL = "https://api.deepseek.com"
+
+    def __init__(self, api_key: str):
+        super().__init__()
+        self._api_key = api_key
+        self._client = None
+
+    @property
+    def provider_name(self) -> str:
+        return "deepseek"
+
+    @property
+    def supported_models(self) -> list[str]:
+        return list(self.RATES.keys())
+
+    async def _get_client(self):
+        if self._client is None:
+            from openai import AsyncOpenAI
+            self._client = AsyncOpenAI(
+                api_key=self._api_key,
+                base_url=self.BASE_URL,
+                max_retries=0,  # Celery handles retries
+            )
+        return self._client
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        """Execute an LLM completion via DeepSeek's OpenAI-compatible API.
+
+        Retry-on-rate-limit is handled by the Celery task layer so the worker
+        is released back to the pool during backoff.
+        """
+        client = await self._get_client()
+        start = time.monotonic()
+
+        messages = []
+        if request.system_prompt:
+            messages.append({"role": "system", "content": request.system_prompt})
+        messages.append({"role": "user", "content": request.prompt})
+
+        model = request.model or self.DEFAULT_MODEL
+        kwargs = {
+            "model": model,
+            "messages": messages,
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+        }
+        if request.response_format:
+            kwargs["response_format"] = request.response_format
+
+        try:
+            response = await client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            error = str(exc).lower()
+            if "insufficient_quota" in error or "exceeded your current quota" in error:
+                raise QuotaExceededError(str(exc))
+            if "rate" in error and "limit" in error:
+                raise RateLimitError(str(exc))
+            raise LLMProviderError(f"DeepSeek call failed: {exc}")
+
+        latency_ms = int((time.monotonic() - start) * 1000)
+        usage = response.usage
+        model_used = response.model
+        self.record_metrics(latency_ms=latency_ms, cost_usd=0.0, success=True)
+
+        return LLMResponse(
+            content=response.choices[0].message.content,
+            model=model_used,
+            provider=self.provider_name,
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens,
+            total_tokens=usage.total_tokens,
+            latency_ms=latency_ms,
+        )
+
+    def _estimate_cost(self, model: str, prompt_tokens: int, completion_tokens: int) -> float:
+        rates = self.RATES.get(model, self.RATES[self.DEFAULT_MODEL])
+        return (prompt_tokens * rates["input"]) + (completion_tokens * rates["output"])
 
 
 class StructuredOutputParser:

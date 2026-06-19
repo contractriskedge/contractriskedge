@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useRef } from "react";
 import {
   Upload, FileText, CheckCircle, XCircle, AlertTriangle, Clock,
   Loader2, Eye, RefreshCw, ChevronDown, ChevronRight, MoreHorizontal,
@@ -236,7 +236,7 @@ function DetailDrawer({ job, onClose, onRetry }: { job: ImportJob; onClose: () =
             <h4 className="text-[8px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">AI Extraction Scores</h4>
             <div className="space-y-1">
               {[{ label: "OCR", value: job.ocrAccuracy, c: "bg-blue-400" }, { label: "Classification", value: job.classificationScore, c: "bg-purple-400" }, { label: "Extraction", value: job.extractionScore, c: "bg-green-400" }, { label: "Overall", value: job.confidence, c: "bg-blue-500" }].map(s => (
-                <div key={s.label} className="flex items-center gap-2"><span className="text-[9px] text-gray-500 w-16">{s.label}</span><div className="flex-1 h-1.5 bg-gray-100 dark:bg-navy-700 rounded-full overflow-hidden"><div className={`h-full rounded-full ${s.c}`} style={{ width: `${s.value}%` }} /></div><span className="text-[9px] text-gray-500 tabular-nums w-6 text-right font-medium">{s.value}%</span></div>
+                <div key={s.label} className="flex items-center gap-2"><span className="text-[9px] text-gray-500 w-16">{s.label}</span><div className="flex-1 h-1.5 bg-gray-100 dark:bg-navy-700 rounded-full overflow-hidden"><div className={`h-full rounded-full ${s.c}`} style={{ width: `${s.value ?? 0}%` }} /></div><span className="text-[9px] text-gray-500 tabular-nums w-6 text-right font-medium">{s.value != null ? `${s.value}%` : "—"}</span></div>
               ))}
             </div>
           </div>
@@ -269,14 +269,39 @@ function DetailDrawer({ job, onClose, onRetry }: { job: ImportJob; onClose: () =
 
 // ── Empty State ──────────────────────────────────────────────────────────
 
-function EmptyState({ onUpload }: { onUpload: (files: FileList | null) => void }) {
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
+function EmptyState({ onUpload, onOpenUploadModal }: { onUpload: (files: FileList | null) => void; onOpenUploadModal: () => void }) {
+  const [isDragging, setIsDragging] = React.useState(false);
+
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragLeave = () => setIsDragging(false);
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files.length) onUpload(e.dataTransfer.files);
+  };
+
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">
-      <div className="w-12 h-12 rounded-lg bg-gray-100 dark:bg-navy-800 flex items-center justify-center"><Upload className="w-6 h-6 text-gray-400" /></div>
-      <div><h3 className="text-sm font-semibold text-navy-900 dark:text-white">No contracts imported</h3><p className="text-xs text-gray-500 mt-0.5 max-w-sm">Upload a contract to begin AI-powered ingestion and analysis.</p></div>
-      <input ref={fileInputRef} type="file" multiple accept=".pdf,.docx,.doc,.tiff,.tif,.png,.jpg,.jpeg" onChange={(e) => onUpload(e.target.files)} className="hidden" />
-      <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors"><Upload className="w-3.5 h-3.5" /> Upload Contract</button>
+      <div
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`w-full max-w-md border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer ${
+          isDragging ? "border-blue-400 bg-blue-50 dark:bg-blue-900/10" : "border-gray-200 dark:border-navy-600 hover:border-gray-300 dark:hover:border-navy-500 bg-gray-50/50 dark:bg-navy-850"
+        }`}
+      >
+        <Upload className={`w-10 h-10 mx-auto mb-3 ${isDragging ? "text-blue-500" : "text-gray-300"}`} />
+        <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Drag & drop files here</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">or</p>
+        <button onClick={onOpenUploadModal} className="mt-2 text-xs font-medium px-4 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+          Browse Files
+        </button>
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2">PDF, DOCX, DOC, TIFF, PNG, JPG — up to 100MB each</p>
+      </div>
+      <div>
+        <h3 className="text-sm font-semibold text-navy-900 dark:text-white">No contracts imported</h3>
+        <p className="text-xs text-gray-500 mt-0.5 max-w-sm">Upload a contract to begin AI-powered ingestion and analysis.</p>
+      </div>
     </div>
   );
 }
@@ -288,6 +313,7 @@ interface IngestionCenterPanelProps {
   onPreview: (job: ImportJob) => void;
   onRetry: (jobId: string) => void;
   onUpload: (files: FileList | null) => void;
+  onOpenUploadModal: () => void;
   onReprioritize?: (jobId: string, priority: "high" | "medium" | "low") => void;
   onAssignQueue?: (jobId: string, queue: string) => void;
   onRemove?: (jobId: string) => void;
@@ -295,12 +321,22 @@ interface IngestionCenterPanelProps {
   searchQuery: string;
 }
 
-export function IngestionCenterPanel({ jobs, onPreview, onRetry, onUpload, onReprioritize, onAssignQueue, onRemove, compactMode, searchQuery }: IngestionCenterPanelProps) {
+export function IngestionCenterPanel({ jobs, onPreview, onRetry, onUpload, onOpenUploadModal, onReprioritize, onAssignQueue, onRemove, compactMode, searchQuery }: IngestionCenterPanelProps) {
   const [sort, setSort] = useState<TableSort>({ column: "createdAt", direction: "desc" });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detailJob, setDetailJob] = useState<ImportJob | null>(null);
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set(ALL_COLUMNS.filter(c => c.default).map(c => c.key)));
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragLeave = () => setIsDragging(false);
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files.length) onUpload(e.dataTransfer.files);
+  };
   const [showColumnChooser, setShowColumnChooser] = useState(false);
 
   const handleSort = useCallback((col: string) => setSort(prev => ({ column: col, direction: prev.column === col && prev.direction === "asc" ? "desc" : "asc" })), []);
@@ -315,7 +351,7 @@ export function IngestionCenterPanel({ jobs, onPreview, onRetry, onUpload, onRep
         case "source": c = a.sourceLabel.localeCompare(b.sourceLabel); break;
         case "createdAt": c = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(); break;
         case "status": c = a.status.localeCompare(b.status); break;
-        case "confidence": c = a.confidence - b.confidence; break;
+        case "confidence": c = (a.confidence ?? 0) - (b.confidence ?? 0); break;
         case "riskScore": c = (a.extractionScore || 0) - (b.extractionScore || 0); break;
         case "stage": { const p = { high: 0, medium: 1, low: 2 }; c = (p[a.priority] || 1) - (p[b.priority] || 1); break; }
         default: c = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
@@ -343,10 +379,29 @@ export function IngestionCenterPanel({ jobs, onPreview, onRetry, onUpload, onRep
     return "flex-1";
   };
 
-  if (filteredJobs.length === 0) return <EmptyState onUpload={onUpload} />;
+  if (filteredJobs.length === 0) return <EmptyState onUpload={onUpload} onOpenUploadModal={onOpenUploadModal} />;
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 bg-white dark:bg-navy-900">
+    <div
+      className="flex-1 flex flex-col min-w-0 bg-white dark:bg-navy-900 relative"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Drag-and-drop overlay */}
+      {isDragging && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-blue-600/10 dark:bg-blue-500/10 backdrop-blur-sm rounded-lg">
+          <div className="bg-white dark:bg-navy-800 border-2 border-dashed border-blue-400 rounded-xl p-8 text-center shadow-xl">
+            <Upload className="w-10 h-10 mx-auto mb-3 text-blue-500" />
+            <p className="text-sm font-semibold text-navy-900 dark:text-white">Drop files to upload</p>
+            <p className="text-xs text-gray-500 mt-1">PDF, DOCX, DOC, TIFF, PNG, JPG</p>
+          </div>
+        </div>
+      )}
+
+      {/* Hidden file input for browse fallback */}
+      <input ref={fileInputRef} type="file" multiple accept=".pdf,.docx,.doc,.tiff,.tif,.png,.jpg,.jpeg" onChange={(e) => { if (e.target.files) onUpload(e.target.files); e.target.value = ""; }} className="hidden" />
+
       {/* Batch Action Bar */}
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 dark:bg-blue-900/10 border-b border-blue-200 dark:border-blue-900/30">
@@ -408,7 +463,7 @@ export function IngestionCenterPanel({ jobs, onPreview, onRetry, onUpload, onRep
       {/* Table Body */}
       <div className="flex-1 overflow-y-auto">
         {filteredJobs.map((job) => {
-          const risk = job.status === "completed" ? Math.round((job.extractionScore + job.classificationScore + job.ocrAccuracy) / 3) : 0;
+          const risk = job.status === "completed" && job.extractionScore != null && job.classificationScore != null && job.ocrAccuracy != null ? Math.round((job.extractionScore + job.classificationScore + job.ocrAccuracy) / 3) : 0;
           const riskColor = risk >= 90 ? "text-green-600" : risk >= 75 ? "text-amber-600" : risk > 0 ? "text-red-600" : "text-gray-400";
           const isExpanded = expandedId === job.id;
           return (
@@ -438,7 +493,7 @@ export function IngestionCenterPanel({ jobs, onPreview, onRetry, onUpload, onRep
                 {visibleColumns.has("status") && <div className="w-20"><Badge status={job.status} /></div>}
                 {visibleColumns.has("confidence") && (
                   <div className="w-20">
-                    {job.status === "completed" ? (
+                    {job.status === "completed" && job.confidence != null ? (
                       <div className="flex items-center gap-1"><div className="flex-1 h-1 bg-gray-100 dark:bg-navy-700 rounded-full overflow-hidden"><div className="h-full rounded-full bg-blue-400" style={{ width: `${job.confidence}%` }} /></div><span className="text-[9px] font-semibold text-navy-700 dark:text-gray-200 tabular-nums">{job.confidence}%</span></div>
                     ) : job.status === "running" ? <span className="text-[9px] text-blue-600">Processing</span> : <span className="text-[9px] text-gray-400">—</span>}
                   </div>
@@ -467,9 +522,9 @@ export function IngestionCenterPanel({ jobs, onPreview, onRetry, onUpload, onRep
                     <div><span className="text-[8px] font-semibold text-gray-400 uppercase">Type</span><p className="text-navy-700 dark:text-gray-200 mt-0.5 capitalize">{job.documentType}</p></div>
                     <div><span className="text-[8px] font-semibold text-gray-400 uppercase">Priority</span><p className="mt-0.5"><PriorityBadge priority={job.priority} /></p></div>
                     {job.status === "completed" && (
-                      <><div><span className="text-[8px] font-semibold text-gray-400 uppercase">OCR</span><p className="text-navy-700 dark:text-gray-200 mt-0.5">{job.ocrAccuracy}%</p></div>
-                      <div><span className="text-[8px] font-semibold text-gray-400 uppercase">Class</span><p className="text-navy-700 dark:text-gray-200 mt-0.5">{job.classificationScore}%</p></div>
-                      <div><span className="text-[8px] font-semibold text-gray-400 uppercase">Extract</span><p className="text-navy-700 dark:text-gray-200 mt-0.5">{job.extractionScore}%</p></div></>
+                      <><div><span className="text-[8px] font-semibold text-gray-400 uppercase">OCR</span><p className="text-navy-700 dark:text-gray-200 mt-0.5">{job.ocrAccuracy != null ? `${job.ocrAccuracy}%` : "—"}</p></div>
+                      <div><span className="text-[8px] font-semibold text-gray-400 uppercase">Class</span><p className="text-navy-700 dark:text-gray-200 mt-0.5">{job.classificationScore != null ? `${job.classificationScore}%` : "—"}</p></div>
+                      <div><span className="text-[8px] font-semibold text-gray-400 uppercase">Extract</span><p className="text-navy-700 dark:text-gray-200 mt-0.5">{job.extractionScore != null ? `${job.extractionScore}%` : "—"}</p></div></>
                     )}
                     {job.error && <div className="text-red-600"><span className="text-[8px] font-semibold uppercase">Error</span><p className="mt-0.5 text-[9px]">{job.error}</p></div>}
                   </div>

@@ -48,11 +48,25 @@ def require_permission(permission: str) -> Any:
                 permission,
                 user.permissions,
             )
+            # Map technical permission names to user-friendly messages
+            _friendly_messages = {
+                "contracts:approve": "Approval is restricted to authorized reviewers. Please contact your administrator if you need approval access.",
+                "contracts:write": "You have read-only access to contracts. Changes require additional permissions.",
+                "contracts:delete": "Contract deletion is restricted to administrators.",
+                "workflows:write": "You have read-only access to workflows. Changes require additional permissions.",
+                "workflows:approve": "Workflow approval is restricted to authorized reviewers.",
+                "workflows:escalate": "Escalation is restricted to authorized reviewers.",
+                "admin:tenant": "Tenant settings are restricted to administrators.",
+                "admin:system": "System administration is restricted to administrators.",
+                "users:write": "User management is restricted to administrators.",
+                "audit:export": "Audit export is restricted to authorized users.",
+            }
+            friendly = _friendly_messages.get(permission, f"Access denied. You need '{permission}' permission to perform this action.")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "error": "forbidden",
-                    "message": f"Missing required permission: {permission}",
+                    "message": friendly,
                 },
             )
 

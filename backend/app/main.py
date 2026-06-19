@@ -26,6 +26,7 @@ from app.kernel.middleware.security_headers import SecurityHeadersMiddleware
 from app.kernel.middleware.request_id import RequestIDMiddleware
 from app.kernel.middleware.tenant_context import TenantContextMiddleware
 from app.kernel.middleware.auth_context import AuthContextMiddleware
+from app.kernel.middleware.audit_response import AuditResponseMiddleware
 from app.kernel.middleware.logging_middleware import LoggingMiddleware
 from app.kernel.middleware.deadline import RequestDeadlineMiddleware
 from app.kernel.middleware.request_size import RequestBodySizeMiddleware
@@ -259,6 +260,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(TenantContextMiddleware)
     app.add_middleware(AuthContextMiddleware)
+    app.add_middleware(AuditResponseMiddleware)
 
     class ExceptionLoggingMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):

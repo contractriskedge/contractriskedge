@@ -77,14 +77,37 @@ export async function fetchAuditLogs(params?: {
   page_size?: number;
   event_type?: string;
   actor_id?: string;
+  status?: string;
   days?: number;
-}): Promise<{ data: AdminAuditEvent[]; pagination: { page: number; page_size: number; total: number; total_pages: number } }> {
+  from_date?: string;
+  to_date?: string;
+}): Promise<{
+  events: Array<{
+    event_id: string;
+    event_type: string;
+    action: string;
+    resource_type: string;
+    resource_id?: string;
+    actor_id?: string;
+    description?: string;
+    status?: string;
+    severity?: string;
+    created_at: string;
+  }>;
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}> {
   const searchParams = new URLSearchParams();
   if (params?.page) searchParams.set("page", String(params.page));
   if (params?.page_size) searchParams.set("page_size", String(params.page_size));
   if (params?.event_type) searchParams.set("event_type", params.event_type);
   if (params?.actor_id) searchParams.set("actor_id", params.actor_id);
+  if (params?.status) searchParams.set("status", params.status);
   if (params?.days) searchParams.set("days", String(params.days));
+  if (params?.from_date) searchParams.set("from_date", params.from_date);
+  if (params?.to_date) searchParams.set("to_date", params.to_date);
 
   const qs = searchParams.toString();
   return api.get(`/admin/audit-logs${qs ? `?${qs}` : ""}`);

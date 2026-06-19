@@ -68,6 +68,11 @@ from workers.ingestion_tasks import ingest_document
 
 logger = logging.getLogger(__name__)
 
+# Limit parallel inline ingestion pipelines in dev (each upload spawns a thread).
+_inline_ingest_semaphore = threading.Semaphore(
+    max(1, settings.dev_inline_ingestion_max_concurrent)
+)
+
 router = APIRouter(prefix="/uploads", tags=["Uploads"])
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -103,7 +108,7 @@ async def get_ingestion_service(
 _UPLOAD_RATE_LIMITS: dict[str, list[float]] = {}
 """Simple in-memory rate limiter: tenant_id -> [timestamps of recent uploads]."""
 
-MAX_UPLOADS_PER_MINUTE: int = 10
+MAX_UPLOADS_PER_MINUTE: int = 200
 
 
 async def check_upload_rate_limit(tenant_id: str) -> None:
@@ -127,7 +132,7 @@ async def check_upload_rate_limit(tenant_id: str) -> None:
             tenant_id=tenant_id,
             details={"uploads_in_window": len(timestamps), "max_allowed": MAX_UPLOADS_PER_MINUTE},
         )
-        raise RateLimitError(message="Upload rate limit exceeded. Max 10 uploads per minute.")
+        raise RateLimitError(message="Upload rate limit exceeded. Max 200 uploads per minute.")
 
 
 # ── POST /uploads ─────────────────────────────────────────────────────────────
@@ -360,6 +365,13 @@ def _schedule_inline_ingestion(
     cannot be shared across uvicorn's loop and a worker thread.
     """
     def _thread_main() -> None:
+        acquired = _inline_ingest_semaphore.acquire(timeout=3600)
+        if not acquired:
+            logger.error(
+                "Inline ingestion timed out waiting for slot (upload=%s)",
+                upload_id,
+            )
+            return
         try:
             asyncio.run(
                 _run_inline_ingestion(
@@ -371,6 +383,8 @@ def _schedule_inline_ingestion(
             )
         except Exception:
             logger.exception("Inline ingestion thread crashed for upload %s", upload_id)
+        finally:
+            _inline_ingest_semaphore.release()
 
     thread = threading.Thread(
         target=_thread_main,
@@ -420,6 +434,7 @@ async def _run_inline_ingestion(
             embedding_service=EmbeddingService(
                 api_key=settings.openai_api_key,
                 model=settings.default_embedding_model,
+                tenant_id=tenant_id,
             ),
             event_bus=EventBus(),
             tenant_id=tenant_id,
@@ -475,6 +490,9 @@ async def get_upload(
     if not upload:
         raise NotFoundError(f"Upload {upload_id} not found")
 
+    # Fetch AI quality scores from the associated review metadata
+    ai_conf, ocr_acc, cls_score, ext_score, risk = await _fetch_ai_scores(db, tenant_id, upload_id)
+
     return UploadStatusResponse(
         upload_id=str(upload.upload_id),
         filename=upload.filename,
@@ -490,6 +508,11 @@ async def get_upload(
         created_at=upload.created_at,
         updated_at=upload.updated_at,
         completed_at=upload.completed_at,
+        ai_confidence=ai_conf,
+        ocr_accuracy=ocr_acc,
+        classification_score=cls_score,
+        extraction_score=ext_score,
+        risk_score=risk,
     )
 
 
@@ -541,6 +564,9 @@ async def get_upload_status(
     api_state = ingestion_state_for_api(upload.ingestion_state)
     progress = _build_progress(api_state.value)
 
+    # Fetch AI quality scores from the associated review metadata
+    ai_conf, ocr_acc, cls_score, ext_score, risk = await _fetch_ai_scores(db, tenant_id, upload_id)
+
     return UploadStatusResponse(
         upload_id=str(upload.upload_id),
         filename=upload.filename,
@@ -557,7 +583,41 @@ async def get_upload_status(
         created_at=upload.created_at,
         updated_at=upload.updated_at,
         completed_at=upload.completed_at,
+        ai_confidence=ai_conf,
+        ocr_accuracy=ocr_acc,
+        classification_score=cls_score,
+        extraction_score=ext_score,
+        risk_score=risk,
     )
+
+
+async def _fetch_ai_scores(db: AsyncSession, tenant_id: str, upload_id: str) -> tuple:
+    """Fetch AI quality scores from the review associated with this upload."""
+    from sqlalchemy import text as sa_text
+    try:
+        result = await db.execute(
+            sa_text("""
+                SELECT
+                    cr.metadata->>'ai_confidence' AS ai_confidence,
+                    cr.metadata->>'risk_score' AS risk_score
+                FROM contract_reviews cr
+                WHERE cr.upload_id = :uid AND cr.tenant_id = :tid
+                LIMIT 1
+            """),
+            {"uid": upload_id, "tid": tenant_id},
+        )
+        row = result.fetchone()
+        if row:
+            ai_conf = float(row.ai_confidence) if row.ai_confidence else None
+            risk = float(row.risk_score) if row.risk_score else None
+            # ocr_accuracy, classification_score, extraction_score are not
+            # individually stored — they are derived from the single AI analysis
+            # pass. We use ai_confidence as a proxy for all three since the LLM
+            # produces one unified confidence score per analysis run.
+            return (ai_conf, ai_conf, ai_conf, ai_conf, risk)
+    except Exception:
+        pass
+    return (None, None, None, None, None)
 
 
 def _build_progress(state: str) -> dict:
@@ -866,17 +926,30 @@ async def list_uploads(
     items, total = await service.list_uploads(state, page, page_size)
     data = []
     for u in items:
-        # Fetch contract_number from linked contract_review
+        # Fetch contract_number and AI scores from linked contract_review
         contract_number = None
+        ai_conf = ocr_acc = cls_score = ext_score = risk = None
         try:
             from sqlalchemy import text as sa_text
             row = await db.execute(
-                sa_text("SELECT metadata->>'contract_number' FROM contract_reviews WHERE upload_id = :uid AND tenant_id = :tid"),
+                sa_text("""
+                    SELECT
+                        metadata->>'contract_number' AS contract_number,
+                        metadata->>'ai_confidence' AS ai_confidence,
+                        metadata->>'risk_score' AS risk_score
+                    FROM contract_reviews
+                    WHERE upload_id = :uid AND tenant_id = :tid
+                """),
                 {"uid": u.upload_id, "tid": tenant_id},
             )
-            cn = row.scalar()
-            if cn:
-                contract_number = cn
+            r = row.fetchone()
+            if r:
+                contract_number = r.contract_number
+                ai_conf = float(r.ai_confidence) if r.ai_confidence else None
+                risk = float(r.risk_score) if r.risk_score else None
+                # OCR, classification, and extraction scores use ai_confidence
+                # as a proxy since the LLM produces one unified confidence score.
+                ocr_acc = cls_score = ext_score = ai_conf
         except Exception:
             pass
         data.append(
@@ -888,6 +961,11 @@ async def list_uploads(
                 ingestion_state=ingestion_state_for_api(u.ingestion_state),
                 created_at=u.created_at,
                 contract_number=contract_number,
+                ai_confidence=ai_conf,
+                ocr_accuracy=ocr_acc,
+                classification_score=cls_score,
+                extraction_score=ext_score,
+                risk_score=risk,
             )
         )
     return PaginatedResponse(
@@ -1017,3 +1095,75 @@ async def get_queue_stats(
             "activeQueues": 0,
             "error": str(exc),
         }
+
+
+# ── GET /uploads/pipeline/dashboard ──────────────────────────────────────────
+
+
+@router.get(
+    "/pipeline/dashboard",
+    summary="Get ingestion pipeline stage counts",
+    description="Return per-stage counts of contracts in the ingestion pipeline. "
+                "Shows how many contracts are at each stage of processing.",
+    responses={
+        200: {"description": "Pipeline dashboard with per-stage counts"},
+    },
+)
+async def get_pipeline_dashboard(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Get per-stage counts of contracts in the ingestion pipeline.
+
+    Returns a breakdown of how many uploads are at each stage of the
+    ingestion state machine, plus total counts for active, completed,
+    and failed contracts.
+    """
+    repo = IngestionRepository(db, tenant_id=tenant_id)
+
+    stages = [
+        ("uploaded", IngestionState.UPLOADED, "Uploaded"),
+        ("validating", IngestionState.VALIDATING, "Validating"),
+        ("validated", IngestionState.VALIDATED, "Validated"),
+        ("storage_confirmed", IngestionState.STORAGE_CONFIRMED, "Storage Confirmed"),
+        ("ocr_pending", IngestionState.OCR_PENDING, "OCR Pending"),
+        ("ocr_processing", IngestionState.OCR_PROCESSING, "OCR Processing"),
+        ("ocr_complete", IngestionState.OCR_COMPLETE, "OCR Complete"),
+        ("chunking_pending", IngestionState.CHUNKING_PENDING, "Chunking Pending"),
+        ("embedding_pending", IngestionState.EMBEDDING_PENDING, "Embedding Pending"),
+        ("analysis_pending", IngestionState.ANALYSIS_PENDING, "AI Analysis Pending"),
+        ("review_ready", IngestionState.REVIEW_READY, "Review Ready"),
+        ("failed", IngestionState.FAILED, "Failed"),
+        ("cancelled", IngestionState.CANCELLED, "Cancelled"),
+        ("quarantined", IngestionState.QUARANTINED, "Quarantined"),
+    ]
+
+    stage_counts = {}
+    total_active = 0
+    for key, state, label in stages:
+        count = await repo.count_by_tenant(tenant_id, state=state)
+        stage_counts[key] = {
+            "label": label,
+            "count": count,
+            "state": state.value,
+        }
+        if state not in (IngestionState.REVIEW_READY, IngestionState.FAILED,
+                         IngestionState.CANCELLED, IngestionState.QUARANTINED):
+            total_active += count
+
+    total_uploaded = await repo.count_by_tenant(tenant_id)
+    review_ready = stage_counts.get("review_ready", {}).get("count", 0)
+    failed = stage_counts.get("failed", {}).get("count", 0)
+
+    return {
+        "stages": stage_counts,
+        "summary": {
+            "totalUploaded": total_uploaded,
+            "totalActive": total_active,
+            "reviewReady": review_ready,
+            "failed": failed,
+            "progress": round((review_ready / max(total_uploaded, 1)) * 100, 1),
+        },
+    }

@@ -133,8 +133,9 @@ class ExportService:
 
     async def _fetch_audit_events(self, period_days: int) -> list[dict]:
         sql = sa_text("""
-            SELECT event_type, action, resource_type, resource_id,
-                   actor_id, description, created_at
+            SELECT event_id, event_type, entity_type, entity_id,
+                   actor_id, change_summary, correlation_id, source,
+                   metadata, created_at
             FROM governance_audit_events
             WHERE tenant_id = :tenant_id
               AND created_at > NOW() - :period::interval
@@ -266,6 +267,26 @@ class ExportService:
             job.status = "completed"
             job.completed_at = datetime.utcnow()
             await self.session.flush()
+
+            from app.domains.audit.recorder import AuditRecorder
+            recorder = AuditRecorder(self.session, self.tenant_id)
+            await recorder.record(
+                event_type="export.generated",
+                actor_id=actor_id,
+                actor_role=actor_role,
+                description=f"Immutable audit export ({request.output_format.value}) — {len(events)} events",
+                status="success",
+                severity="info",
+                entity_type="audit_export",
+                entity_id=str(job.job_id),
+                source="audit_export_service",
+                metadata={
+                    "job_id": str(job.job_id),
+                    "output_format": request.output_format.value,
+                    "event_count": len(events),
+                    "filters": filter_params,
+                },
+            )
         except Exception as exc:
             job.status = "failed"
             job.failure_reason = str(exc)
@@ -313,7 +334,7 @@ class ExportService:
         headers = [
             "event_id", "event_type", "entity_type", "entity_id",
             "actor_id", "actor_role", "change_summary", "correlation_id",
-            "request_id", "source", "created_at", "metadata",
+            "request_id", "source", "status", "created_at", "metadata",
             "previous_state", "new_state",
         ]
         buf = io.StringIO()
@@ -321,8 +342,15 @@ class ExportService:
         writer.writeheader()
         for event in events:
             row = {**event}
+            meta = event.get("metadata") or {}
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except json.JSONDecodeError:
+                    meta = {}
+            row["status"] = meta.get("status", "success")
             row["created_at"] = event.get("created_at").isoformat() if event.get("created_at") else ""
-            row["metadata"] = json.dumps(event.get("metadata", {}), sort_keys=True)
+            row["metadata"] = json.dumps(meta, sort_keys=True)
             row["previous_state"] = json.dumps(event.get("previous_state", {}), sort_keys=True) if event.get("previous_state") is not None else ""
             row["new_state"] = json.dumps(event.get("new_state", {}), sort_keys=True) if event.get("new_state") is not None else ""
             writer.writerow(row)

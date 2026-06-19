@@ -36,6 +36,8 @@ import {
   Sliders,
   Cpu,
   ClipboardList,
+  FileSearch,
+  Activity,
 } from "lucide-react";
 
 type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "review-dashboard" | "executive-dashboard" | "policy" | "clause-intelligence" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center";
@@ -89,6 +91,7 @@ const navGroups: NavGroup[] = [
     label: "Operations",
     items: [
       { id: "command-center", label: "Command Center", icon: LayoutDashboard, permission: "contracts:read" },
+      { id: "activity-center", label: "Activity Center", icon: Activity, permission: "contracts:read" },
       { id: "reviewer-operations", label: "Reviewer Ops", icon: ClipboardCheck, permission: "workflows:read" },
       { id: "workflow-intelligence-dashboard", label: "Workflow Intel", icon: BarChart3, permission: "workflows:read" },
       { id: "search", label: "Search & Discovery", icon: Search, permission: "contracts:read" },
@@ -97,7 +100,7 @@ const navGroups: NavGroup[] = [
   {
     label: "Analytics",
     items: [
-      { id: "analytics", label: "Analytics", icon: TrendingUp, permission: "contracts:read" },
+      { id: "analytics", label: "Analytics", icon: TrendingUp, permission: "audit:read" },
       { id: "benchmarks", label: "Benchmarks", icon: BarChart3, permission: "benchmarks:read" },
       { id: "executive-dashboard", label: "Executive", icon: LayoutDashboard, permission: "contracts:read" },
     ],
@@ -114,7 +117,13 @@ const navGroups: NavGroup[] = [
   {
     label: "Administration",
     items: [
-      { id: "admin", label: "Admin Console", icon: ShieldAlert, permission: "admin:system" },
+      {
+        id: "admin",
+        label: "Admin & Audit",
+        icon: FileSearch,
+        permission: ["admin:tenant", "audit:read"],
+        requireAll: false,
+      },
       { id: "settings", label: "Settings", icon: Settings, permission: "admin:tenant" },
       { id: "tenant-settings", label: "Tenant Config", icon: Sliders, permission: "admin:tenant" },
       { id: "ai-operations-dashboard", label: "AI Ops", icon: Cpu, permission: "ai:view" },

@@ -10,8 +10,9 @@
  * - Timestamps with relative formatting
  * - System events mixed with human actions
  * - Event type badges
+ * - Evidence file count and metadata
+ * - Richer content display (actor, action, evidence, timestamp)
  * - Empty state when no events
- * - Loading state with skeleton
  *
  * CON-06: Activity timeline
  */
@@ -39,6 +40,7 @@ import {
   Edit,
   Calendar,
   Link,
+  Paperclip,
 } from "lucide-react";
 import type { ActivityEvent, ActivityEventType } from "./types";
 
@@ -92,6 +94,18 @@ function formatRelativeTime(timestamp: string): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+function formatAbsoluteTime(timestamp: string): string {
+  const d = new Date(timestamp);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function getActorInitials(name: string): string {
   return name
     .split(/[\s._-]+/)
@@ -115,6 +129,23 @@ function getActorColor(id: string): string {
     hash = ((hash << 5) - hash) + id.charCodeAt(i);
   }
   return colors[Math.abs(hash) % colors.length];
+}
+
+// ── Extract metadata helpers ────────────────────────────────────────────────
+
+function getEvidenceCount(event: ActivityEvent): number | null {
+  if (event.metadata?.evidence_count != null) return Number(event.metadata.evidence_count);
+  if (event.metadata?.file_count != null) return Number(event.metadata.file_count);
+  if (event.metadata?.files != null && Array.isArray(event.metadata.files)) return event.metadata.files.length;
+  return null;
+}
+
+function getObjectName(event: ActivityEvent): string | null {
+  if (event.metadata?.object_name) return String(event.metadata.object_name);
+  if (event.metadata?.obligation_title) return String(event.metadata.obligation_title);
+  if (event.metadata?.finding_title) return String(event.metadata.finding_title);
+  if (event.metadata?.document_name) return String(event.metadata.document_name);
+  return null;
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -156,7 +187,8 @@ export function ActivityTimelinePanel({ events }: ActivityTimelinePanelProps) {
           {sortedEvents.map((event, index) => {
             const config = EVENT_CONFIG[event.type] || DEFAULT_CONFIG;
             const Icon = config.icon;
-            const isLast = index === sortedEvents.length - 1;
+            const evidenceCount = getEvidenceCount(event);
+            const objectName = getObjectName(event);
 
             return (
               <div key={event.id} className="relative flex gap-3 pb-4">
@@ -167,10 +199,10 @@ export function ActivityTimelinePanel({ events }: ActivityTimelinePanelProps) {
                   </div>
                 </div>
 
-                {/* Event content */}
+                {/* Event content — enriched */}
                 <div className="flex-1 min-w-0 pt-0.5">
+                  {/* Header row: actor + badge + time */}
                   <div className="flex items-center gap-2 mb-0.5">
-                    {/* Actor avatar */}
                     <span className={`w-5 h-5 rounded-full ${getActorColor(event.actor)} flex items-center justify-center text-[9px] font-bold flex-shrink-0`}>
                       {getActorInitials(event.actor)}
                     </span>
@@ -180,19 +212,48 @@ export function ActivityTimelinePanel({ events }: ActivityTimelinePanelProps) {
                     <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${config.bg} ${config.color} font-medium`}>
                       {config.label}
                     </span>
-                    <span className="text-[9px] text-gray-400 dark:text-gray-500 ml-auto whitespace-nowrap">
+                    <span className="text-[9px] text-gray-400 dark:text-gray-500 ml-auto whitespace-nowrap" title={formatAbsoluteTime(event.timestamp)}>
                       {formatRelativeTime(event.timestamp)}
                     </span>
                   </div>
 
+                  {/* Object name (e.g., "Insurance Certificate") */}
+                  {objectName && (
+                    <p className="text-[11px] font-semibold text-navy-800 dark:text-navy-200 ml-7 mb-0.5">
+                      {objectName}
+                    </p>
+                  )}
+
+                  {/* Action description */}
                   <p className="text-[11px] text-gray-700 dark:text-gray-300 ml-7">
                     {event.action}
                   </p>
 
+                  {/* Details / reason */}
                   {event.details && (
                     <p className="text-[10px] text-gray-500 dark:text-gray-400 ml-7 mt-0.5 italic">
                       {event.details}
                     </p>
+                  )}
+
+                  {/* Evidence / file count */}
+                  {evidenceCount !== null && (
+                    <div className="flex items-center gap-1 ml-7 mt-1">
+                      <Paperclip className="w-3 h-3 text-gray-400" />
+                      <span className="text-[9px] text-gray-500 dark:text-gray-400 font-medium">
+                        Evidence: {evidenceCount} file{evidenceCount !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Completed timestamp for obligation_completed events */}
+                  {(event.type === "obligation_completed" || event.type === "review_approved") && (
+                    <div className="flex items-center gap-1 ml-7 mt-0.5">
+                      <CheckCircle2 className="w-3 h-3 text-green-500" />
+                      <span className="text-[9px] text-green-600 dark:text-green-400 font-medium">
+                        Completed: {formatAbsoluteTime(event.timestamp)}
+                      </span>
+                    </div>
                   )}
                 </div>
               </div>

@@ -67,6 +67,11 @@ export function PolicyDetailDrawer({ policy, open, onClose, clauses, evaluations
   const [editPriority, setEditPriority] = useState(50);
   const [editError, setEditError] = useState<string | null>(null);
 
+  // Risk config state (Sprint 25.5)
+  const [editDeviationThresholds, setEditDeviationThresholds] = useState<string>("");
+  const [editRiskWeights, setEditRiskWeights] = useState<string>("");
+  const [editRiskLevels, setEditRiskLevels] = useState<string>("");
+
   // Reset the edit form whenever the drawer opens for a new policy.
   useEffect(() => {
     if (policy) {
@@ -74,6 +79,9 @@ export function PolicyDetailDrawer({ policy, open, onClose, clauses, evaluations
       setEditDescription(policy.description || "");
       setEditEffect(policy.effect || "flag_for_review");
       setEditPriority(policy.priority ?? 50);
+      setEditDeviationThresholds(JSON.stringify(policy.deviation_thresholds || { similarity: 0.5, forbidden_similarity: 0.3 }, null, 2));
+      setEditRiskWeights(JSON.stringify(policy.risk_weights || { critical: 5.0, high: 3.0, medium: 2.0, low: 1.0, info: 0.1 }, null, 2));
+      setEditRiskLevels(JSON.stringify(policy.risk_levels || { critical: 8.0, high: 5.0, medium: 3.0 }, null, 2));
       setEditing(false);
       setEditError(null);
     }
@@ -84,12 +92,17 @@ export function PolicyDetailDrawer({ policy, open, onClose, clauses, evaluations
     mutationFn: async () => {
       if (!policy) throw new Error("No policy selected");
       const id = policy.policy_id || policy.playbook_id;
-      return await policyService.update(id, {
+      const payload: Record<string, unknown> = {
         name: editName,
         description: editDescription,
         effect: editEffect,
         priority: editPriority,
-      });
+      };
+      // Parse risk config JSON strings — only send valid JSON
+      try { payload.deviation_thresholds = JSON.parse(editDeviationThresholds); } catch {}
+      try { payload.risk_weights = JSON.parse(editRiskWeights); } catch {}
+      try { payload.risk_levels = JSON.parse(editRiskLevels); } catch {}
+      return await policyService.update(id, payload);
     },
     onSuccess: (data) => {
       // Refresh the policies list and close the edit form.
@@ -441,6 +454,91 @@ export function PolicyDetailDrawer({ policy, open, onClose, clauses, evaluations
                     </section>
                   )}
 
+                  {/* ── Risk Configuration (Sprint 25.4 & 25.5) ───── */}
+                  {editing && (
+                    <section className="rounded-lg border-2 border-indigo-200 bg-indigo-50/30 p-3 space-y-2">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Target className="w-3 h-3 text-indigo-600" />
+                        <h4 className="text-[9px] font-semibold text-indigo-700 uppercase tracking-wider">Risk Configuration</h4>
+                      </div>
+
+                      <div>
+                        <label className="block text-[8px] font-semibold text-gray-500 uppercase mb-0.5">
+                          Deviation Thresholds
+                          <span className="text-gray-400 normal-case ml-1">(similarity, forbidden_similarity)</span>
+                        </label>
+                        <textarea
+                          value={editDeviationThresholds}
+                          onChange={(e) => setEditDeviationThresholds(e.target.value)}
+                          rows={2}
+                          className="w-full text-[10px] px-2 py-1.5 rounded-md border border-gray-200 bg-white text-navy-900 font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                        />
+                        <p className="text-[7px] text-gray-400 mt-0.5">
+                          Jaccard similarity thresholds. Lower = more deviations flagged.
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="block text-[8px] font-semibold text-gray-500 uppercase mb-0.5">
+                          Risk Weights
+                          <span className="text-gray-400 normal-case ml-1">(critical, high, medium, low, info)</span>
+                        </label>
+                        <textarea
+                          value={editRiskWeights}
+                          onChange={(e) => setEditRiskWeights(e.target.value)}
+                          rows={2}
+                          className="w-full text-[10px] px-2 py-1.5 rounded-md border border-gray-200 bg-white text-navy-900 font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                        />
+                        <p className="text-[7px] text-gray-400 mt-0.5">
+                          Severity weights for risk score calculation. Higher = more impact.
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="block text-[8px] font-semibold text-gray-500 uppercase mb-0.5">
+                          Risk Levels
+                          <span className="text-gray-400 normal-case ml-1">(critical, high, medium thresholds)</span>
+                        </label>
+                        <textarea
+                          value={editRiskLevels}
+                          onChange={(e) => setEditRiskLevels(e.target.value)}
+                          rows={2}
+                          className="w-full text-[10px] px-2 py-1.5 rounded-md border border-gray-200 bg-white text-navy-900 font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                        />
+                        <p className="text-[7px] text-gray-400 mt-0.5">
+                          Score boundaries for each risk level. Changes affect risk classification.
+                        </p>
+                      </div>
+                    </section>
+                  )}
+
+                  {/* Current risk config display (read-only when not editing) */}
+                  {!editing && (
+                    <section>
+                      <h4 className="text-[9px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Risk Configuration</h4>
+                      <div className="rounded-lg border border-gray-200 divide-y divide-gray-100">
+                        <div className="px-3 py-1.5">
+                          <span className="text-[9px] text-gray-500">Deviation Thresholds</span>
+                          <pre className="text-[9px] text-navy-900 font-mono mt-0.5">
+                            {JSON.stringify(policy.deviation_thresholds || { similarity: 0.5, forbidden_similarity: 0.3 }, null, 1)}
+                          </pre>
+                        </div>
+                        <div className="px-3 py-1.5">
+                          <span className="text-[9px] text-gray-500">Risk Weights</span>
+                          <pre className="text-[9px] text-navy-900 font-mono mt-0.5">
+                            {JSON.stringify(policy.risk_weights || { critical: 5.0, high: 3.0, medium: 2.0, low: 1.0, info: 0.1 }, null, 1)}
+                          </pre>
+                        </div>
+                        <div className="px-3 py-1.5">
+                          <span className="text-[9px] text-gray-500">Risk Levels</span>
+                          <pre className="text-[9px] text-navy-900 font-mono mt-0.5">
+                            {JSON.stringify(policy.risk_levels || { critical: 8.0, high: 5.0, medium: 3.0 }, null, 1)}
+                          </pre>
+                        </div>
+                      </div>
+                    </section>
+                  )}
+
                   {/* Lifecycle actions */}
                   <section>
                     <h4 className="text-[9px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Lifecycle Actions</h4>
@@ -534,29 +632,54 @@ export function PolicyDetailDrawer({ policy, open, onClose, clauses, evaluations
                         </div>
                       </div>
 
-                      {/* Risk Score */}
-                      {simResult.risk_score != null && (
+                      {/* Risk Score — supports both 0-1 and 0-10 scales */}
+                      {(simResult.risk_score != null || simResult.normalized_score != null) && (
                         <div className="rounded-lg border border-gray-200 bg-white p-3">
                           <div className="flex items-center justify-between mb-1.5">
                             <span className="text-[9px] font-semibold text-gray-500 uppercase">Risk Score</span>
                             <span className={`text-[11px] font-bold ${
-                              simResult.risk_score >= 0.7 ? "text-red-600" :
-                              simResult.risk_score >= 0.4 ? "text-amber-600" :
+                              (simResult.risk_level || "").toLowerCase() === "critical" ? "text-red-600" :
+                              (simResult.risk_level || "").toLowerCase() === "high" ? "text-amber-600" :
+                              (simResult.risk_level || "").toLowerCase() === "medium" ? "text-orange-500" :
                               "text-green-600"
                             }`}>
-                              {(simResult.risk_score * 100).toFixed(0)}%
+                              {simResult.normalized_score != null
+                                ? simResult.normalized_score.toFixed(1)
+                                : simResult.risk_score != null && simResult.risk_score <= 1
+                                  ? (simResult.risk_score * 10).toFixed(1)
+                                  : (simResult.risk_score ?? 0).toFixed(1)
+                              }
+                              <span className="text-[9px] text-gray-400 font-normal ml-1">/ 10</span>
                             </span>
                           </div>
+                          {/* Progress bar — map 0-10 scale to percentage */}
                           <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
                             <div className={`h-full rounded-full transition-all duration-700 ${
-                              simResult.risk_score >= 0.7 ? "bg-red-500" :
-                              simResult.risk_score >= 0.4 ? "bg-amber-500" :
+                              (simResult.risk_level || "").toLowerCase() === "critical" ? "bg-red-500" :
+                              (simResult.risk_level || "").toLowerCase() === "high" ? "bg-amber-500" :
+                              (simResult.risk_level || "").toLowerCase() === "medium" ? "bg-orange-400" :
                               "bg-green-500"
-                            }`} style={{ width: `${(simResult.risk_score * 100).toFixed(0)}%` }} />
+                            }`} style={{
+                              width: `${Math.min(
+                                ((simResult.normalized_score ?? simResult.risk_score ?? 0) / 10) * 100,
+                                100
+                              )}%`
+                            }} />
                           </div>
-                          <p className="text-[9px] text-gray-500 mt-1.5">
-                            Risk Level: <span className="font-semibold capitalize">{simResult.risk_level || "unknown"}</span>
-                          </p>
+                          <div className="flex items-center justify-between mt-1.5">
+                            <p className="text-[9px] text-gray-500">
+                              Risk Level: <span className={`font-semibold capitalize ${
+                                (simResult.risk_level || "").toLowerCase() === "critical" ? "text-red-600" :
+                                (simResult.risk_level || "").toLowerCase() === "high" ? "text-amber-600" :
+                                "text-gray-700"
+                              }`}>{simResult.risk_level || "unknown"}</span>
+                            </p>
+                            {simResult.risk_score != null && (
+                              <p className="text-[7px] text-gray-400">
+                                Raw: {simResult.risk_score.toFixed(2)}
+                              </p>
+                            )}
+                          </div>
                         </div>
                       )}
 
@@ -665,7 +788,8 @@ export function PolicyDetailDrawer({ policy, open, onClose, clauses, evaluations
 
 function RulesTab({ policy }: { policy: any }) {
   const group = policy.rules;
-  if (!group || !Array.isArray(group.conditions) || group.conditions.length === 0) {
+  const keywordPatterns: string[] = policy.keyword_patterns || [];
+  if ((!group || !Array.isArray(group.conditions) || group.conditions.length === 0) && keywordPatterns.length === 0) {
     return (
       <div className="text-center py-6 text-[10px] text-gray-500">
         No rules configured for this policy.
@@ -674,64 +798,150 @@ function RulesTab({ policy }: { policy: any }) {
   }
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-1.5 mb-1.5">
-        <BookOpen className="w-3 h-3 text-indigo-400" />
-        <span className="text-[9px] font-semibold text-gray-500 uppercase">Rule Conditions ({group.conditions.length})</span>
-        <span className="ml-auto text-[8px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700">
-          Logic: {group.type || "AND"}
-        </span>
-      </div>
-      {group.conditions.map((c: any, i: number) => (
-        <div key={c.condition_id || i} className="rounded-lg border border-gray-200 p-2.5">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-medium text-navy-900">{c.label || c.field}</span>
-            <span className="text-[8px] text-gray-500 font-mono ml-auto">{c.field} {c.operator}</span>
+      {/* Keyword Patterns (Sprint 25.3) */}
+      {keywordPatterns.length > 0 && (
+        <section>
+          <div className="flex items-center gap-1.5 mb-1">
+            <Target className="w-3 h-3 text-indigo-400" />
+            <span className="text-[9px] font-semibold text-gray-500 uppercase">Keyword Patterns</span>
+            <span className="text-[8px] text-gray-400 ml-auto">{keywordPatterns.length} pattern(s)</span>
           </div>
-          {c.value !== undefined && c.value !== null && (
-            <p className="text-[9px] text-gray-700 mt-0.5 font-mono">
-              Value: {typeof c.value === "string" ? c.value : JSON.stringify(c.value)}
-            </p>
-          )}
-        </div>
-      ))}
+          <div className="flex flex-wrap gap-1">
+            {keywordPatterns.map((kw: string, i: number) => (
+              <span key={i} className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 font-mono">
+                {kw}
+              </span>
+            ))}
+          </div>
+          <p className="text-[7px] text-gray-400 mt-1">
+            These keywords are matched against finding clause types and rule names.
+            Add or remove patterns via the rule editor.
+          </p>
+        </section>
+      )}
+
+      {/* Rule Conditions */}
+      {group && Array.isArray(group.conditions) && group.conditions.length > 0 && (
+        <>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <BookOpen className="w-3 h-3 text-indigo-400" />
+            <span className="text-[9px] font-semibold text-gray-500 uppercase">Rule Conditions ({group.conditions.length})</span>
+            <span className="ml-auto text-[8px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700">
+              Logic: {group.type || "AND"}
+            </span>
+          </div>
+          {group.conditions.map((c: any, i: number) => (
+            <div key={c.condition_id || i} className="rounded-lg border border-gray-200 p-2.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-medium text-navy-900">{c.label || c.field}</span>
+                <span className="text-[8px] text-gray-500 font-mono ml-auto">{c.field} {c.operator}</span>
+              </div>
+              {c.value !== undefined && c.value !== null && (
+                <p className="text-[9px] text-gray-700 mt-0.5 font-mono">
+                  Value: {typeof c.value === "string" ? c.value : JSON.stringify(c.value)}
+                </p>
+              )}
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }
 
 function VersionsTab({ policy, history }: { policy: any; history: any[] }) {
+  const queryClient = useQueryClient();
+  const [publishing, setPublishing] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+
+  const handlePublish = async () => {
+    if (!policy) return;
+    setPublishing(true);
+    setPublishError(null);
+    try {
+      const id = policy.policy_id || policy.playbook_id;
+      await policyService.publish(id);
+      queryClient.invalidateQueries({ queryKey: policyKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: policyKeys.detail(id) });
+    } catch (err: any) {
+      setPublishError(err?.message || "Publish failed");
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const currentVersion = policy?.active_version_id
+    ? `v${policy.version_count || 1} (${policy.active_version_id.slice(0, 8)})`
+    : `v${policy.version_count || 1}`;
+
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-1.5 mb-1.5">
-        <History className="w-3 h-3 text-indigo-400" />
-        <span className="text-[9px] font-semibold text-gray-500 uppercase">Version History</span>
-      </div>
-      {history.length === 0 ? (
-        <p className="text-[10px] text-gray-500 italic">No versions recorded yet.</p>
-      ) : (
-        <ol className="space-y-1.5">
-          {history.map((v, i) => (
-            <li key={i} className="flex items-start gap-2 p-2 rounded-lg border border-gray-100">
-              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-navy-100 text-navy-700 text-[9px] font-bold flex items-center justify-center">
-                v{v.version}
-              </span>
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-medium text-navy-900">{v.change}</p>
-                <p className="text-[8px] text-gray-500 mt-0.5">
-                  {formatDate(v.when)} · {v.who}
-                </p>
-              </div>
-              {i > 0 && (
-                <button
-                  className="text-[8px] text-indigo-600 hover:text-indigo-800 inline-flex items-center gap-0.5"
-                  title={`Restore v${v.version}`}
-                >
-                  <ArrowRight className="w-2.5 h-2.5" /> Restore
-                </button>
-              )}
-            </li>
-          ))}
-        </ol>
-      )}
+    <div className="space-y-3">
+      {/* Current Version */}
+      <section className="rounded-lg border border-gray-200 p-3">
+        <div className="flex items-center gap-1.5 mb-1">
+          <Layers className="w-3 h-3 text-indigo-400" />
+          <span className="text-[9px] font-semibold text-gray-500 uppercase">Current Version</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-bold text-navy-900">{currentVersion}</p>
+            <p className="text-[9px] text-gray-500">
+              {policy.version_count || 1} version(s) · Last updated {policy.updated_at ? formatDate(policy.updated_at) : "—"}
+            </p>
+          </div>
+          <button
+            onClick={handlePublish}
+            disabled={publishing}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-md bg-green-100 text-green-700 hover:bg-green-200 disabled:opacity-50 transition-colors"
+          >
+            {publishing ? (
+              <><Loader2 className="w-3 h-3 animate-spin" /> Publishing…</>
+            ) : (
+              <><CheckCircle2 className="w-3 h-3" /> Publish New Version</>
+            )}
+          </button>
+        </div>
+        {publishError && (
+          <p className="text-[9px] text-red-600 mt-1">{publishError}</p>
+        )}
+      </section>
+
+      {/* Version History */}
+      <section>
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <History className="w-3 h-3 text-indigo-400" />
+          <span className="text-[9px] font-semibold text-gray-500 uppercase">Version History</span>
+        </div>
+        {history.length === 0 ? (
+          <p className="text-[10px] text-gray-500 italic">No versions recorded yet. Publish the first version to begin tracking changes.</p>
+        ) : (
+          <ol className="space-y-1.5">
+            {history.map((v, i) => (
+              <li key={i} className="flex items-start gap-2 p-2 rounded-lg border border-gray-100">
+                <span className={`flex-shrink-0 w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center ${
+                  i === 0 ? 'bg-green-100 text-green-700' : 'bg-navy-100 text-navy-700'
+                }`}>
+                  v{v.version}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-medium text-navy-900">{v.change}</p>
+                  <p className="text-[8px] text-gray-500 mt-0.5">
+                    {formatDate(v.when)} · {v.who}
+                  </p>
+                </div>
+                {i > 0 && (
+                  <button
+                    className="text-[8px] text-indigo-600 hover:text-indigo-800 inline-flex items-center gap-0.5"
+                    title={`Restore v${v.version}`}
+                  >
+                    <ArrowRight className="w-2.5 h-2.5" /> Restore
+                  </button>
+                )}
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
     </div>
   );
 }

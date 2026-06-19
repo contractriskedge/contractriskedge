@@ -20,6 +20,11 @@ class AuditEventItem(BaseModel):
     after_state: Optional[dict[str, Any]] = None
     description: Optional[str] = None
     correlation_id: Optional[str] = None
+    status: str = "success"
+    severity: str = "info"
+    source: Optional[str] = None
+    ip_address: Optional[str] = None
+    error_message: Optional[str] = None
     created_at: datetime
 
 
@@ -30,6 +35,7 @@ class AuditQueryParams(BaseModel):
     resource_id: Optional[str] = None
     actor_id: Optional[str] = None
     action: Optional[str] = None
+    status: Optional[str] = None
     from_date: Optional[datetime] = None
     to_date: Optional[datetime] = None
     page: int = Field(default=1, ge=1)

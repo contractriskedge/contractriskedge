@@ -78,7 +78,8 @@ class PlaybookRepository(BaseRepository):
         playbook = await self.get_playbook(playbook_id, tenant_id)
         if not playbook:
             return None
-        allowed = {"name", "description", "jurisdiction", "practice_area", "status", "tags", "metadata"}
+        allowed = {"name", "description", "jurisdiction", "practice_area", "status",
+                    "tags", "metadata", "deviation_thresholds", "risk_weights", "risk_levels"}
         updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
         if updates:
             stmt = update(LegalPlaybook).where(
@@ -338,7 +339,7 @@ class PlaybookRepository(BaseRepository):
                     "conditions", "effect", "effect_config", "target_clause_id",
                     "target_category", "applicable_jurisdictions", "applicable_industries",
                     "min_contract_value", "max_contract_value", "effective_date",
-                    "expiration_date", "tags", "metadata"}
+                    "expiration_date", "tags", "keyword_patterns", "metadata"}
         updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
         if updates:
             stmt = update(PolicyRule).where(
@@ -347,6 +348,8 @@ class PlaybookRepository(BaseRepository):
             ).values(**updates)
             await self.session.execute(stmt)
             await self.session.flush()
+            # Expire the cached ORM object so the next get_rule fetches fresh data
+            await self.session.refresh(rule)
         return await self.get_rule(rule_id, tenant_id)
 
     async def get_active_rules_by_playbook(self, playbook_id: str, tenant_id: str) -> list[PolicyRule]:

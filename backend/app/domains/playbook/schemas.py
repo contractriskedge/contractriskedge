@@ -27,6 +27,9 @@ class PlaybookUpdate(BaseModel):
     practice_area: Optional[str] = Field(None, max_length=50)
     tags: Optional[list[str]] = None
     metadata: Optional[dict[str, Any]] = None
+    deviation_thresholds: Optional[dict[str, Any]] = None
+    risk_weights: Optional[dict[str, Any]] = None
+    risk_levels: Optional[dict[str, Any]] = None
 
 
 class PlaybookSummary(BaseModel):
@@ -46,6 +49,9 @@ class PlaybookSummary(BaseModel):
 
 class PlaybookDetail(PlaybookSummary):
     metadata: dict[str, Any] = Field(default_factory=dict)
+    deviation_thresholds: Optional[dict[str, Any]] = None
+    risk_weights: Optional[dict[str, Any]] = None
+    risk_levels: Optional[dict[str, Any]] = None
     archived_at: Optional[datetime] = None
 
 
@@ -182,6 +188,7 @@ class PolicyRuleCreate(BaseModel):
     effective_date: Optional[datetime] = None
     expiration_date: Optional[datetime] = None
     tags: list[str] = Field(default_factory=list)
+    keyword_patterns: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -203,6 +210,7 @@ class PolicyRuleUpdate(BaseModel):
     effective_date: Optional[datetime] = None
     expiration_date: Optional[datetime] = None
     tags: Optional[list[str]] = None
+    keyword_patterns: Optional[list[str]] = None
     metadata: Optional[dict[str, Any]] = None
 
 
@@ -227,6 +235,7 @@ class PolicyRuleItem(BaseModel):
     effective_date: Optional[datetime] = None
     expiration_date: Optional[datetime] = None
     tags: list[str] = Field(default_factory=list)
+    keyword_patterns: list[str] = Field(default_factory=list)
     created_by: str
     created_at: datetime
     updated_at: datetime

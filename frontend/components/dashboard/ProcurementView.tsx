@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useState, useRef } from "react";
-import { ShoppingCart, Upload, Download, FileSpreadsheet, Search, Loader2, CheckCircle, XCircle } from "lucide-react";
+import { ShoppingCart, Upload, Download, FileSpreadsheet, Search, Loader2, CheckCircle, XCircle, AlertCircle } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import * as api from "@/lib/api";
+import { useProcurementDashboard } from "@/services/hooks/useProcurement";
 
 export function ProcurementView() {
   const { token } = useAuth();
@@ -12,6 +13,22 @@ export function ProcurementView() {
   const [batchResult, setBatchResult] = useState<api.BatchUploadResponse | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Real procurement dashboard data
+  const { data: dashboardData, isLoading, error } = useProcurementDashboard();
+  const suppliers = dashboardData?.suppliers ?? [];
+  const totalSuppliers = dashboardData?.total_suppliers ?? 0;
+  const highRiskSuppliers = dashboardData?.high_risk_suppliers ?? 0;
+  const avgRiskScore = dashboardData?.avg_risk_score ?? 0;
+  const totalContractValue = dashboardData?.total_contract_value ?? 0;
+  const kpis = dashboardData?.kpis ?? [];
+
+  // Format total contract value
+  const formattedTotalValue = totalContractValue >= 1_000_000
+    ? `$${(totalContractValue / 1_000_000).toFixed(1)}M`
+    : totalContractValue >= 1_000
+      ? `$${(totalContractValue / 1_000).toFixed(1)}K`
+      : `$${totalContractValue.toLocaleString()}`;
 
   const handleBatchUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -94,6 +111,27 @@ export function ProcurementView() {
         </div>
       )}
 
+      {/* KPI Summary Cards */}
+      {kpis.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {kpis.map((kpi, i) => (
+            <div key={i} className="stat-card">
+              <span className="stat-label">{kpi.label}</span>
+              <span className="stat-value">
+                {kpi.format === "currency"
+                  ? `$${(kpi.value / 1_000_000).toFixed(1)}M`
+                  : kpi.format === "percentage"
+                    ? `${kpi.value}%`
+                    : kpi.value.toLocaleString()}
+              </span>
+              <span className={`stat-trend ${kpi.trend === "up" ? "text-green-600" : kpi.trend === "down" ? "text-red-500" : "text-gray-400"}`}>
+                {kpi.change > 0 ? "+" : ""}{kpi.change}%
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Vendor Comparison Matrix */}
       <div className="card overflow-hidden">
         <div className="card-header flex items-center justify-between">
@@ -109,57 +147,81 @@ export function ProcurementView() {
             />
           </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="bg-gray-50">
-                <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
-                <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Risk Score</th>
-                <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Contracts</th>
-                <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Contract Value</th>
-                <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry</th>
-                <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Top Risk</th>
-                <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {vendors
-                .filter((v) => v.name.toLowerCase().includes(searchQuery.toLowerCase()))
-                .map((v) => (
-                <tr key={v.name} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-6 py-4">
-                    <p className="text-sm font-medium text-gray-900">{v.name}</p>
-                  </td>
-                  <td className="px-6 py-4 text-center">
-                    <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                      v.risk >= 7 ? "bg-red-100 text-red-800" :
-                      v.risk >= 5 ? "bg-orange-100 text-orange-800" :
-                      "bg-green-100 text-green-800"
-                    }`}>
-                      {v.risk}/10
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-center text-sm text-gray-600">{v.contracts}</td>
-                  <td className="px-6 py-4 text-center text-sm font-medium text-gray-900">{v.value}</td>
-                  <td className="px-6 py-4 text-center text-sm text-gray-600">{v.expiry}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{v.topRisk}</td>
-                  <td className="px-6 py-4 text-center">
-                    <span className="badge bg-green-100 text-green-800">Active</span>
-                  </td>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-6 h-6 text-gold-400 animate-spin" />
+          </div>
+        ) : error ? (
+          <div className="flex items-center gap-2 p-6 text-red-600">
+            <AlertCircle className="w-5 h-5" />
+            <span className="text-sm">Failed to load vendor data</span>
+          </div>
+        ) : suppliers.length === 0 ? (
+          <div className="text-center py-12 text-gray-500 text-sm">No vendors found</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
+                  <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Risk Score</th>
+                  <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Contract Value</th>
+                  <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Renewal Date</th>
+                  <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">SLA Compliance</th>
+                  <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Incidents (30d)</th>
+                  <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {suppliers
+                  .filter((v) => v.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                  .map((v) => (
+                  <tr key={v.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4">
+                      <p className="text-sm font-medium text-gray-900">{v.name}</p>
+                      <p className="text-xs text-gray-500">{v.category}</p>
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                        v.risk_score >= 7 ? "bg-red-100 text-red-800" :
+                        v.risk_score >= 5 ? "bg-orange-100 text-orange-800" :
+                        "bg-green-100 text-green-800"
+                      }`}>
+                        {v.risk_score}/10
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm font-medium text-gray-900">
+                      ${(v.contract_value / 1_000).toFixed(0)}K
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm text-gray-600">{v.renewal_date}</td>
+                    <td className="px-6 py-4 text-center">
+                      <span className={`text-sm font-medium ${
+                        v.sla_compliance >= 95 ? "text-green-600" :
+                        v.sla_compliance >= 85 ? "text-orange-600" :
+                        "text-red-600"
+                      }`}>
+                        {v.sla_compliance}%
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-center text-sm text-gray-600">{v.incidents_30d}</td>
+                    <td className="px-6 py-4 text-center">
+                      <span className={`badge ${
+                        v.status === "active" ? "bg-green-100 text-green-800" :
+                        v.status === "under_review" ? "bg-orange-100 text-orange-800" :
+                        v.status === "onboarding" ? "bg-blue-100 text-blue-800" :
+                        "bg-gray-100 text-gray-800"
+                      }`}>
+                        {v.status.replace(/_/g, " ")}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
-const vendors = [
-  { name: "TechSolutions Inc.", risk: 8.5, contracts: 3, expiry: "2027-03-15", value: "$500K", topRisk: "Liability" },
-  { name: "CloudSoft Inc.", risk: 7.2, contracts: 2, expiry: "2026-11-30", value: "$350K", topRisk: "IP Ownership" },
-  { name: "DataPartner LLC", risk: 6.8, contracts: 1, expiry: "2026-09-01", value: "$250K", topRisk: "Confidentiality" },
-  { name: "SecureHost Corp", risk: 4.2, contracts: 2, expiry: "2027-06-30", value: "$180K", topRisk: "SLA" },
-  { name: "GlobalLogistics Ltd", risk: 3.1, contracts: 1, expiry: "2026-12-31", value: "$120K", topRisk: "Payment" },
-];

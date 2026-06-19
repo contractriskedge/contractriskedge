@@ -7,12 +7,14 @@ import { AdminKpiCards } from "./AdminKpiCards";
 import { UserManagement } from "./UserManagement";
 import { AiGovernanceCenter } from "./AiGovernanceCenter";
 import { AuditCenter } from "./AuditCenter";
+import { AuditReportsPanel } from "./AuditReportsPanel";
 import { SystemHealth } from "./SystemHealth";
 import { IntegrationsHub } from "./IntegrationsHub";
 import { SecurityCenter } from "./SecurityCenter";
 import { AdminDetailDrawer } from "./AdminDetailDrawer";
 import { AdminFilterBar } from "./AdminFilterBar";
 import { useAdminDashboard, useAdminUsers, useAuditLogs } from "@/services/hooks/useAdmin";
+import { useAuth } from "@/components/auth/AuthProvider";
 import type { AdminUser, AuditEventType } from "./types";
 
 // ── Audit event type/severity mapping ────────────────────────────
@@ -43,20 +45,21 @@ const defaultFilters: AdminFilters = {
 };
 
 export function AdminConsole() {
+  const { hasPermission } = useAuth();
+  const isFullAdmin = hasPermission("admin:tenant");
+  const canViewAudit = hasPermission("audit:read");
+
   const [filters, setFilters] = useState<AdminFilters>({ ...defaultFilters });
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
 
-  // Real API hooks replacing mockData
-  const { data: dashboardData, isLoading, error, refetch } = useAdminDashboard();
-  const { data: usersData } = useAdminUsers();
-  const { data: auditLogsData } = useAuditLogs({ page_size: 50 });
+  const { data: dashboardData, isLoading, error, refetch } = useAdminDashboard(isFullAdmin);
+  const { data: usersData } = useAdminUsers(undefined, isFullAdmin);
+  const { data: auditLogsData } = useAuditLogs({ page_size: 50 }, canViewAudit);
 
   const adminKpis = dashboardData?.kpis ?? [];
   const adminUsers = usersData?.data ?? [];
   const systemHealthMetrics = dashboardData?.system_health ? [{ status: dashboardData.system_health, uptime: 99.9, lastChecked: new Date().toISOString() }] : [];
-  // AuditLogsData has { events: AuditEventItem[], total, page, page_size, total_pages }
-  const auditLogsResponse = auditLogsData as { events?: Array<Record<string, unknown>> } | undefined;
-  const auditEvents = (auditLogsResponse?.events ?? []).map((e: Record<string, unknown>) => ({
+  const auditEvents = (auditLogsData?.events ?? []).map((e) => ({
     id: String(e.event_id ?? ""),
     timestamp: String(e.created_at ?? ""),
     type: mapAuditEventType(String(e.event_type ?? "")),
@@ -66,7 +69,7 @@ export function AdminConsole() {
     details: String(e.description ?? `${e.event_type} on ${e.resource_type}`),
     severity: mapAuditSeverity(String(e.event_type ?? "")),
     ip: "",
-    status: "success" as const,
+    status: (e.status === "failure" || e.status === "blocked" ? e.status : "success") as "success" | "failure" | "blocked",
   }));
   const integrations = [];
   const securityAlerts = [];
@@ -80,8 +83,8 @@ export function AdminConsole() {
   }, []);
   const resetFilters = useCallback(() => setFilters({ ...defaultFilters }), []);
 
-  // Loading state
-  if (isLoading && adminUsers.length === 0) {
+  // Loading state (full admin only)
+  if (isFullAdmin && isLoading && adminUsers.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
@@ -92,8 +95,8 @@ export function AdminConsole() {
     );
   }
 
-  // Error state
-  if (error && adminUsers.length === 0) {
+  // Error state (full admin only — audit-only users still see audit panel)
+  if (isFullAdmin && error && adminUsers.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center max-w-md">
@@ -117,8 +120,14 @@ export function AdminConsole() {
             <Shield className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-navy-900">Admin & Security Console</h1>
-            <p className="text-xs text-gray-500 mt-0.5">Enterprise governance, security, and administration</p>
+            <h1 className="text-xl font-bold text-navy-900">
+              {isFullAdmin ? "Admin & Security Console" : "Audit & Compliance"}
+            </h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {isFullAdmin
+                ? "Enterprise governance, security, and administration"
+                : "View and export tenant audit logs"}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -131,32 +140,45 @@ export function AdminConsole() {
         </div>
       </motion.div>
 
-      {/* KPI Row */}
-      <AdminKpiCards metrics={adminKpis} />
+      {/* KPI Row — tenant admins only */}
+      {isFullAdmin && <AdminKpiCards metrics={adminKpis} />}
 
-      {/* Filter Bar */}
-      <AdminFilterBar filters={filters} onChange={handleFilterChange} onReset={resetFilters} />
+      {/* Filter Bar — tenant admins only */}
+      {isFullAdmin && (
+        <AdminFilterBar filters={filters} onChange={handleFilterChange} onReset={resetFilters} />
+      )}
 
       {/* Section 1: User Management */}
-      <UserManagement users={adminUsers} roles={roleDefinitions} onSelectUser={setSelectedUser} />
+      {isFullAdmin && (
+        <UserManagement users={adminUsers} roles={roleDefinitions} onSelectUser={setSelectedUser} />
+      )}
 
       {/* Section 2: AI Governance + System Health */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <AiGovernanceCenter events={aiGovernanceEvents} />
-        <SystemHealth metrics={systemHealthMetrics} />
-      </div>
+      {isFullAdmin && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <AiGovernanceCenter events={aiGovernanceEvents} />
+          <SystemHealth metrics={systemHealthMetrics} />
+        </div>
+      )}
 
-      {/* Section 3: Audit + Compliance */}
-      <AuditCenter events={auditEvents} compliance={complianceChecks} />
+      {/* Enterprise Audit Reports */}
+      {canViewAudit && <AuditReportsPanel />}
+
+      {/* Audit summary cards */}
+      {canViewAudit && <AuditCenter events={auditEvents} compliance={complianceChecks} />}
 
       {/* Section 4: Integrations + Security */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <IntegrationsHub integrations={integrations} />
-        <SecurityCenter alerts={securityAlerts} tenants={tenants} />
-      </div>
+      {isFullAdmin && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <IntegrationsHub integrations={integrations} />
+          <SecurityCenter alerts={securityAlerts} tenants={tenants} />
+        </div>
+      )}
 
       {/* Detail Drawer */}
-      <AdminDetailDrawer user={selectedUser} onClose={() => setSelectedUser(null)} />
+      {isFullAdmin && (
+        <AdminDetailDrawer user={selectedUser} onClose={() => setSelectedUser(null)} />
+      )}
     </div>
   );
 }

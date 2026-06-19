@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import get_db, get_tenant_id
 from app.kernel.security.rbac import require_permission
 from app.kernel.security.permissions import Permissions
+from app.domains.admin.models import AdminUser
 
 logger = logging.getLogger(__name__)
 
@@ -139,31 +140,29 @@ async def search_users(
 
     Returns user name, email, role, and department.
     """
-    query = select(
-        text("user_id, name, email, role, business_unit")
-    ).select_from(text("admin_users")).where(
-        text("tenant_id = :tenant_id")
+    stmt = (
+        select(AdminUser)
+        .where(AdminUser.tenant_id == tenant_id, AdminUser.is_active.is_(True))
+        .order_by(AdminUser.name.asc())
+        .limit(limit)
     )
-    bind = {"tenant_id": tenant_id}
-
     if q:
-        query = query.where(
-            text("(name ILIKE :query OR email ILIKE :query)")
+        pattern = f"%{q}%"
+        stmt = stmt.where(
+            (AdminUser.name.ilike(pattern)) | (AdminUser.email.ilike(pattern))
         )
-        bind["query"] = f"%{q}%"
 
-    query = query.order_by(text("is_active DESC, name ASC")).limit(limit)
-    rows = await db.execute(query, bind)
+    rows = await db.execute(stmt)
 
     results = []
-    for row in rows.fetchall():
+    for user in rows.scalars().all():
         results.append({
-            "id": str(row.user_id),
-            "name": row.name,
-            "email": row.email,
-            "role": row.role,
-            "department": row.business_unit,
-            "business_unit": row.business_unit,
+            "id": str(user.user_id),
+            "name": user.name,
+            "email": user.email,
+            "role": user.role,
+            "department": user.business_unit,
+            "business_unit": user.business_unit,
         })
 
     return {"data": results, "total": len(results)}

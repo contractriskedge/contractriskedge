@@ -122,6 +122,21 @@ class EvaluationStatus(str, PyEnum):
     FAILED = "failed"
 
 
+# ── Default factory functions for JSONB columns ─────────────────────
+
+
+def _default_deviation_thresholds() -> dict:
+    return {"similarity": 0.5, "forbidden_similarity": 0.3}
+
+
+def _default_risk_weights() -> dict:
+    return {"critical": 5.0, "high": 3.0, "medium": 2.0, "low": 1.0, "info": 0.1}
+
+
+def _default_risk_levels() -> dict:
+    return {"critical": 8.0, "high": 5.0, "medium": 3.0}
+
+
 # ── Legal Playbooks ──────────────────────────────────────────────────
 
 
@@ -143,6 +158,18 @@ class LegalPlaybook(Base):
 
     tags = Column(ARRAY(Text), nullable=False, default=list)
     document_metadata = Column("metadata", JSONB, nullable=False, default=dict)
+
+    # Configurable deviation detection thresholds (Sprint 25.4)
+    # {"similarity": 0.5, "forbidden_similarity": 0.3}
+    deviation_thresholds = Column(JSONB, nullable=False, default=_default_deviation_thresholds)
+
+    # Configurable risk scoring weights (Sprint 25.5)
+    # {"critical": 5.0, "high": 3.0, "medium": 2.0, "low": 1.0, "info": 0.1}
+    risk_weights = Column(JSONB, nullable=False, default=_default_risk_weights)
+
+    # Configurable risk level thresholds
+    # {"critical": 8.0, "high": 5.0, "medium": 3.0}
+    risk_levels = Column(JSONB, nullable=False, default=_default_risk_levels)
 
     created_by = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -270,6 +297,7 @@ class PolicyRule(Base):
 
     # Rule metadata
     tags = Column(ARRAY(Text), nullable=False, default=list)
+    keyword_patterns = Column(JSONB, nullable=False, default=list)
     document_metadata = Column("metadata", JSONB, nullable=False, default=dict)
 
     created_by = Column(Text, nullable=False)

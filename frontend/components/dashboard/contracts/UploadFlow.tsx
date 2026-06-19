@@ -75,10 +75,10 @@ export function UploadFlow({ isOpen, onClose }: UploadFlowProps) {
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="fixed inset-0 m-auto w-full max-w-lg h-fit bg-white rounded-2xl border border-gray-200 shadow-2xl z-50 overflow-hidden"
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg max-h-[90vh] flex flex-col bg-white rounded-2xl border border-gray-200 shadow-2xl z-50 overflow-hidden"
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
               <div className="flex items-center gap-2">
                 <Upload className="w-4.5 h-4.5 text-navy-700" />
                 <h2 className="text-sm font-semibold text-navy-900">
@@ -88,7 +88,7 @@ export function UploadFlow({ isOpen, onClose }: UploadFlowProps) {
               <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 text-gray-400 transition-colors"><X className="w-4 h-4" /></button>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4">
               {!uploading && !complete && (
                 <>
                   {/* Drop zone */}
@@ -116,17 +116,21 @@ export function UploadFlow({ isOpen, onClose }: UploadFlowProps) {
                   {/* Selected files */}
                   {files.length > 0 && (
                     <div className="space-y-1.5">
-                      <p className="text-[10px] font-semibold text-gray-500 uppercase">{files.length} file{files.length > 1 ? "s" : ""} selected</p>
-                      {files.map((f, i) => (
-                        <div key={i} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
-                          <FileText className="w-4 h-4 text-navy-400" />
-                          <span className="text-xs text-gray-700 flex-1 truncate">{f.name}</span>
-                          <span className="text-[10px] text-gray-400">{(f.size / 1024 / 1024).toFixed(1)}MB</span>
-                          <button onClick={() => setFiles(files.filter((_, j) => j !== i))} className="p-0.5 rounded hover:bg-gray-200 text-gray-400">
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ))}
+                      <p className="text-[10px] font-semibold text-gray-500 uppercase sticky top-0 bg-white py-1 z-10">
+                        {files.length} file{files.length > 1 ? "s" : ""} selected
+                      </p>
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                        {files.map((f, i) => (
+                          <div key={`${f.name}-${i}`} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
+                            <FileText className="w-4 h-4 text-navy-400 shrink-0" />
+                            <span className="text-xs text-gray-700 flex-1 truncate">{f.name}</span>
+                            <span className="text-[10px] text-gray-400 shrink-0">{(f.size / 1024 / 1024).toFixed(1)}MB</span>
+                            <button onClick={() => setFiles(files.filter((_, j) => j !== i))} className="p-0.5 rounded hover:bg-gray-200 text-gray-400 shrink-0">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 

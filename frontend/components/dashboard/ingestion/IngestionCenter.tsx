@@ -8,6 +8,17 @@ import { IngestionKpiCards } from "./IngestionKpiCards";
 import { IngestionToolbar } from "./IngestionToolbar";
 import { IngestionLeftSidebar } from "./IngestionLeftSidebar";
 import { IngestionCenterPanel } from "./IngestionCenterPanel";
+import { UploadModal } from "./UploadModal";
+import { BulkImportProgressBanner } from "./BulkImportProgressBanner";
+import {
+  BULK_IMPORT_MIN_FILES,
+  computeBulkImportProgress,
+  createBulkImportSession,
+  isBulkImportSession,
+  loadBulkImportSession,
+  saveBulkImportSession,
+  type BulkImportSession,
+} from "./bulkImportUtils";
 import { useUploads, useUploadFile, useRetryUpload, useUploadStatus, useQueueStats, uploadKeys } from "@/services/hooks/useUploads";
 import type { UploadSummary, UploadStatusResponse } from "@/services/api/uploads";
 import { uploadService } from "@/services/api/uploads";
@@ -35,10 +46,10 @@ function summaryToImportJob(summary: UploadSummary): ImportJob {
     submittedBy: "Current User",
     priority: "medium",
     isDuplicate: false,
-    confidence: status === "completed" ? 90 : 0,
-    ocrAccuracy: status === "completed" ? 95 : 0,
-    classificationScore: status === "completed" ? 90 : 0,
-    extractionScore: status === "completed" ? 88 : 0,
+    confidence: summary.ai_confidence ?? undefined,
+    ocrAccuracy: summary.ocr_accuracy ?? undefined,
+    classificationScore: summary.classification_score ?? undefined,
+    extractionScore: summary.extraction_score ?? undefined,
     pipeline: pipelineFromIngestionState(summary.ingestion_state, 0),
     contractNumber: summary.contract_number,
     metadata: {
@@ -121,15 +132,47 @@ function deriveKpis(uploads: UploadSummary[] | undefined, total: number | undefi
   const failed = uploads?.filter((u) => ["failed", "cancelled", "quarantined"].includes(u.ingestion_state)).length ?? 0;
   const running = uploads?.filter((u) => !["review_ready", "failed", "cancelled", "quarantined"].includes(u.ingestion_state)).length ?? 0;
 
+  // Compute real metrics from upload data
+  const totalUploads = uploads?.length ?? 0;
+  const completedUploads = completed;
+  const successRate = totalUploads > 0 ? Math.round((completedUploads / totalUploads) * 1000) / 10 : 0;
+
+  // Compute average OCR accuracy from completed uploads that have the field
+  const withOcrAccuracy = uploads?.filter((u) => u.ocr_accuracy != null) ?? [];
+  const avgOcrAccuracy = withOcrAccuracy.length > 0
+    ? (withOcrAccuracy.reduce((s, u) => s + (u.ocr_accuracy ?? 0), 0) / withOcrAccuracy.length)
+    : null;
+
+  // Compute average extraction score from completed uploads
+  const withExtractionScore = uploads?.filter((u) => u.extraction_score != null) ?? [];
+  const avgExtractionScore = withExtractionScore.length > 0
+    ? (withExtractionScore.reduce((s, u) => s + (u.extraction_score ?? 0), 0) / withExtractionScore.length)
+    : null;
+
+  // Compute average risk score from completed uploads
+  const withRiskScore = uploads?.filter((u) => u.risk_score != null) ?? [];
+  const avgRiskScore = withRiskScore.length > 0
+    ? (withRiskScore.reduce((s, u) => s + (u.risk_score ?? 0), 0) / withRiskScore.length)
+    : null;
+
+  // Compute processing throughput: count of uploads created in the last hour
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const uploadedLastHour = uploads?.filter((u) => new Date(u.created_at) >= oneHourAgo).length ?? 0;
+
+  // Compute today's uploads
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const uploadedToday = uploads?.filter((u) => new Date(u.created_at) >= startOfToday).length ?? 0;
+
   return [
-    { id: "uploaded-today", label: "Uploaded Today", value: count.toLocaleString(), trend: 12, trendDirection: "up", icon: "Upload", severity: "info", tooltip: `${count} documents uploaded today` },
+    { id: "uploaded-today", label: "Uploaded Today", value: (uploadedToday || count).toLocaleString(), trend: 12, trendDirection: "up", icon: "Upload", severity: "info", tooltip: `${uploadedToday || count} documents uploaded today` },
     { id: "processing-queue", label: "Processing Queue", value: running.toLocaleString(), subtitle: `${completed} completed`, trend: running > 0 ? 8 : 0, trendDirection: running > 0 ? "up" : "neutral", icon: "ListOrdered", severity: running > 5 ? "warning" : "info", tooltip: `${running} documents in queue` },
     { id: "failed-jobs", label: "Failed Jobs", value: failed.toLocaleString(), trend: 100, trendDirection: failed > 0 ? "down" : "neutral", icon: "AlertTriangle", severity: failed > 0 ? "critical" : "success", tooltip: `${failed} failed imports` },
-    { id: "avg-processing-time", label: "Avg Processing Time", value: "2.4m", subtitle: "per document", trend: -8, trendDirection: "down", icon: "Clock", severity: "info", tooltip: "Average processing time per document" },
-    { id: "ocr-success-rate", label: "OCR Success Rate", value: "97.4%", trend: 1.8, trendDirection: "up", icon: "ScanEye", severity: "success", tooltip: "97.4% OCR success rate" },
-    { id: "extraction-success-rate", label: "Extraction Success Rate", value: "94.2%", trend: 2.1, trendDirection: "up", icon: "FileSearch", severity: "success", tooltip: "94.2% AI extraction success rate" },
-    { id: "avg-queue-wait", label: "Avg Queue Wait", value: "1.8m", subtitle: "per document", trend: -12, trendDirection: "down", icon: "Clock", severity: "info", tooltip: "Average queue wait time per document" },
-    { id: "processing-throughput", label: "Processing Throughput", value: "24/hr", trend: 5, trendDirection: "up", icon: "Activity", severity: "info", tooltip: "Documents processed per hour" },
+    { id: "avg-processing-time", label: "Avg Processing Time", value: successRate > 0 ? `${successRate}%` : "—", subtitle: "success rate", trend: -8, trendDirection: "down", icon: "Clock", severity: "info", tooltip: `${successRate}% overall processing success rate` },
+    { id: "ocr-success-rate", label: "OCR Accuracy", value: avgOcrAccuracy != null ? `${Math.round(avgOcrAccuracy)}%` : "—", trend: 1.8, trendDirection: "up", icon: "ScanEye", severity: "success", tooltip: avgOcrAccuracy != null ? `${Math.round(avgOcrAccuracy)}% average OCR accuracy` : "No OCR data available" },
+    { id: "extraction-success-rate", label: "Extraction Score", value: avgExtractionScore != null ? `${Math.round(avgExtractionScore)}%` : "—", trend: 2.1, trendDirection: "up", icon: "FileSearch", severity: "success", tooltip: avgExtractionScore != null ? `${Math.round(avgExtractionScore)}% average extraction score` : "No extraction data available" },
+    { id: "avg-risk-score", label: "Avg Risk Score", value: avgRiskScore != null ? `${avgRiskScore.toFixed(1)}` : "—", subtitle: "/10", trend: -12, trendDirection: "down", icon: "AlertTriangle", severity: avgRiskScore != null && avgRiskScore >= 5 ? "warning" : "info", tooltip: avgRiskScore != null ? `${avgRiskScore.toFixed(1)} average risk score` : "No risk data available" },
+    { id: "processing-throughput", label: "Processing Throughput", value: `${uploadedLastHour}/hr`, trend: 5, trendDirection: "up", icon: "Activity", severity: "info", tooltip: `${uploadedLastHour} documents in the last hour` },
   ];
 }
 
@@ -143,6 +186,8 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
   const queryClient = useQueryClient();
   const [showLeftSidebar, setShowLeftSidebar] = useState(true);
   const [showActivityFeed, setShowActivityFeed] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [bulkSession, setBulkSession] = useState<BulkImportSession | null>(null);
   const [compactMode, setCompactMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [toast, setToast] = useState<string | null>(null);
@@ -156,9 +201,21 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
   ]);
 
   // ── React Query: list uploads ──────────────────────────────────────
-  const { data: listResponse, isLoading, isError, error, refetch } = useUploads({ page_size: 100 });
+  const { data: listResponse, isLoading, isError, error, refetch } = useUploads(
+    { page_size: 100 },
+    { forcePolling: isBulkImportSession(bulkSession) },
+  );
   const uploads: UploadSummary[] = listResponse?.data ?? [];
   const total: number = listResponse?.pagination?.total ?? uploads.length;
+
+  useEffect(() => {
+    const stored = loadBulkImportSession();
+    if (stored) setBulkSession(stored);
+  }, []);
+
+  useEffect(() => {
+    saveBulkImportSession(bulkSession);
+  }, [bulkSession]);
 
   // When uploads complete (review_ready), invalidate review/contract queries
   // so the Review Queue and Contracts pages reflect the new data immediately.
@@ -214,11 +271,24 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
 
   const handleUpload = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    for (const file of Array.from(files)) {
+    const fileArray = Array.from(files);
+
+    if (fileArray.length >= BULK_IMPORT_MIN_FILES) {
+      setBulkSession(createBulkImportSession(fileArray.length));
+    }
+
+    for (const file of fileArray) {
       const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       setLocalJobs((prev) => [createPendingJob(file, tempId), ...prev]);
       try {
-        await uploadFileMutation.mutateAsync(file);
+        const result = await uploadFileMutation.mutateAsync(file);
+        setBulkSession((prev) => {
+          if (!prev || prev.dismissed) return prev;
+          const uploadIds = prev.uploadIds.includes(result.upload_id)
+            ? prev.uploadIds
+            : [...prev.uploadIds, result.upload_id];
+          return { ...prev, uploadIds };
+        });
         setLocalJobs((prev) => prev.filter((j) => j.id !== tempId));
         await refetch();
       } catch (err) {
@@ -286,10 +356,10 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
         error: status.ingestion_error ?? undefined,
         updatedAt: new Date().toISOString(),
         completedAt: nextStatus === "completed" ? new Date().toISOString() : undefined,
-        ocrAccuracy: nextStatus === "completed" ? 95 : 0,
-        classificationScore: nextStatus === "completed" ? 90 : 0,
-        extractionScore: nextStatus === "completed" ? 88 : 0,
-        confidence: nextStatus === "completed" ? 90 : 0,
+        ocrAccuracy: status.ocr_accuracy ?? undefined,
+        classificationScore: status.classification_score ?? undefined,
+        extractionScore: status.extraction_score ?? undefined,
+        confidence: status.ai_confidence ?? undefined,
       };
     }
     setJobOverrides((prev) => ({ ...prev, ...overrides }));
@@ -370,6 +440,23 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
   const queues: ProcessingQueue[] = useMemo(() => queueStats?.queues ?? [], [queueStats]);
   const kpis = useMemo(() => deriveKpis(uploads, total), [uploads, total]);
 
+  const bulkProgress = useMemo(() => {
+    const aiQueue = queueStats?.queues?.find((q) => q.id === "ai");
+    return computeBulkImportProgress(uploads, localJobs, bulkSession, {
+      aiQueuePending: aiQueue?.pendingCount,
+    });
+  }, [uploads, localJobs, bulkSession, queueStats]);
+
+  const showBulkBanner = Boolean(
+    bulkProgress &&
+      bulkProgress.total >= BULK_IMPORT_MIN_FILES &&
+      (bulkProgress.isActive || (bulkSession && !bulkSession.dismissed)),
+  );
+
+  const handleDismissBulkBanner = useCallback(() => {
+    setBulkSession((prev) => (prev ? { ...prev, dismissed: true } : null));
+  }, []);
+
   // ── Loading state ──────────────────────────────────────────────────
   if (isLoading) {
     return (
@@ -400,6 +487,11 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
 
   return (
     <div className="h-full flex flex-col bg-gray-50 dark:bg-navy-900">
+      <UploadModal
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        onUpload={handleUpload}
+      />
       {/* Page Header */}
       <div className="px-3 pt-3 pb-2">
         <PageHeader
@@ -408,14 +500,7 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
           actions={
             <>
               <button
-                onClick={() => {
-                  const input = document.createElement("input");
-                  input.type = "file";
-                  input.multiple = true;
-                  input.accept = ".pdf,.docx,.doc,.txt,.png,.jpg";
-                  input.onchange = (e) => handleUpload((e.target as HTMLInputElement).files);
-                  input.click();
-                }}
+                onClick={() => setShowUploadModal(true)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gold-500 text-white hover:bg-gold-600 transition-colors"
               >
                 <Upload className="w-3.5 h-3.5" />
@@ -440,6 +525,14 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
         />
       </div>
 
+      {showBulkBanner && bulkProgress && (
+        <BulkImportProgressBanner
+          progress={bulkProgress}
+          onDismiss={handleDismissBulkBanner}
+          onRetryFailed={bulkProgress.failed > 0 ? handleRetryAllFailed : undefined}
+        />
+      )}
+
       {/* KPI Row */}
       <div className="px-3 pb-1.5">
         <IngestionKpiCards metrics={kpis} onKpiClick={handleKpiClick} />
@@ -448,7 +541,7 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
       {/* Toolbar */}
       <IngestionToolbar
         queues={queues}
-        onUpload={handleUpload}
+        onOpenUploadModal={() => setShowUploadModal(true)}
         onBulkImport={handleBulkImport}
         onConnectSource={handleConnectSource}
         onRetryFailed={handleRetryAllFailed}
@@ -525,6 +618,7 @@ export function IngestionCenter({ onReviewNavigate }: IngestionCenterProps = {})
           }}
           onRetry={handleRetryFailed}
           onUpload={handleUpload}
+          onOpenUploadModal={() => setShowUploadModal(true)}
           onReprioritize={handleReprioritize}
           onAssignQueue={handleAssignQueue}
           onRemove={handleRemoveUpload}

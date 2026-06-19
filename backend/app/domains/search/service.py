@@ -45,44 +45,61 @@ class SearchService:
 
         # ── 1. Chunk search (full-text + vector) ──────────────────
         if "chunk" in entity_types:
-            cache_key = self._cache_key(request)
-            cached = await repo.cache_get(self.tenant_id, cache_key)
-            if cached:
-                results = [SearchResultItem(**item) for item in cached]
-                chunk_total = len(results)
-            else:
-                result = await engine.search(
-                    query=request.query,
-                    strategy=request.strategy,
-                    filters=request.filters,
-                    clause_type=request.clause_type,
-                    contract_id=request.contract_id,
-                    page=request.page,
-                    page_size=request.page_size,
-                )
-                chunk_total = result.total
-                results = []
-                for chunk in result.results:
-                    snippet = HybridRetrievalEngine.generate_snippet(chunk.text, request.query)
-                    results.append(SearchResultItem(
-                        chunk_id=chunk.chunk_id,
-                        entity_type="chunk",
-                        upload_id=chunk.upload_id,
-                        contract_id=chunk.contract_id,
-                        contract_name=chunk.contract_name,
-                        page_numbers=chunk.page_numbers,
-                        section_heading=chunk.section_heading,
-                        clause_type=chunk.clause_type,
-                        snippet=snippet,
-                        score=round(chunk.score, 4),
-                        strategy=chunk.strategy,
-                        token_count=chunk.token_count,
-                    ))
+            result = await engine.search(
+                query=request.query,
+                strategy=request.strategy,
+                filters=request.filters,
+                clause_type=request.clause_type,
+                contract_id=request.contract_id,
+                page=request.page,
+                page_size=request.page_size,
+            )
+            chunk_total = result.total
+            results = []
+            # Pre-fetch contract numbers for all upload IDs in results
+            # to include them in search results (contract_number is stored
+            # in review metadata, not in the chunks table).
+            upload_ids = [c.upload_id for c in result.results if c.upload_id]
+            contract_numbers: dict[str, str] = {}
+            if upload_ids:
+                try:
+                    from sqlalchemy import text as sa_text
+                    ids_list = [f"'{uid}'" for uid in set(upload_ids)]
+                    cn_result = await self.session.execute(
+                        sa_text(f"""
+                            SELECT DISTINCT ON (cr.upload_id)
+                                cr.upload_id::text,
+                                cr.metadata->>'contract_number' AS contract_number
+                            FROM contract_reviews cr
+                            WHERE cr.upload_id IN ({','.join(ids_list)})
+                              AND cr.tenant_id = :tid
+                        """),
+                        {"tid": self.tenant_id},
+                    )
+                    for row in cn_result.fetchall():
+                        if row.contract_number:
+                            contract_numbers[str(row.upload_id)] = row.contract_number
+                except Exception:
+                    pass
 
-                # Cache chunk results
-                if request.strategy == "hybrid" and results:
-                    cache_data = [item.model_dump() for item in results]
-                    await repo.cache_set(self.tenant_id, cache_key, request.query, cache_data, ttl=300)
+            for chunk in result.results:
+                snippet = HybridRetrievalEngine.generate_snippet(chunk.text, request.query)
+                cn = chunk.contract_number or contract_numbers.get(chunk.upload_id) if chunk.upload_id else None
+                results.append(SearchResultItem(
+                    chunk_id=chunk.chunk_id,
+                    entity_type="chunk",
+                    upload_id=chunk.upload_id,
+                    contract_id=chunk.contract_id,
+                    contract_name=chunk.contract_name,
+                    contract_number=cn,
+                    page_numbers=chunk.page_numbers,
+                    section_heading=chunk.section_heading,
+                    clause_type=chunk.clause_type,
+                    snippet=snippet,
+                    score=round(chunk.score, 4),
+                    strategy=chunk.strategy,
+                    token_count=chunk.token_count,
+                ))
 
             all_results.extend(results)
             total += chunk_total

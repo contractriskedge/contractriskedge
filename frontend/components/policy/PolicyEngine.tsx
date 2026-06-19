@@ -1379,8 +1379,8 @@ function SimulationResults({ results }: { results: any }) {
         ))}
       </div>
 
-      {/* Risk score gauge */}
-      {results.risk_score !== undefined && (
+      {/* Risk score gauge — supports 0-10 scale from RiskScorer */}
+      {(results.risk_score !== undefined || results.normalized_score !== undefined) && (
         <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-3">
           <div className="flex items-center gap-1.5 mb-1.5">
             <Info className="w-3 h-3 text-indigo-400" />
@@ -1390,15 +1390,36 @@ function SimulationResults({ results }: { results: any }) {
             <div className="flex-1 h-2 bg-gray-100 dark:bg-navy-700 rounded-full overflow-hidden">
               <div
                 className={`h-full rounded-full ${
-                  results.risk_score >= 0.7 ? "bg-red-500"
-                  : results.risk_score >= 0.4 ? "bg-amber-500"
+                  (results.risk_level || "").toLowerCase() === "critical" ? "bg-red-500"
+                  : (results.risk_level || "").toLowerCase() === "high" ? "bg-amber-500"
+                  : (results.risk_level || "").toLowerCase() === "medium" ? "bg-orange-400"
                   : "bg-green-500"
                 }`}
-                style={{ width: `${(results.risk_score * 100).toFixed(0)}%` }}
+                style={{
+                  width: `${Math.min(
+                    ((results.normalized_score ?? results.risk_score ?? 0) / 10) * 100,
+                    100
+                  )}%`
+                }}
               />
             </div>
-            <span className="text-[10px] font-bold tabular-nums w-12 text-right">{results.risk_score.toFixed(2)}</span>
+            <div className="text-right min-w-[60px]">
+              <span className="text-[11px] font-bold tabular-nums">
+                {(results.normalized_score ?? results.risk_score ?? 0).toFixed(1)}
+              </span>
+              <span className="text-[8px] text-gray-400 ml-0.5">/ 10</span>
+              {results.risk_level && (
+                <p className={`text-[8px] font-semibold capitalize ${
+                  (results.risk_level || "").toLowerCase() === "critical" ? "text-red-600" :
+                  (results.risk_level || "").toLowerCase() === "high" ? "text-amber-600" :
+                  "text-gray-500"
+                }`}>{results.risk_level}</p>
+              )}
+            </div>
           </div>
+          {results.risk_score != null && results.normalized_score == null && results.risk_score <= 1 && (
+            <p className="text-[7px] text-gray-400 mt-1">Raw: {results.risk_score.toFixed(4)}</p>
+          )}
         </div>
       )}
 

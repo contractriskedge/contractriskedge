@@ -40,6 +40,7 @@ import {
   Edit3, GitCompare, MessageSquare, Activity, Calendar,
   Building2, Globe, Loader2, ChevronDown, ChevronRight, ChevronUp,
   BarChart3, BookOpen, XCircle, DollarSign, GitBranch, Lock, Archive,
+  Tag, ListChecks,
 } from "lucide-react";
 import {
   useContractDetail,
@@ -62,6 +63,7 @@ import { AuditTrailPanel } from "./AuditTrailPanel";
 import { IntelligenceHub } from "./IntelligenceHub";
 import { formatDate } from "@/lib/date-utils";
 import { ApprovalModal } from "@/components/review/ApprovalModal";
+import { CollapsibleSection } from "@/components/shared/CollapsibleSection";
 
 // ── Props ───────────────────────────────────────────────────────────────────
 
@@ -566,119 +568,95 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                 {/* Governance Traceability — linked policies and rules */}
                 <GovernanceTraceabilityCard contractId={contractId} />
 
-                {/* Key Details */}
-                <div className="rounded-lg border border-gray-200 dark:border-navy-700">
-                  <div className="px-4 py-2 border-b border-gray-100 dark:border-navy-700 bg-gray-50 dark:bg-navy-850">
-                    <span className="text-[9px] font-semibold text-gray-500 uppercase">Contract Details</span>
-                  </div>
-                  <div className="divide-y divide-gray-50 dark:divide-navy-800">
-                    {[
-                      { label: "Vendor", value: contract.vendor, icon: Building2, missing: "Extraction Pending" },
-                      { label: "Counterparty", value: contract.counterparty, icon: User, missing: "Extraction Pending" },
-                      { label: "Type", value: contract.contract_type, icon: FileText, missing: "Not Found In Contract" },
-                      { label: "Business Unit", value: contract.business_unit, missing: "Not Mapped" },
-                      { label: "Geography", value: contract.geography, icon: Globe, missing: "Not Mapped" },
-                      { label: "Owner", value: contract.owner, icon: User, missing: "Not Assigned" },
-                      { label: "Status", value: (contract.status || "—").replace(/_/g, " ") },
-                      { label: "Workflow Stage", value: contract.workflow_stage?.replace(/_/g, " ") ?? "—" },
-                      { label: "Financial Value", value: contract.financial_value != null && contract.financial_value > 0 ? `${contract.currency ?? ""} ${contract.financial_value.toLocaleString()}` : "—", icon: DollarSign, missing: "Not Found In Contract" },
-                      { label: "Auto-Renewal", value: contract.auto_renew ? "Yes" : "No" },
-                      { label: "Has DPA", value: contract.has_dpa ? "Yes" : "No" },
-                    ].map((row, i) => {
-                      const displayValue = row.missing && (!row.value || row.value === "" || row.value === "0")
-                        ? <span className="italic text-gray-400 dark:text-gray-500">{row.missing}</span>
-                        : row.value;
-                      return (
-                        <div key={i} className="flex items-center justify-between px-4 py-1.5">
-                          <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                            {row.icon && <row.icon className="w-3 h-3" />}{row.label}
-                          </span>
-                          <span className="text-[10px] font-medium text-gray-800 dark:text-gray-200 text-right max-w-[60%] truncate">{displayValue}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Key Dates */}
-                <div className="rounded-lg border border-gray-200 dark:border-navy-700">
-                  <div className="px-4 py-2 border-b border-gray-100 dark:border-navy-700 bg-gray-50 dark:bg-navy-850">
-                    <span className="text-[9px] font-semibold text-gray-500 uppercase">Key Dates</span>
-                  </div>
-                  <div className="divide-y divide-gray-50 dark:divide-navy-800">
-                    {[
-                      { label: "Effective", value: formatDate(contract.effective_date) },
-                      { label: "Expiration", value: formatDate(contract.expiration_date) },
-                      { label: "Renewal", value: formatDate(contract.renewal_date) },
-                      { label: "Last Activity", value: formatDate(contract.last_activity) },
-                      { label: "Created", value: formatDate(contract.created_at) },
-                    ].map((row, i) => (
+                {/* Collapsible: Contract Details */}
+                <CollapsibleSection title="Contract Details" icon={FileText} defaultOpen={false}>
+                  {[
+                    { label: "Vendor", value: contract.vendor, icon: Building2, missing: "Extraction Pending" },
+                    { label: "Counterparty", value: contract.counterparty, icon: User, missing: "Extraction Pending" },
+                    { label: "Type", value: contract.contract_type, icon: FileText, missing: "Not Found In Contract" },
+                    { label: "Business Unit", value: contract.business_unit, missing: "Not Mapped" },
+                    { label: "Geography", value: contract.geography, icon: Globe, missing: "Not Mapped" },
+                    { label: "Owner", value: contract.owner, icon: User, missing: "Not Assigned" },
+                    { label: "Status", value: (contract.status || "—").replace(/_/g, " ") },
+                    { label: "Workflow Stage", value: contract.workflow_stage?.replace(/_/g, " ") ?? "—" },
+                    { label: "Financial Value", value: contract.financial_value != null && contract.financial_value > 0 ? `${contract.currency ?? ""} ${contract.financial_value.toLocaleString()}` : "—", icon: DollarSign, missing: "Not Found In Contract" },
+                    { label: "Auto-Renewal", value: contract.auto_renew ? "Yes" : "No" },
+                    { label: "Has DPA", value: contract.has_dpa ? "Yes" : "No" },
+                  ].map((row, i) => {
+                    const displayValue = row.missing && (!row.value || row.value === "" || row.value === "0")
+                      ? <span className="italic text-gray-400 dark:text-gray-500">{row.missing}</span>
+                      : row.value;
+                    return (
                       <div key={i} className="flex items-center justify-between px-4 py-1.5">
-                        <span className="text-[10px] text-gray-500">{row.label}</span>
-                        <span className="text-[10px] font-medium text-gray-800 dark:text-gray-200">{row.value}</span>
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                          {row.icon && <row.icon className="w-3 h-3" />}{row.label}
+                        </span>
+                        <span className="text-[10px] font-medium text-gray-800 dark:text-gray-200 text-right max-w-[60%] truncate">{displayValue}</span>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    );
+                  })}
+                </CollapsibleSection>
 
-                {/* Tags */}
-                {contract.tags.length > 0 && (
-                  <div className="rounded-lg border border-gray-200 dark:border-navy-700 p-3">
-                    <span className="text-[9px] font-semibold text-gray-500 uppercase mb-2 block">Tags</span>
-                    <div className="flex flex-wrap gap-1">
-                      {contract.tags.map(tag => (
-                        <span key={tag} className="text-[9px] px-2 py-0.5 rounded-full bg-navy-50 text-navy-700 dark:bg-navy-700 dark:text-navy-200">{tag}</span>
-                      ))}
+                {/* Collapsible: Key Dates */}
+                <CollapsibleSection title="Key Dates" icon={Calendar} defaultOpen={false}>
+                  {[
+                    { label: "Effective", value: formatDate(contract.effective_date) },
+                    { label: "Expiration", value: formatDate(contract.expiration_date) },
+                    { label: "Renewal", value: formatDate(contract.renewal_date) },
+                    { label: "Last Activity", value: formatDate(contract.last_activity) },
+                    { label: "Created", value: formatDate(contract.created_at) },
+                  ].map((row, i) => (
+                    <div key={i} className="flex items-center justify-between px-4 py-1.5">
+                      <span className="text-[10px] text-gray-500">{row.label}</span>
+                      <span className="text-[10px] font-medium text-gray-800 dark:text-gray-200">{row.value}</span>
                     </div>
-                  </div>
+                  ))}
+                </CollapsibleSection>
+
+                {/* Collapsible: Tags */}
+                {contract.tags.length > 0 && (
+                  <CollapsibleSection title="Tags" icon={Tag} defaultOpen={false} badge={contract.tags.length}>
+                    <div className="px-4 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {contract.tags.map(tag => (
+                          <span key={tag} className="text-[9px] px-2 py-0.5 rounded-full bg-navy-50 text-navy-700 dark:bg-navy-700 dark:text-navy-200">{tag}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </CollapsibleSection>
                 )}
 
-                {/* Obligations */}
-                <div className="rounded-lg border border-gray-200 dark:border-navy-700">
-                  <div className="px-4 py-2 border-b border-gray-100 dark:border-navy-700 bg-gray-50 dark:bg-navy-850 flex items-center justify-between">
-                    <span className="text-[9px] font-semibold text-gray-500 uppercase">
-                      Obligations ({obligationsData?.total ?? obligations.length})
-                    </span>
-                    <div className="flex items-center gap-1.5 text-[8px]">
-                      <span className="text-green-600 font-medium bg-green-50 dark:bg-green-900/10 px-1 py-0.5 rounded">
-                        {obligationsData?.completed ?? 0} done
-                      </span>
-                      <span className="text-amber-600 font-medium bg-amber-50 dark:bg-amber-900/10 px-1 py-0.5 rounded">
-                        {obligationsData?.open ?? openObligations} open
-                      </span>
-                      {(obligationsData?.overdue ?? 0) > 0 && (
-                        <span className="text-red-600 font-medium bg-red-50 dark:bg-red-900/10 px-1 py-0.5 rounded">
-                          {obligationsData?.overdue ?? 0} overdue
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="divide-y divide-gray-50 dark:divide-navy-800">
-                    {obligations.length === 0 ? (
-                      <div className="px-4 py-3 text-[10px] text-gray-400 italic">No obligations tracked.</div>
-                    ) : obligations.slice(0, 8).map(ob => (
-                      <div
-                        key={ob.id}
-                        onClick={() => router.push(`/obligations?obligationId=${ob.id}`)}
-                        className="flex items-start gap-2 px-4 py-2 hover:bg-gray-50 dark:hover:bg-navy-750 cursor-pointer transition-colors"
-                      >
-                        <span className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${
-                          ob.status === "overdue" ? "bg-red-500" : ob.status === "completed" ? "bg-green-500" : ob.status === "in_progress" ? "bg-blue-500" : "bg-yellow-500"
-                        }`} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[10px] text-gray-700 dark:text-gray-300 truncate">{ob.description}</p>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className={`text-[8px] px-1 py-0.5 rounded font-medium ${
-                              ob.status === "overdue" ? "bg-red-100 text-red-700" : ob.status === "completed" ? "bg-green-100 text-green-700" : ob.status === "in_progress" ? "bg-blue-100 text-blue-700" : "bg-yellow-100 text-yellow-700"
-                            }`}>{ob.status.replace(/_/g, " ")}</span>
-                            <span className="text-[8px] text-gray-400">Due: {formatDate(ob.due_date)}</span>
-                            <span className="text-[8px] text-gray-400">{ob.owner}</span>
-                          </div>
+                {/* Collapsible: Obligations */}
+                <CollapsibleSection
+                  title="Obligations"
+                  icon={ListChecks}
+                  defaultOpen={true}
+                  badge={obligationsData?.total ?? obligations.length}
+                >
+                  {obligations.length === 0 ? (
+                    <div className="px-4 py-3 text-[10px] text-gray-400 italic">No obligations tracked.</div>
+                  ) : obligations.slice(0, 8).map(ob => (
+                    <div
+                      key={ob.id}
+                      onClick={() => router.push(`/obligations?obligationId=${ob.id}`)}
+                      className="flex items-start gap-2 px-4 py-2 hover:bg-gray-50 dark:hover:bg-navy-750 cursor-pointer transition-colors"
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${
+                        ob.status === "overdue" ? "bg-red-500" : ob.status === "completed" ? "bg-green-500" : ob.status === "in_progress" ? "bg-blue-500" : "bg-yellow-500"
+                      }`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] text-gray-700 dark:text-gray-300 truncate">{ob.description}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className={`text-[8px] px-1 py-0.5 rounded font-medium ${
+                            ob.status === "overdue" ? "bg-red-100 text-red-700" : ob.status === "completed" ? "bg-green-100 text-green-700" : ob.status === "in_progress" ? "bg-blue-100 text-blue-700" : "bg-yellow-100 text-yellow-700"
+                          }`}>{ob.status.replace(/_/g, " ")}</span>
+                          <span className="text-[8px] text-gray-400">Due: {formatDate(ob.due_date)}</span>
+                          <span className="text-[8px] text-gray-400">{ob.owner}</span>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    </div>
+                  ))}
+                </CollapsibleSection>
 
                 {/* ── Intelligence Hub ─────────────────────────────────────
                     Single-screen summary of the contract's risk profile,

@@ -206,17 +206,36 @@ export function ActivityFeed({ maxItems = 50, showFilter = true, className = "" 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-[9px] font-medium text-gray-400 uppercase">{cfg.label}</span>
-                      <span className="text-[9px] text-gray-400">{formatTimeAgo(event.timestamp)}</span>
+                      <span className="text-[9px] text-gray-400 ml-auto whitespace-nowrap">{formatTimeAgo(event.timestamp)}</span>
                     </div>
                     <p className="text-xs font-medium text-navy-900 mt-0.5">{event.title}</p>
                     {event.description && (
                       <p className="text-[10px] text-gray-500 mt-0.5 line-clamp-2">{event.description}</p>
                     )}
-                    {event.actionUrl && (
-                      <a href={event.actionUrl} className="inline-flex items-center gap-0.5 text-[9px] font-medium text-blue-600 hover:text-blue-700 mt-0.5">
-                        View <ArrowRight className="w-2.5 h-2.5" />
-                      </a>
-                    )}
+                    {/* Richer metadata: severity indicator + action link */}
+                    <div className="flex items-center gap-2 mt-1">
+                      {event.severity && (
+                        <span className={`inline-flex items-center gap-0.5 text-[8px] font-medium px-1 py-0.5 rounded ${
+                          event.severity === "error" ? "bg-red-100 text-red-700" :
+                          event.severity === "warning" ? "bg-amber-100 text-amber-700" :
+                          event.severity === "success" ? "bg-green-100 text-green-700" :
+                          "bg-gray-100 text-gray-600"
+                        }`}>
+                          <span className={`w-1 h-1 rounded-full ${
+                            event.severity === "error" ? "bg-red-500" :
+                            event.severity === "warning" ? "bg-amber-500" :
+                            event.severity === "success" ? "bg-green-500" :
+                            "bg-gray-400"
+                          }`} />
+                          {event.severity}
+                        </span>
+                      )}
+                      {event.actionUrl && (
+                        <a href={event.actionUrl} className="inline-flex items-center gap-0.5 text-[9px] font-medium text-blue-600 hover:text-blue-700">
+                          View <ArrowRight className="w-2.5 h-2.5" />
+                        </a>
+                      )}
+                    </div>
                   </div>
                 </motion.div>
               );

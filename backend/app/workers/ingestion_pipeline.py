@@ -40,6 +40,7 @@ async def _build_orchestrator(
     embedding_service = EmbeddingService(
         api_key=settings.openai_api_key,
         model=settings.default_embedding_model,
+        tenant_id=tenant_id,
     )
     orchestrator = IngestionOrchestrator(
         session=session,

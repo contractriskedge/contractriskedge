@@ -27,6 +27,7 @@ import { RelationshipGraph } from "./RelationshipGraph";
 import { PlaceholderView } from "./shared/PlaceholderView";
 import { PolicyEngine } from "@/components/policy/PolicyEngine";
 import { ExplainabilityPanel } from "@/components/explainability/ExplainabilityPanel";
+import { GlobalActivityCenter } from "@/components/activity/GlobalActivityCenter";
 import { ClauseIntelligenceView } from "@/components/clause-intelligence/ClauseIntelligenceView";
 import { ExecutiveDashboardView } from "@/components/executive/ExecutiveDashboard";
 import { TenantSettings } from "@/components/tenant/TenantSettings";
@@ -71,7 +72,7 @@ function DashboardSkeleton() {
 // Full enterprise view types — all workspaces available in the sidebar.
 // Views without full backend integration show a placeholder indicating
 // the module is available but pending backend completion.
-        type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "review-dashboard" | "executive-dashboard" | "policy" | "clause-intelligence" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center";
+        type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "review-dashboard" | "executive-dashboard" | "policy" | "clause-intelligence" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center" | "activity-center";
 
 export function DashboardLayout() {
   const { user, logout } = useAuth();
@@ -94,6 +95,18 @@ export function DashboardLayout() {
     setActiveView("review");
   }, []);
 
+  // Listen for navigate-to-review custom event from NotificationCenter
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent).detail as { reviewId: string } | undefined;
+      if (detail?.reviewId) {
+        handleNavigateToReview(detail.reviewId);
+      }
+    };
+    window.addEventListener("navigate-to-review", handler);
+    return () => window.removeEventListener("navigate-to-review", handler);
+  }, [handleNavigateToReview]);
+
   // When entering Review view without a specific review selected, show list
   useEffect(() => {
     if (activeView === "review" && !selectedReviewId) {
@@ -104,6 +117,12 @@ export function DashboardLayout() {
   const renderView = () => {
     switch (activeView) {
       // ── Core Workspaces ──
+      case "activity-center":
+        return (
+          <div className="max-w-5xl mx-auto">
+            <GlobalActivityCenter />
+          </div>
+        );
       case "ingestion":
         return <IngestionCenter onReviewNavigate={handleNavigateToReview} />;
       case "search":

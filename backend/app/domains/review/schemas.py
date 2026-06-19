@@ -87,6 +87,7 @@ class SourceLocation(BaseModel):
 
 class FindingItem(BaseModel):
     finding_id: str
+    finding_number: Optional[str] = None
     clause_type: Optional[str] = None
     severity: str
     title: str
@@ -291,6 +292,16 @@ class AssignRequest(BaseModel):
     role: str = Field(default="reviewer", pattern="^(reviewer|approver|observer|legal_ops|compliance|executive|security|procurement)$")
     due_date: Optional[datetime] = None
     notes: Optional[str] = None
+
+
+class AssigneeItem(BaseModel):
+    """Minimal user record for workflow assignment pickers."""
+    user_id: str
+    email: str
+    name: str
+    role: str
+    business_unit: Optional[str] = None
+    is_active: bool = True
 
 
 class RedlineAssignRequest(BaseModel):

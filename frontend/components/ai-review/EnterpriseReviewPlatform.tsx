@@ -124,13 +124,9 @@ function EnterpriseReviewPlatformInner() {
   });
   const hasBlockingFindings = (openFindingsData?.count ?? 0) > 0;
 
-  const { data: openObligationsData } = useQuery({
-    queryKey: ["reviews", selectedReviewId, "obligations", "open"],
-    queryFn: () => obligationsService.getByContract(selectedReviewId!),
-    enabled: !!selectedReviewId,
-    staleTime: 10_000,
-  });
-  const hasOpenObligations = (openObligationsData?.open ?? 0) > 0;
+  // Open obligations do NOT block approval — they are future commitments
+  // that remain open after the contract is approved. Only contract closure
+  // is blocked by open obligations (enforced server-side).
 
   const handleApprove = useCallback(async () => {
     if (!selectedReviewId) return;
@@ -140,13 +136,6 @@ function EnterpriseReviewPlatformInner() {
       setApproveError(
         `${openFindingsData?.count ?? 0} critical/high finding(s) are still open. ` +
         "Resolve or dismiss them first."
-      );
-      return;
-    }
-    if (hasOpenObligations) {
-      setApproveError(
-        `${openObligationsData?.open ?? 0} obligation(s) are still open. ` +
-        "Complete or close all obligations before approving."
       );
       return;
     }
@@ -168,7 +157,7 @@ function EnterpriseReviewPlatformInner() {
       }
       setApproveError(msg);
     }
-  }, [selectedReviewId, approveMutation, queryClient, hasBlockingFindings, openFindingsData, hasOpenObligations, openObligationsData]);
+  }, [selectedReviewId, approveMutation, queryClient, hasBlockingFindings, openFindingsData]);
 
   const openRejectModal = useCallback(() => {
     setApproveError(null);
@@ -393,7 +382,7 @@ function EnterpriseReviewPlatformInner() {
         </div>
       )}
       {/* ── Enterprise Command Bar ────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-4 py-1.5 bg-white dark:bg-navy-800 border-b border-gray-200 dark:border-navy-700 shadow-sm z-20">
+      <div className="flex items-center justify-between px-4 py-1.5 bg-white dark:bg-navy-800 border-b border-gray-200 dark:border-navy-700 shadow-sm z-10">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <Brain className="w-4 h-4 text-navy-600 dark:text-navy-300" />
@@ -506,14 +495,12 @@ function EnterpriseReviewPlatformInner() {
                 <>
                   <button
                     onClick={handleApprove}
-                    disabled={approveMutation.isPending || hasBlockingFindings || hasOpenObligations}
+                    disabled={approveMutation.isPending || hasBlockingFindings}
                     className="flex items-center gap-1 px-1.5 py-1 text-[9px] font-medium rounded hover:bg-green-50 text-green-700 transition-colors disabled:opacity-40"
                     title={
                       hasBlockingFindings
                         ? `${openFindingsData?.count ?? 0} critical/high finding(s) unresolved — resolve or dismiss them first`
-                        : hasOpenObligations
-                          ? `${openObligationsData?.open ?? 0} open obligation(s) — complete or close them first`
-                          : "Approve review"
+                        : "Approve review"
                     }
                   >
                     {approveMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}

@@ -54,3 +54,37 @@ export function sessionCookieOptions() {
     maxAge: 60 * 60 * 24 * 7,
   };
 }
+
+/** Dev login button keys accepted by POST /api/auth/dev-login and /api/v1/auth/token. */
+export type DevLoginRole = "admin" | "reviewer" | "legal" | "viewer";
+
+const DEV_LOGIN_ROLE_BY_SUB: Record<string, DevLoginRole> = {
+  "test-admin-1": "admin",
+  "test-reviewer-1": "reviewer",
+  "test-legal-1": "legal",
+  "test-viewer-1": "viewer",
+  "dev-user": "admin",
+};
+
+const DEV_LOGIN_ROLE_BY_JWT_ROLE: Record<string, DevLoginRole> = {
+  tenant_admin: "admin",
+  admin: "admin",
+  reviewer: "reviewer",
+  legal_reviewer: "legal",
+  legal_ops: "legal",
+  viewer: "viewer",
+};
+
+/** Map app session / JWT role to the dev-login role key for backend token minting. */
+export function resolveDevLoginRole(session: {
+  sub?: string;
+  role?: string;
+}): DevLoginRole | undefined {
+  if (session.sub && DEV_LOGIN_ROLE_BY_SUB[session.sub]) {
+    return DEV_LOGIN_ROLE_BY_SUB[session.sub];
+  }
+  if (session.role && DEV_LOGIN_ROLE_BY_JWT_ROLE[session.role]) {
+    return DEV_LOGIN_ROLE_BY_JWT_ROLE[session.role];
+  }
+  return undefined;
+}

@@ -83,7 +83,7 @@ export function ContractSummary({
               <span>Document</span>
             </div>
             <p className="mt-0.5 font-medium text-gray-900 dark:text-gray-100 truncate" title={review.document_name || review.review_id}>
-              {review.document_name || review.original_filename || `Review ${review.review_id.slice(0, 8)}`}
+              {review.document_name || review.original_filename || review.review_number || `Review ${review.review_id.slice(0, 8)}`}
             </p>
           </div>
 

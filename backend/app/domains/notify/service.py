@@ -126,8 +126,13 @@ class NotificationService:
             if not recipient_email:
                 return
 
-            user_email = await self.repo.get_user_email(self.tenant_id, user_id)
-            display_name = (user_email or user_id).split("@")[0].replace(".", " ").replace("-", " ").title()
+            # Resolve display name from the admin_users record for a proper greeting
+            user_name = await self.repo.get_user_name(self.tenant_id, user_id)
+            if user_name:
+                display_name = user_name
+            else:
+                user_email = await self.repo.get_user_email(self.tenant_id, user_id)
+                display_name = (user_email or user_id).split("@")[0].replace(".", " ").replace("-", " ").title()
 
             # Fetch real contract data from the review if entity_id is a review
             contract_name = notif.title
@@ -141,6 +146,7 @@ class NotificationService:
                 try:
                     from sqlalchemy import select, text as sa_text
                     from app.domains.review.models import ContractReview
+                    from app.domains.ingestion.models import UploadSession
 
                     review_result = await self.repo.session.execute(
                         select(ContractReview).where(
@@ -150,11 +156,34 @@ class NotificationService:
                     )
                     review = review_result.scalar_one_or_none()
                     if review:
-                        # Use document filename as contract name if available
+                        # Resolve document filename — prefer _document_filename
+                        # (set by repository queries that JOIN with uploads),
+                        # then try the uploads table, then metadata, then fallback.
                         if hasattr(review, '_document_filename') and review._document_filename:
                             contract_name = review._document_filename
-                        elif review.document_metadata:
-                            contract_name = review.document_metadata.get("filename") or review.document_metadata.get("original_filename") or contract_name
+                        else:
+                            # Fetch filename from the upload session
+                            try:
+                                upload_result = await self.repo.session.execute(
+                                    select(UploadSession.filename).where(
+                                        UploadSession.upload_id == review.upload_id,
+                                        UploadSession.tenant_id == self.tenant_id,
+                                    )
+                                )
+                                upload_row = upload_result.fetchone()
+                                if upload_row and upload_row.filename:
+                                    contract_name = upload_row.filename
+                            except Exception:
+                                pass
+
+                            # Fallback to metadata if upload lookup failed
+                            if not contract_name or contract_name == notif.title:
+                                if review.document_metadata:
+                                    contract_name = (
+                                        review.document_metadata.get("filename")
+                                        or review.document_metadata.get("original_filename")
+                                        or contract_name
+                                    )
 
                         risk_score = review.document_metadata.get("risk_score") if review.document_metadata else None
                         reviewer = review.assigned_to
@@ -223,7 +252,8 @@ class NotificationService:
             entity_type="review",
             entity_id=review_id,
             action_url=f"/reviews/{review_id}",
-            dedup_key=f"review_assigned:{review_id}:{assignee_id}",
+            # No dedup_key — every assignment (including re-assignment)
+            # should produce a fresh notification and email.
         )
 
     async def send_escalation_notification(self, escalation, review_id: str):
@@ -321,6 +351,50 @@ class NotificationService:
             entity_id=review_id,
             action_url=f"/reviews/{review_id}",
             dedup_key=f"archived:{review_id}",
+        )
+
+    async def send_obligation_created(self, obligation_id: str, review_id: str,
+                                       created_by: str, obligation_name: str):
+        """Notify the review creator that an obligation was created."""
+        await self.send_notification(
+            user_id=created_by,
+            notif_type="obligation.created",
+            title="Obligation Created",
+            body=f"Obligation '{obligation_name}' has been created for this contract.",
+            severity="medium",
+            entity_type="obligation",
+            entity_id=obligation_id,
+            action_url=f"/reviews/{review_id}",
+            dedup_key=f"obligation_created:{obligation_id}",
+        )
+
+    async def send_obligation_completed(self, obligation_id: str, review_id: str,
+                                         completed_by: str, obligation_name: str):
+        """Notify that an obligation has been completed."""
+        await self.send_notification(
+            user_id=completed_by,
+            notif_type="obligation.completed",
+            title="Obligation Completed",
+            body=f"Obligation '{obligation_name}' has been completed.",
+            severity="low",
+            entity_type="obligation",
+            entity_id=obligation_id,
+            action_url=f"/reviews/{review_id}",
+            dedup_key=f"obligation_completed:{obligation_id}",
+        )
+
+    async def send_contract_closed(self, review_id: str, user_id: str, contract_number: str):
+        """Notify that a contract has been closed."""
+        await self.send_notification(
+            user_id=user_id,
+            notif_type="contract.closed",
+            title="Contract Closed",
+            body=f"Contract {contract_number} has been closed.",
+            severity="low",
+            entity_type="review",
+            entity_id=review_id,
+            action_url=f"/reviews/{review_id}",
+            dedup_key=f"contract_closed:{review_id}",
         )
 
     async def mark_read(self, notification_id: str, user_id: str) -> bool:

@@ -9,7 +9,9 @@ from app.domains.ingestion.models import IngestionState, coerce_ingestion_state
 from app.domains.ingestion.repository import IngestionRepository
 from app.domains.extraction.repository import ExtractionRepository
 from app.domains.vectors.chunking import chunking_service
-from app.domains.vectors.embeddings import OpenAIEmbeddingProvider, EmbeddingRequest, embedding_registry
+from app.domains.vectors.embeddings import (
+    OpenAIEmbeddingProvider, EmbeddingRequest, embedding_registry, RateLimitError,
+)
 from app.domains.vectors.repository import VectorRepository
 from workers.worker_async import WorkerAsyncHelper
 from workers.worker_loop import worker_loop
@@ -147,7 +149,7 @@ async def _chunk_document(helper: WorkerAsyncHelper, upload_id: str, tenant_id: 
     name="generate_embeddings",
     max_retries=MAX_RETRIES,
     acks_late=True,
-    autoretry_for=(Exception,),
+    autoretry_for=(RateLimitError,),
     retry_backoff=True,
     retry_backoff_max=300,
 )
@@ -194,7 +196,10 @@ async def _generate_embeddings(helper: WorkerAsyncHelper, upload_id: str, tenant
                 return
 
             # Initialize provider
-            provider = OpenAIEmbeddingProvider(api_key=settings.openai_api_key)
+            provider = OpenAIEmbeddingProvider(
+                api_key=settings.openai_api_key,
+                tenant_id=tenant_id,
+            )
             embedding_registry.register(provider)
 
             # Create embedding run
@@ -215,6 +220,8 @@ async def _generate_embeddings(helper: WorkerAsyncHelper, upload_id: str, tenant
                 except Exception as exc:
                     logger.error("Embedding batch failed: %s", exc)
                     await vector_repo.record_failure(upload_id, tenant_id, "batch_failed", str(exc))
+                    if "quota" in str(exc).lower():
+                        raise
                     continue
 
                 for j, response in enumerate(responses):
@@ -232,7 +239,9 @@ async def _generate_embeddings(helper: WorkerAsyncHelper, upload_id: str, tenant
                         total_cost += response.cost_usd
                         total_latency += response.latency_ms
 
-            # Complete run
+                if i + provider.MAX_BATCH_SIZE < len(chunks):
+                    import asyncio
+                    await asyncio.sleep(0.5)
             avg_latency = total_latency // max(chunks_embedded, 1)
             await vector_repo.complete_run(
                 run_id=run.run_id,
@@ -248,9 +257,9 @@ async def _generate_embeddings(helper: WorkerAsyncHelper, upload_id: str, tenant
             await ingest_repo.update_state(upload_id, tenant_id, IngestionState.ANALYSIS_PENDING)
             await session.commit()
 
-            # Dispatch AI analysis
-            from workers.ai_worker import analyze_contract_task
-            analyze_contract_task.delay(upload_id, tenant_id, user_id, "full")
+            # Dispatch AI analysis with staggered countdown to reduce OpenAI TPM bursts
+            from workers.ai_worker import dispatch_analyze_contract
+            dispatch_analyze_contract(upload_id, tenant_id, user_id, "full")
 
             logger.info(
                 "Embeddings generated for %s: %d/%d chunks, %d tokens, $%.6f. AI analysis dispatched.",

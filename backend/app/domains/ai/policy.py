@@ -126,7 +126,9 @@ class AIPolicyEngine:
     def _evaluate_prompt_constraints(self, context: AIPolicyContext, decision: AIPolicyDecision) -> None:
         # Convert prompt length (characters) to estimated tokens (~4 chars per token)
         estimated_tokens = context.prompt_length // 4
-        max_allowed = min(context.max_tokens, settings.ai_max_tokens)
+        # Use the HIGHER of context.max_tokens (model budget) and settings.ai_max_tokens (policy limit)
+        # so that a generous policy limit doesn't get overridden by a conservative model default.
+        max_allowed = max(context.max_tokens, settings.ai_max_tokens)
         if estimated_tokens > max_allowed:
             decision.violations.append(
                 f"Prompt length ~{estimated_tokens} estimated tokens exceeds allowed max tokens {max_allowed}."
@@ -151,7 +153,26 @@ class AIPolicyEngine:
         decision.applied_rules.append("region_restrictions")
 
     def _evaluate_pii_constraints(self, context: AIPolicyContext, decision: AIPolicyDecision) -> None:
-        if settings.ai_pii_protection_enabled and self._contains_pii(context.metadata.get("prompt_text", "")):
+        if not settings.ai_pii_protection_enabled:
+            decision.applied_rules.append("pii_detection_disabled")
+            return
+
+        prompt_text = context.metadata.get("prompt_text", "")
+        if not prompt_text:
+            decision.applied_rules.append("pii_detection_skipped_empty")
+            return
+
+        # Skip PII detection for contract analysis operations — contracts
+        # naturally contain email addresses, phone numbers, and other
+        # identifiers as part of the business terms. Flagging these as PII
+        # would block legitimate analysis of every contract.
+        pii_safe_operations = {"risk_review", "clause_extraction", "obligation_extraction",
+                               "redline_generation", "summarization", "classification"}
+        if context.operation in pii_safe_operations:
+            decision.applied_rules.append("pii_detection_skipped_operation")
+            return
+
+        if self._contains_pii(prompt_text):
             decision.violations.append("Prompt contains PII and violates tenant policy.")
         decision.applied_rules.append("pii_detection")
 

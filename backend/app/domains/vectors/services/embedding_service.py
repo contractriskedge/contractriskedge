@@ -22,6 +22,7 @@ from tenacity import (
 )
 
 from app.config import settings
+from app.domains.vectors.embedding_throttle import embedding_slot
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,11 @@ class EmbeddingTimeoutError(EmbeddingError):
 
 
 class EmbeddingRateLimitError(EmbeddingError):
-    """Raised when OpenAI rate limit is hit."""
+    """Raised when OpenAI rate limit is hit (transient — retryable)."""
+
+
+class EmbeddingQuotaExceededError(EmbeddingError):
+    """Raised when OpenAI billing quota is exhausted (not retryable)."""
 
 
 class EmbeddingAPIError(EmbeddingError):
@@ -177,6 +182,7 @@ class EmbeddingService:
         model: Optional[str] = None,
         timeout_seconds: int = TIMEOUT_SECONDS,
         max_retries: int = MAX_RETRIES,
+        tenant_id: Optional[str] = None,
     ) -> None:
         """Initialize the embedding service.
 
@@ -200,6 +206,7 @@ class EmbeddingService:
         )
         self._timeout = timeout_seconds
         self._max_retries = max_retries
+        self._tenant_id = tenant_id or "global"
         self._client: Optional[openai.AsyncOpenAI] = None
 
         logger.info(
@@ -324,7 +331,7 @@ class EmbeddingService:
         succeeded = 0
         failed = 0
 
-        # Process in sub-batches
+        # Process in sub-batches with a short pause to avoid TPM bursts
         for batch_start in range(0, len(cleaned_texts), MAX_BATCH_SIZE):
             batch = cleaned_texts[batch_start : batch_start + MAX_BATCH_SIZE]
             batch_vectors, batch_latency, batch_succeeded, batch_failed = (
@@ -334,6 +341,8 @@ class EmbeddingService:
             total_latency += batch_latency
             succeeded += batch_succeeded
             failed += batch_failed
+            if batch_start + MAX_BATCH_SIZE < len(cleaned_texts):
+                await asyncio.sleep(0.5)
 
         total_latency_ms = int((time.monotonic() - start) * 1000)
 
@@ -364,7 +373,7 @@ class EmbeddingService:
 
         async for attempt_data in AsyncRetrying(
             stop=stop_after_attempt(self._max_retries),
-            wait=wait_exponential(multiplier=1, min=2, max=30),
+            wait=wait_exponential(multiplier=2, min=5, max=90),
             retry=retry_if_exception_type(
                 (EmbeddingTimeoutError, EmbeddingRateLimitError)
             ),
@@ -399,35 +408,51 @@ class EmbeddingService:
         """Execute the actual OpenAI API call with timeout handling."""
         client = await self._get_client()
 
-        try:
-            response = await asyncio.wait_for(
-                client.embeddings.create(
-                    model=self._model,
-                    input=text,
-                    dimensions=EMBEDDING_DIMENSION,
-                ),
-                timeout=self._timeout,
-            )
-        except asyncio.TimeoutError as exc:
-            raise EmbeddingTimeoutError(
-                f"OpenAI embedding request timed out after {self._timeout}s"
-            ) from exc
-        except openai.APIConnectionError as exc:
-            raise EmbeddingTimeoutError(
-                f"OpenAI connection error: {exc}"
-            ) from exc
-        except openai.RateLimitError as exc:
-            raise EmbeddingRateLimitError(
-                f"OpenAI rate limit exceeded: {exc}"
-            ) from exc
-        except openai.APIError as exc:
-            raise EmbeddingAPIError(
-                f"OpenAI API error: {exc}"
-            ) from exc
-        except Exception as exc:
-            raise EmbeddingAPIError(
-                f"Unexpected embedding error: {exc}"
-            ) from exc
+        async with embedding_slot(self._tenant_id):
+            try:
+                response = await asyncio.wait_for(
+                    client.embeddings.create(
+                        model=self._model,
+                        input=text,
+                        dimensions=EMBEDDING_DIMENSION,
+                    ),
+                    timeout=self._timeout,
+                )
+            except asyncio.TimeoutError as exc:
+                raise EmbeddingTimeoutError(
+                    f"OpenAI embedding request timed out after {self._timeout}s"
+                ) from exc
+            except openai.APIConnectionError as exc:
+                raise EmbeddingTimeoutError(
+                    f"OpenAI connection error: {exc}"
+                ) from exc
+            except openai.RateLimitError as exc:
+                err = str(exc).lower()
+                if "insufficient_quota" in err or "exceeded your current quota" in err:
+                    raise EmbeddingQuotaExceededError(
+                        f"OpenAI embedding quota exceeded: {exc}"
+                    ) from exc
+                raise EmbeddingRateLimitError(
+                    f"OpenAI rate limit exceeded: {exc}"
+                ) from exc
+            except openai.APIError as exc:
+                err = str(exc).lower()
+                if "insufficient_quota" in err or "exceeded your current quota" in err:
+                    raise EmbeddingQuotaExceededError(
+                        f"OpenAI embedding quota exceeded: {exc}"
+                    ) from exc
+                raise EmbeddingAPIError(
+                    f"OpenAI API error: {exc}"
+                ) from exc
+            except Exception as exc:
+                err = str(exc).lower()
+                if "insufficient_quota" in err or "exceeded your current quota" in err:
+                    raise EmbeddingQuotaExceededError(
+                        f"OpenAI embedding quota exceeded: {exc}"
+                    ) from exc
+                raise EmbeddingAPIError(
+                    f"Unexpected embedding error: {exc}"
+                ) from exc
 
         vector: list[float] = response.data[0].embedding
         return vector
@@ -454,6 +479,8 @@ class EmbeddingService:
                 succeeded += 1
             batch_latency = int((time.monotonic() - start) * 1000)
             return vectors, batch_latency, succeeded, failed
+        except EmbeddingQuotaExceededError:
+            raise
         except EmbeddingError:
             # Fall back to individual embedding with retry
             logger.info(
@@ -485,7 +512,7 @@ class EmbeddingService:
 
         async for attempt_data in AsyncRetrying(
             stop=stop_after_attempt(self._max_retries),
-            wait=wait_exponential(multiplier=1, min=2, max=30),
+            wait=wait_exponential(multiplier=2, min=5, max=90),
             retry=retry_if_exception_type(
                 (EmbeddingTimeoutError, EmbeddingRateLimitError)
             ),
@@ -518,35 +545,51 @@ class EmbeddingService:
         """Execute batch OpenAI API call with timeout."""
         client = await self._get_client()
 
-        try:
-            response = await asyncio.wait_for(
-                client.embeddings.create(
-                    model=self._model,
-                    input=texts,
-                    dimensions=EMBEDDING_DIMENSION,
-                ),
-                timeout=self._timeout,
-            )
-        except asyncio.TimeoutError as exc:
-            raise EmbeddingTimeoutError(
-                f"Batch embedding timed out after {self._timeout}s"
-            ) from exc
-        except openai.APIConnectionError as exc:
-            raise EmbeddingTimeoutError(
-                f"OpenAI connection error on batch: {exc}"
-            ) from exc
-        except openai.RateLimitError as exc:
-            raise EmbeddingRateLimitError(
-                f"OpenAI rate limit exceeded on batch: {exc}"
-            ) from exc
-        except openai.APIError as exc:
-            raise EmbeddingAPIError(
-                f"OpenAI API error on batch: {exc}"
-            ) from exc
-        except Exception as exc:
-            raise EmbeddingAPIError(
-                f"Unexpected batch embedding error: {exc}"
-            ) from exc
+        async with embedding_slot(self._tenant_id):
+            try:
+                response = await asyncio.wait_for(
+                    client.embeddings.create(
+                        model=self._model,
+                        input=texts,
+                        dimensions=EMBEDDING_DIMENSION,
+                    ),
+                    timeout=self._timeout,
+                )
+            except asyncio.TimeoutError as exc:
+                raise EmbeddingTimeoutError(
+                    f"Batch embedding timed out after {self._timeout}s"
+                ) from exc
+            except openai.APIConnectionError as exc:
+                raise EmbeddingTimeoutError(
+                    f"OpenAI connection error on batch: {exc}"
+                ) from exc
+            except openai.RateLimitError as exc:
+                err = str(exc).lower()
+                if "insufficient_quota" in err or "exceeded your current quota" in err:
+                    raise EmbeddingQuotaExceededError(
+                        f"OpenAI embedding quota exceeded on batch: {exc}"
+                    ) from exc
+                raise EmbeddingRateLimitError(
+                    f"OpenAI rate limit exceeded on batch: {exc}"
+                ) from exc
+            except openai.APIError as exc:
+                err = str(exc).lower()
+                if "insufficient_quota" in err or "exceeded your current quota" in err:
+                    raise EmbeddingQuotaExceededError(
+                        f"OpenAI embedding quota exceeded on batch: {exc}"
+                    ) from exc
+                raise EmbeddingAPIError(
+                    f"OpenAI API error on batch: {exc}"
+                ) from exc
+            except Exception as exc:
+                err = str(exc).lower()
+                if "insufficient_quota" in err or "exceeded your current quota" in err:
+                    raise EmbeddingQuotaExceededError(
+                        f"OpenAI embedding quota exceeded on batch: {exc}"
+                    ) from exc
+                raise EmbeddingAPIError(
+                    f"Unexpected batch embedding error: {exc}"
+                ) from exc
 
         # Sort by index to preserve input order
         sorted_data = sorted(response.data, key=lambda d: d.index)

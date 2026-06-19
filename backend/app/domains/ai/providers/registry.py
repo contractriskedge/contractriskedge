@@ -23,12 +23,18 @@ class LLMProviderRegistry:
         provider = self._providers.get(name)
         return provider
 
+    def registered_names(self) -> list[str]:
+        return list(self._providers.keys())
+
     def select_provider(self, preferred: Optional[Iterable[str]] = None) -> BaseLLMProvider:
         if preferred:
             for name in preferred:
                 provider = self._providers.get(name)
-                if provider and provider.health.is_available():
+                if provider is None:
+                    continue
+                if provider.health.is_available():
                     return provider
+            raise ValueError("No healthy LLM providers are available")
         healthy_providers = [p for p in self._providers.values() if p.health.is_available()]
         if not healthy_providers:
             raise ValueError("No healthy LLM providers are available")

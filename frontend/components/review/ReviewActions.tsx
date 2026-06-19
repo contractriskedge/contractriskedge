@@ -38,6 +38,7 @@ import {
 } from "@/services/hooks";
 import { api } from "@/services/api/client";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { useToast } from "@/components/ui/toast";
 import { EscalationModal } from "./EscalationModal";
 import { UserPicker } from "@/components/shared/UserPicker";
 import { getAllowedActions, isImmutable, WORKFLOW_STATES } from "@/lib/workflow";
@@ -55,6 +56,7 @@ type ActionModal = "assign" | "escalate" | "approve" | "comment" | "delete"
 export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
   const [activeModal, setActiveModal] = useState<ActionModal>(null);
   const { hasPermission } = useAuth();
+  const { addToast } = useToast();
 
   // Permission checks
   const canAssign = hasPermission("workflows:write");
@@ -115,22 +117,9 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
   });
   const hasBlockingFindings = (openFindingsData?.count ?? 0) > 0;
 
-  // Pre-flight check: fetch open obligations count for approval gate
-  const { data: openObligationsData, isFetching: openObligationsLoading } = useQuery({
-    queryKey: ["reviews", reviewId, "obligations", "open"],
-    queryFn: async () => {
-      const res = await api.get<{ obligations: Array<Record<string, unknown>> }>(`/obligations/?contract_id=${reviewId}`);
-      const obligations = res?.obligations ?? [];
-      const open = obligations.filter(
-        (o) => !["completed", "closed", "waived", "cancelled", "archived"].includes(String(o.status ?? ""))
-      );
-      return { count: open.length };
-    },
-    enabled: activeModal === "approve" && (approveDecision === "approved" || approveDecision === "conditionally_approved"),
-    staleTime: 0,
-    refetchOnMount: true,
-  });
-  const hasOpenObligations = (openObligationsData?.count ?? 0) > 0;
+  // Open obligations do NOT block approval — they are future commitments
+  // that remain open after the contract is approved. Only contract closure
+  // is blocked by open obligations (enforced server-side).
 
   const closeModal = () => {
     setActiveModal(null);
@@ -149,6 +138,14 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
       { assignee_id: assigneeId, role: assignRole },
     );
     closeModal();
+    // Show assignment confirmation with audit summary
+    const assigneeName = reviewerWorkloads.find(r => r.user_id === assigneeId)?.user_id || assigneeId;
+    const now = new Date().toLocaleString("en-US", {
+      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+    });
+    addToast("success", "Reviewer Assigned",
+      `Assigned to ${assigneeName} · ${now} · by ${user?.name || user?.email || "You"}`
+    );
   };
 
   const handleApprove = async () => {
@@ -176,22 +173,14 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
         return;
       }
     }
-    // Pre-flight check: block if open obligations exist
-    if (hasOpenObligations && (approveDecision === "approved" || approveDecision === "conditionally_approved")) {
-      if (!approveComments.toLowerCase().includes("override:")) {
-        setApproveError(
-          `${openObligationsData?.count ?? 0} obligation(s) are still open. ` +
-          "Complete or close all obligations before approving, or add 'override:' at the start of your comments to bypass."
-        );
-        return;
-      }
-    }
     try {
       await approveMutation.mutateAsync({
         decision: approveDecision,
         comments: approveComments || undefined,
       });
       closeModal();
+      const label = approveDecision === "approved" ? "Approved" : approveDecision === "rejected" ? "Rejected" : "Conditionally Approved";
+      addToast("success", `Review ${label}`, `Contract "${review.document_name || reviewId.slice(0, 8)}" has been ${approveDecision}.`);
     } catch (err) {
       // Format user-friendly error message
       let msg = "";
@@ -209,7 +198,11 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
         msg = "This action cannot be completed due to the current review state.";
       } else if (msg.includes("409") || msg.includes("Conflict")) {
         msg = "This action conflicts with the current review state.";
-      } else if (msg.includes("403") || msg.includes("forbidden")) {
+      } else if (msg.includes("403") || msg.includes("forbidden") || msg.includes("Missing required permission")) {
+        msg = "You don't have permission to perform this action.";
+      } else if (msg.includes("contracts:approve") || msg.includes("contracts:write") || msg.includes("workflows:approve")) {
+        msg = "You don't have permission to perform this action.";
+      } else if (msg.includes("Missing required permission")) {
         msg = "You don't have permission to perform this action.";
       }
       setApproveError(msg);
@@ -510,7 +503,7 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
               <UserPicker
                 value={assigneeId}
                 onChange={setAssigneeId}
-                allowedRoles={["tenant_admin", "reviewer", "legal_ops", "compliance", "executive", "admin"]}
+                allowedRoles={["tenant_admin", "reviewer", "legal_ops", "legal_reviewer", "compliance", "executive", "admin"]}
                 placeholder="Search by name, email, or role…"
                 size="md"
                 allowNone
@@ -594,21 +587,6 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
                 </p>
               </div>
             )}
-            {/* Warning: open obligations */}
-            {hasOpenObligations && (approveDecision === "approved" || approveDecision === "conditionally_approved") && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-900/20">
-                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
-                  <AlertTriangle className="h-4 w-4" />
-                  <span className="text-sm font-semibold">Open Obligations</span>
-                </div>
-                <p className="mt-1 text-xs text-amber-600 dark:text-amber-300">
-                  {openObligationsData?.count} obligation(s) are still open.
-                </p>
-                <p className="mt-1 text-xs text-amber-500 dark:text-amber-400">
-                  Complete or close all obligations before approving, or add 'override:' at the start of your comments to bypass.
-                </p>
-              </div>
-            )}
             <div className="flex gap-2">
               {(["approved", "rejected", "conditionally_approved"] as const).map((d) => (
                 <button
@@ -648,8 +626,8 @@ export function ReviewActions({ reviewId, review }: ReviewActionsProps) {
             )}
             <div className="flex justify-end gap-2">
               <button onClick={closeModal} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700">Cancel</button>
-              <button onClick={handleApprove} disabled={approveMutation.isPending || openFindingsLoading || openObligationsLoading || (hasBlockingFindings && (approveDecision === "approved" || (approveDecision === "conditionally_approved" && !approveComments.toLowerCase().includes("override:")))) || (hasOpenObligations && (approveDecision === "approved" || approveDecision === "conditionally_approved") && !approveComments.toLowerCase().includes("override:")) || (approveDecision === "rejected" && !approveComments.trim())}
-                title={openFindingsLoading ? "Checking for blocking findings..." : openObligationsLoading ? "Checking for open obligations..." : hasBlockingFindings && approveDecision === "approved" ? `${openFindingsData?.count ?? 0} critical/high finding(s) unresolved` : hasBlockingFindings && approveDecision === "conditionally_approved" && !approveComments.toLowerCase().includes("override:") ? "Add 'override:' in comments to bypass" : hasOpenObligations && !approveComments.toLowerCase().includes("override:") ? `${openObligationsData?.count ?? 0} obligation(s) still open — add 'override:' to bypass` : approveDecision === "rejected" && !approveComments.trim() ? "Rejection reason is required" : "Submit decision"}
+              <button onClick={handleApprove} disabled={approveMutation.isPending || openFindingsLoading || (hasBlockingFindings && (approveDecision === "approved" || (approveDecision === "conditionally_approved" && !approveComments.toLowerCase().includes("override:")))) || (approveDecision === "rejected" && !approveComments.trim())}
+                title={openFindingsLoading ? "Checking for blocking findings..." : hasBlockingFindings && approveDecision === "approved" ? `${openFindingsData?.count ?? 0} critical/high finding(s) unresolved` : hasBlockingFindings && approveDecision === "conditionally_approved" && !approveComments.toLowerCase().includes("override:") ? "Add 'override:' in comments to bypass" : approveDecision === "rejected" && !approveComments.trim() ? "Rejection reason is required" : "Submit decision"}
                 className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-50 ${
                   approveDecision === "approved" ? "bg-green-600 hover:bg-green-700"
                   : approveDecision === "rejected" ? "bg-red-600 hover:bg-red-700"

@@ -59,10 +59,10 @@ export interface ImportJob {
   status: ImportJobStatus;
   pipeline: PipelineStage[];
   documentType: DocumentType;
-  confidence: number;
-  ocrAccuracy: number;
-  classificationScore: number;
-  extractionScore: number;
+  confidence?: number;
+  ocrAccuracy?: number;
+  classificationScore?: number;
+  extractionScore?: number;
   duplicateScore?: number;
   isDuplicate: boolean;
   duplicateOf?: string;

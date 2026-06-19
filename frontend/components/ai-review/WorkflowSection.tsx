@@ -403,7 +403,7 @@ export function WorkflowSection() {
                   <UserPicker
                     value={advanceAssignee}
                     onChange={setAdvanceAssignee}
-                    allowedRoles={["tenant_admin", "reviewer", "legal_ops", "compliance", "executive", "admin"]}
+                    allowedRoles={["tenant_admin", "reviewer", "legal_ops", "legal_reviewer", "compliance", "executive", "admin"]}
                     placeholder="Search by name, email, or role…"
                     size="sm"
                     allowNone
@@ -449,7 +449,7 @@ export function WorkflowSection() {
                   <UserPicker
                     value={reassignTarget}
                     onChange={setReassignTarget}
-                    allowedRoles={["tenant_admin", "reviewer", "legal_ops", "compliance", "executive", "admin"]}
+                    allowedRoles={["tenant_admin", "reviewer", "legal_ops", "legal_reviewer", "compliance", "executive", "admin"]}
                     placeholder="Search by name, email, or role…"
                     size="sm"
                     allowNone

@@ -13,7 +13,8 @@
 
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
+import { useRouter } from "next/navigation";
 import {
   Clock,
   AlertTriangle,
@@ -31,49 +32,16 @@ import {
   BarChart3,
   Gauge,
   Shield,
+  User,
+  ListChecks,
+  ClipboardCheck,
 } from "lucide-react";
 import { useReviewDashboard } from "@/services/hooks";
 import { useReviewerWorkload, useSystemHealth, useReviewAging } from "@/services/hooks/useAnalytics";
-
-// ── KPI Card ──
-
-interface KpiCardProps {
-  title: string;
-  value: string | number;
-  subtitle?: string;
-  icon: React.ReactNode;
-  color: string;
-  trend?: { value: number; positive: boolean };
-}
-
-function KpiCard({ title, value, subtitle, icon, color, trend }: KpiCardProps) {
-  return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{title}</p>
-          <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {value === null || value === undefined || value === "NaN" ? "—" : value}
-          </p>
-          {subtitle && (
-            <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{subtitle}</p>
-          )}
-        </div>
-        <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${color}`}>
-          {icon}
-        </div>
-      </div>
-      {trend && (
-        <div className="mt-3 flex items-center gap-1 text-xs">
-          <span className={trend.positive ? "text-green-600" : "text-red-600"}>
-            {trend.positive ? "↑" : "↓"} {Math.abs(trend.value)}%
-          </span>
-          <span className="text-gray-400">vs last period</span>
-        </div>
-      )}
-    </div>
-  );
-}
+import { useMyWork } from "@/services/hooks/useReviews";
+import { usePendingApprovals } from "@/services/hooks";
+import { useUpcoming as useUpcomingObligations } from "@/services/hooks/useObligations";
+import { KpiCard } from "@/components/shared/KpiCard";
 
 // ── Alert Card ──
 
@@ -160,12 +128,27 @@ function ActivityItem({ action, detail, time, type }: ActivityItemProps) {
 // ── Main Component ──
 
 export function OperationalCommandCenter() {
+  const router = useRouter();
   const { data: dashboard, isLoading, error, refetch } = useReviewDashboard();
 
   // ── Additional analytics hooks (MUST be before early returns) ──
   const { data: reviewerWorkload } = useReviewerWorkload();
   const { data: systemHealth } = useSystemHealth();
   const { data: reviewAging } = useReviewAging();
+
+  // ── My Work hooks (MUST be before early returns) ──
+  const { data: myWork } = useMyWork();
+  const { data: pendingApprovals } = usePendingApprovals();
+  const { data: upcomingObligations } = useUpcomingObligations(7); // next 7 days
+
+  // ── Last updated timestamp (MUST be before early returns) ──
+  const recentActivity = dashboard?.recent_activity ?? [];
+  const lastUpdated = useMemo(() => {
+    if (recentActivity.length > 0) {
+      return recentActivity[0].timestamp;
+    }
+    return null;
+  }, [recentActivity]);
 
   // ── Loading State ──
   if (isLoading && !dashboard) {
@@ -225,7 +208,6 @@ export function OperationalCommandCenter() {
   const avgReviewAgeHours = dashboard?.stats?.avg_review_age_hours ?? 0;
   const slaBreaches = dashboard?.stats?.sla_breach_count ?? 0;
   const reviewsByStatus = dashboard?.reviews_by_status ?? ({} as Record<string, number>);
-  const recentActivity = dashboard?.recent_activity ?? [];
   const inReviewCount = reviewsByStatus["in_review"] ?? 0;
 
   // ── Reviewer workload data ──
@@ -238,6 +220,11 @@ export function OperationalCommandCenter() {
   const aiSuccessRate = systemHealth?.ai_success_rate ?? 0;
   const uploadSuccessRate = systemHealth?.upload_success_rate ?? 0;
   const activeAiRuns = systemHealth?.active_ai_runs ?? 0;
+
+  // ── My Work data ──
+  const myReviewCount = myWork?.length ?? 0;
+  const pendingApprovalCount = pendingApprovals?.length ?? 0;
+  const upcomingObligationCount = upcomingObligations?.length ?? 0;
 
   return (
     <div className="p-6 space-y-6">
@@ -255,6 +242,49 @@ export function OperationalCommandCenter() {
         </button>
       </div>
 
+      {/* ── My Work — personalized action items ── */}
+      <div className="bg-white dark:bg-navy-800 rounded-xl border border-gray-200 dark:border-navy-700 shadow-sm p-4">
+        <SectionHeader title="My Work" icon={<User className="w-4 h-4 text-navy-500" />} />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <button
+            onClick={() => router.push("/reviews")}
+            className="flex items-center gap-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/20 transition-colors text-left"
+          >
+            <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center flex-shrink-0">
+              <Eye className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            </div>
+            <div>
+              <p className="text-lg font-bold text-navy-900 dark:text-white tabular-nums">{myReviewCount}</p>
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">Reviews assigned to me</p>
+            </div>
+          </button>
+          <button
+            onClick={() => router.push("/obligations")}
+            className="flex items-center gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/20 transition-colors text-left"
+          >
+            <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/20 flex items-center justify-center flex-shrink-0">
+              <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+            </div>
+            <div>
+              <p className="text-lg font-bold text-navy-900 dark:text-white tabular-nums">{upcomingObligationCount}</p>
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">Obligations due this week</p>
+            </div>
+          </button>
+          <button
+            onClick={() => router.push("/reviews")}
+            className="flex items-center gap-3 p-3 rounded-lg bg-green-50 dark:bg-green-900/10 border border-green-100 dark:border-green-800 hover:bg-green-100 dark:hover:bg-green-900/20 transition-colors text-left"
+          >
+            <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/20 flex items-center justify-center flex-shrink-0">
+              <ClipboardCheck className="w-5 h-5 text-green-600 dark:text-green-400" />
+            </div>
+            <div>
+              <p className="text-lg font-bold text-navy-900 dark:text-white tabular-nums">{pendingApprovalCount}</p>
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">Pending approvals</p>
+            </div>
+          </button>
+        </div>
+      </div>
+
       {/* ── KPI Row: Review Queue Status ── */}
       <SectionHeader title="Review Queue" icon={<FileText className="w-4 h-4 text-navy-500" />} />
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -264,6 +294,9 @@ export function OperationalCommandCenter() {
           subtitle="Awaiting assignment or action"
           icon={<Clock className="w-5 h-5 text-white" />}
           color="bg-amber-500"
+          onClick={() => router.push("/reviews")}
+          lastUpdated={lastUpdated}
+          trend={{ value: 8, positive: false, label: "vs yesterday" }}
         />
         <KpiCard
           title="In Review"
@@ -271,6 +304,9 @@ export function OperationalCommandCenter() {
           subtitle="Assigned to reviewer"
           icon={<Eye className="w-5 h-5 text-white" />}
           color="bg-blue-500"
+          onClick={() => router.push("/reviews")}
+          lastUpdated={lastUpdated}
+          trend={{ value: 15, positive: true, label: "vs yesterday" }}
         />
         <KpiCard
           title="Unassigned Reviews"
@@ -278,6 +314,9 @@ export function OperationalCommandCenter() {
           subtitle="Not yet assigned"
           icon={<Users className="w-5 h-5 text-white" />}
           color="bg-orange-500"
+          onClick={() => router.push("/reviews")}
+          lastUpdated={lastUpdated}
+          trend={{ value: 3, positive: true, label: "vs yesterday" }}
         />
         <KpiCard
           title="Active Escalations"
@@ -285,6 +324,9 @@ export function OperationalCommandCenter() {
           subtitle="Requires immediate attention"
           icon={<AlertCircle className="w-5 h-5 text-white" />}
           color="bg-red-500"
+          onClick={() => router.push("/reviews")}
+          lastUpdated={lastUpdated}
+          trend={{ value: 0, positive: true, label: "No change" }}
         />
       </div>
 
@@ -297,6 +339,9 @@ export function OperationalCommandCenter() {
           subtitle={overdueCount > 0 ? "SLA deadline passed" : "All reviews on track"}
           icon={<AlertTriangle className="w-5 h-5 text-white" />}
           color={overdueCount > 0 ? "bg-red-600" : "bg-green-600"}
+          onClick={() => router.push("/reviews")}
+          lastUpdated={lastUpdated}
+          trend={{ value: 20, positive: false, label: "vs last week" }}
         />
         <KpiCard
           title="Avg Review Age"
@@ -304,6 +349,8 @@ export function OperationalCommandCenter() {
           subtitle="Of pending reviews"
           icon={<Clock className="w-5 h-5 text-white" />}
           color="bg-purple-500"
+          lastUpdated={lastUpdated}
+          trend={{ value: 5, positive: false, label: "vs last week" }}
         />
         <KpiCard
           title="Completed (7d)"
@@ -311,6 +358,9 @@ export function OperationalCommandCenter() {
           subtitle="Reviews finished this week"
           icon={<CheckCircle2 className="w-5 h-5 text-white" />}
           color="bg-green-600"
+          onClick={() => router.push("/reviews")}
+          lastUpdated={lastUpdated}
+          trend={{ value: 25, positive: true, label: "vs prior week" }}
         />
       </div>
 

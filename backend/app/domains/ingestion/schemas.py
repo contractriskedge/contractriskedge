@@ -96,6 +96,12 @@ class UploadStatusResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: Optional[datetime] = None
+    # AI analysis quality scores (populated after analysis completes)
+    ai_confidence: Optional[float] = None
+    ocr_accuracy: Optional[float] = None
+    classification_score: Optional[float] = None
+    extraction_score: Optional[float] = None
+    risk_score: Optional[float] = None
 
 
 class UploadRetryResponse(BaseModel):
@@ -193,6 +199,11 @@ class UploadSummary(BaseModel):
     ingestion_state: IngestionState
     created_at: datetime
     contract_number: Optional[str] = None
+    ai_confidence: Optional[float] = None
+    ocr_accuracy: Optional[float] = None
+    classification_score: Optional[float] = None
+    extraction_score: Optional[float] = None
+    risk_score: Optional[float] = None
 
 
 # ── Error ──────────────────────────────────────────────────────────

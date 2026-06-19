@@ -25,6 +25,7 @@ from app.domains.obligations.schemas import (
     AnomalyResponse, NotificationHistoryResponse, AiReviewRequest,
     ObligationAuditLogResponse,
 )
+from app.domains.notify.service import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +33,14 @@ logger = logging.getLogger(__name__)
 class ObligationService:
     """Service layer for obligation management operations."""
 
-    def __init__(self, session: AsyncSession, tenant_id: str, user_role: str = "viewer") -> None:
+    def __init__(self, session: AsyncSession, tenant_id: str, user_role: str = "viewer",
+                 user_id: Optional[str] = None,
+                 notify_service: Optional[NotificationService] = None) -> None:
         self.session = session
         self.tenant_id = tenant_id
         self.user_role = user_role
+        self.user_id = user_id or "system"
+        self.notify_service = notify_service
 
     # ── Helpers ────────────────────────────────────────────────────────
 
@@ -303,7 +308,7 @@ class ObligationService:
         await self.session.refresh(o)
         await self._log_audit(
             str(o.id), "obligation.created",
-            actor="system",
+            actor=self.user_id,
             changes={
                 "contract_id": str(contract_uid),
                 "contract_name": contract_name,
@@ -314,10 +319,25 @@ class ObligationService:
         if data.owner:
             await self._log_audit(
                 str(o.id), "obligation.assigned",
-                actor="system",
+                actor=self.user_id,
                 comment=f"Assigned to {data.owner}",
                 changes={"assignee": data.owner},
             )
+        # Send notification
+        if self.notify_service:
+            await self.notify_service.send_obligation_created(
+                obligation_id=str(o.id),
+                review_id=str(contract_uid),
+                created_by=data.owner or "system",
+                obligation_name=o.name,
+            )
+
+        # Emit contract timeline event for obligation creation
+        await self._emit_contract_timeline_event(
+            o, self.user_id, f"Obligation created with status '{status}'",
+            event_type="obligation.created",
+        )
+
         return self._to_response(o)
 
     async def update_obligation(self, obligation_id: str, data: ObligationUpdate) -> ObligationResponse:
@@ -459,28 +479,49 @@ class ObligationService:
         )
 
         # Contract timeline integration: create activity event on the parent contract
-        await self._emit_contract_timeline_event(o, completed_by_user_id or "System", completion_notes)
+        await self._emit_contract_timeline_event(
+            o, completed_by_user_id or "System", completion_notes,
+            event_type="obligation.completed",
+        )
+
+        # Send notification
+        if self.notify_service:
+            review_id = str(o.contract_uuid_id) if o.contract_uuid_id else o.contract_id or ""
+            await self.notify_service.send_obligation_completed(
+                obligation_id=obligation_id,
+                review_id=review_id,
+                completed_by=completed_by_user_id or "system",
+                obligation_name=o.name,
+            )
 
         return self._to_response(o)
 
     async def _emit_contract_timeline_event(
-        self, o: Obligation, completed_by: str, completion_notes: str,
+        self, o: Obligation, actor_id: str, notes: str,
+        event_type: str = "obligation.completed",
     ) -> None:
-        """Emit an OBLIGATION_COMPLETED event to the parent contract's activity timeline."""
-        try:
-            from app.domains.review.models import ContractReview
-            from app.domains.review.service import ReviewService
-            from app.kernel.database.session import async_session_factory
+        """Emit an obligation event to the parent contract's activity timeline.
 
+        Writes to both ``review_status_history`` (for the review timeline) and
+        ``governance_audit_events`` (for the Contract 360 audit trail).
+
+        Args:
+            o: The obligation instance.
+            actor_id: User ID of the person performing the action.
+            notes: Description of the event.
+            event_type: Event type string (e.g. ``obligation.created``,
+                       ``obligation.completed``).
+        """
+        try:
             if not o.contract_uuid_id:
                 return
 
-            # Get the actor name from admin_users if possible
-            actor_name = completed_by
+            # Resolve actor display name
+            actor_name = actor_id
             try:
                 from app.domains.admin.models import AdminUser
                 user_result = await self.session.execute(
-                    select(AdminUser.name).where(AdminUser.user_id == completed_by)
+                    select(AdminUser.name).where(AdminUser.user_id == actor_id)
                 )
                 user_row = user_result.scalar_one_or_none()
                 if user_row:
@@ -488,38 +529,43 @@ class ObligationService:
             except Exception:
                 pass
 
-            # Create a timeline-style audit event on the contract review
+            now = datetime.now(timezone.utc)
+
+            # 1. Write to review_status_history (appears in review timeline)
             from app.domains.review.models import ReviewStatusHistory
             timeline_entry = ReviewStatusHistory(
                 review_id=o.contract_uuid_id,
-                tenant_id=uuid.UUID(self.tenant_id) if self.tenant_id else None,
+                tenant_id=uuid.UUID(self.tenant_id) if isinstance(self.tenant_id, str) else self.tenant_id,
                 from_status=o.status,
                 to_status=o.status,
-                changed_by=completed_by,
-                reason=f"Obligation \"{o.name}\" completed by {actor_name} on {datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
+                changed_by=actor_id,
+                reason=f"Obligation \"{o.name}\" {event_type.replace('obligation.', '')} by {actor_name} on {now.strftime('%Y-%m-%d')}",
             )
             self.session.add(timeline_entry)
 
-            # Also record in the general audit events table for Contract 360
-            from app.domains.audit.models import GovernanceAuditEvent
+            # 2. Write to governance_audit_events (appears in Contract 360 audit)
+            from app.domains.playbook.models import GovernanceAuditEvent
             audit_event = GovernanceAuditEvent(
-                id=uuid.uuid4(),
-                tenant_id=uuid.UUID(self.tenant_id) if self.tenant_id else None,
-                event_type="OBLIGATION_COMPLETED",
-                resource_type="obligation",
-                resource_id=uuid.UUID(o.id),
-                actor_id=completed_by,
-                action="completed",
-                description=f"Obligation \"{o.name}\" completed by {actor_name}",
-                metadata={
+                event_id=uuid.uuid4(),
+                tenant_id=uuid.UUID(self.tenant_id) if isinstance(self.tenant_id, str) else self.tenant_id,
+                event_type=event_type,
+                entity_type="obligation",
+                entity_id=uuid.UUID(o.id) if isinstance(o.id, str) else o.id,
+                actor_id=actor_id,
+                change_summary=f"Obligation \"{o.name}\" {event_type.replace('obligation.', '')} by {actor_name}",
+                source="api",
+                document_metadata={
                     "obligation_id": str(o.id),
                     "obligation_name": o.name,
+                    "obligation_number": o.obligation_number,
+                    "review_id": str(o.contract_uuid_id) if o.contract_uuid_id else None,
                     "contract_id": str(o.contract_uuid_id) if o.contract_uuid_id else None,
                     "contract_name": o.contract_name,
-                    "completed_by": completed_by,
-                    "completed_by_name": actor_name,
-                    "completion_date": (o.completion_date or datetime.now(timezone.utc)).isoformat(),
-                    "completion_notes": completion_notes[:500] if completion_notes else None,
+                    "actor_id": actor_id,
+                    "actor_name": actor_name,
+                    "event_type": event_type,
+                    "timestamp": now.isoformat(),
+                    "notes": notes[:500] if notes else None,
                 },
             )
             self.session.add(audit_event)

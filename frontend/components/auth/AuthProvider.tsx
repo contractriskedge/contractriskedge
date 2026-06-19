@@ -12,6 +12,7 @@ import { getRealtimeClient, disconnectRealtimeClient } from "@/lib/realtime";
 import type { ConnectionState } from "@/lib/realtime";
 import { setGlobalConnectionState } from "@/services/hooks/useAdaptivePolling";
 import { sessionGovernance } from "@/services/api/sessionGovernance";
+import { resolveDevLoginRole } from "@/lib/auth/session";
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -29,7 +30,7 @@ export interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   error: string | null;
-  login: () => Promise<void>;
+  login: (role?: string) => Promise<void>;
   logout: () => void;
   hasPermission: (permission: string) => boolean;
   /** Get a valid access token, fetching a new one if necessary. */
@@ -43,7 +44,7 @@ const AuthContext = createContext<AuthContextType>({
   token: null,
   isLoading: true,
   error: null,
-  login: async () => {},
+  login: async (_role?: string) => {},
   logout: () => {},
   hasPermission: () => false,
   getAccessToken: async () => null,
@@ -65,12 +66,22 @@ function readJwtTenantId(jwt: string): string | null {
 }
 
 /** Dev JWT aligned with appSession tenant (backend scopes all data by JWT tenant_id). */
-async function fetchDevBackendJwt(): Promise<string | null> {
+async function fetchDevBackendJwt(role?: string): Promise<string | null> {
+  // In dev mode, request a role-specific JWT from the backend.
+  // The backend endpoint POST /api/v1/auth/token?role=reviewer returns
+  // a token scoped to that role's permissions.
   try {
-    const res = await fetch(`${API_URL}/auth/token`, { method: "POST" });
+    const url = role
+      ? `/api/v1/auth/token?role=${encodeURIComponent(role)}`
+      : "/api/v1/auth/token";
+    const res = await fetch(url, { method: "POST" });
     if (!res.ok) return null;
     const data = await res.json();
-    return typeof data.access_token === "string" ? data.access_token : null;
+    if (typeof data.access_token === "string") {
+      localStorage.setItem("auth_token", data.access_token);
+      return data.access_token;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -108,16 +119,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const authChecked = useRef(false);
 
   // ── Apply a decoded token ──────────────────────────────────────
-  const applyToken = useCallback((newToken: string) => {
+  const applyToken = useCallback((newToken: string, sessionUser?: User) => {
     try {
       const payload = JSON.parse(atob(newToken.split(".")[1]));
       setUser({
-        sub: payload.sub || "",
-        email: payload.email || "",
-        name: payload.name || "",
-        tenant_id: payload.tenant_id || "",
-        role: payload.role || "",
-        permissions: payload.permissions || [],
+        sub: payload.sub || sessionUser?.sub || "",
+        email: payload.email || sessionUser?.email || "",
+        name: sessionUser?.name || payload.name || "",
+        tenant_id: payload.tenant_id || sessionUser?.tenant_id || "",
+        role: payload.role || sessionUser?.role || "",
+        permissions: payload.permissions || sessionUser?.permissions || [],
       });
       setToken(newToken);
       localStorage.setItem("auth_token", newToken);
@@ -128,22 +139,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   /** Keep localStorage JWT tenant_id in sync with the app session (fixes review 404s in dev). */
   const syncBackendJwt = useCallback(
-    async (session: User) => {
+    async (session: User, loginRole?: string) => {
       if (typeof window === "undefined") return;
 
-      // Always mint a fresh backend dev JWT locally so POST mutations get
-      // workflows:approve (stale localStorage tokens often only had contracts:read).
+      const devRoleKey =
+        loginRole || resolveDevLoginRole(session);
+
+      // Always mint a fresh backend dev JWT so role/permissions match the app session.
       if (process.env.NODE_ENV === "development") {
-        const devJwt = await fetchDevBackendJwt();
+        const devJwt = await fetchDevBackendJwt(devRoleKey);
         if (devJwt) {
-          applyToken(devJwt);
+          applyToken(devJwt, session);
           return;
         }
       }
 
       const stored = localStorage.getItem("auth_token");
       if (stored && readJwtTenantId(stored) === session.tenant_id) {
-        applyToken(stored);
+        applyToken(stored, session);
         return;
       }
 
@@ -292,14 +305,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user, token]);
 
   // ── Login ──────────────────────────────────────────────────────
-  const login = useCallback(async () => {
+  const login = useCallback(async (role?: string) => {
     setError(null);
     setIsLoading(true);
 
     try {
       // Local dev: set appSession cookie so middleware allows /dashboard
       if (process.env.NODE_ENV === "development") {
-        const res = await fetch("/api/auth/dev-login", { method: "POST" });
+        const res = await fetch("/api/auth/dev-login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: role ? JSON.stringify({ role }) : undefined,
+        });
         if (res.ok) {
           const session = await res.json();
           const nextUser: User = {
@@ -311,7 +328,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             permissions: session.permissions || [],
           };
           setUser(nextUser);
-          await syncBackendJwt(nextUser);
+          await syncBackendJwt(nextUser, role);
           setIsLoading(false);
           window.location.href = "/dashboard";
           return;
@@ -353,9 +370,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return stored;
     }
 
-    const devJwt = await fetchDevBackendJwt();
+    const devJwt = await fetchDevBackendJwt(
+      user ? resolveDevLoginRole(user) : undefined,
+    );
     if (devJwt) {
-      applyToken(devJwt);
+      applyToken(devJwt, user ?? undefined);
       return devJwt;
     }
     return null;

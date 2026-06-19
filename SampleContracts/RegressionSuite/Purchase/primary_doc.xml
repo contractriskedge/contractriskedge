@@ -1,0 +1,1144 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><link rel="stylesheet" type="text/css" href="/css/SDR_print.css"><style type="text/css">
+
+					.warning {
+					font-weight:bold;
+					padding:10px;
+					margin:5px 0px;
+					font-size:0.9em;
+					}
+					/* informations */
+					.information, .informationNoBorder {
+					font-weight:lighter
+					padding:10px;
+					color:#302000;
+					font-size:0.9em;
+					}
+					img {
+					vertical-align:text-top;
+					}
+					.information {
+					margin:5px 0px;
+					}
+					.informationNoBorder{
+					margin:5px 0px;
+					}
+					/* titles (order by font size)*/
+					.title1, .title2, .title3,
+					.titleNumber {
+					font-family: Arial, Helvetica, sans-serif;
+					text-align: left;
+					line-height: 1.5;
+					}
+					.title1 { /* Largest title */
+					margin: 10px 0px;
+					font-size: 1.3em;
+					}
+					.title2 { /* Second largest title */
+					margin: 10px;
+					font-size: 1.1em;
+					}
+					.title3 { /* Third largest title */
+					margin: 10px 20px;
+					color: black;
+					font-size: 1.0em;
+					}
+					.titleNumber {
+					margin: 10px 0px;
+					line-height: 0.8;
+					}
+					.titleWhite {
+					background-color: white;
+					width: 25%;
+					}
+					h4{
+					vertical-align:middle;
+					}
+					.pageHeader {
+					font-weight:bold;
+					padding:10px;
+					margin:5px 0px;
+					background-color:#e0e0ff;
+					border:2px solid #42638F;
+					color:#302000;
+					text-align: center;
+					vertical-align: middle;
+					}
+					#pageHeaderTitle {
+					font-size:1.2em;
+					}
+					#pageHeaderDetail {
+					font-size:1.1em;
+					}
+					#pageHeaderQuestion{
+					font-weight:lighter;
+					font-size:1.0em;
+					}
+					#twoHeaders .title1, .title2{
+					display:inline;
+					}
+					#pageHeaderTitleOMB{
+					font-size:1.0em;
+					}
+					#pageHeaderOMBNumber {
+					font-size:0.9em;
+					}
+					#pageHeaderOMBEst {
+					font-size:0.8em;
+					}
+					#ombHeaderTable {
+					border-collapse: collapse;
+					border:2px solid #42638F;
+					}
+					#ombHeaderTable td {
+					vertical-align: middle;
+					}
+					#header .side {
+					font-weight:lighter;
+					}
+					.fakeBox {
+					border-top: 2px solid #999;
+					}
+					ul{
+					padding-left:10px;
+					padding-right:10px;
+					}
+					.fakeBox_drp1_duration{
+					display:inline-block;
+					border-top: 2px solid #999;
+					border-right: 1px solid #ccc;
+					border-bottom: 1px solid #ccc;
+					border-left: 2px solid #999;
+					padding: 2px;
+					min-width: 40px;
+					width: 40px;
+					height: 15px;
+					word-wrap: break-word;
+					font-size: 0.9em;
+					color: blue;
+					}
+				</style></head></html><div xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" id="info"><div class="contentwrapper"><table role="presentation" id="header"><tr><td class="title">Form TA-1 Filer Information</td><td rowspan="2" class="center"><br>
+									UNITED STATES
+									<br>
+									SECURITIES AND EXCHANGE COMMISSION
+									<br>
+									Washington, D.C. 20549
+									<br><br>
+									FORM TA-1/A</td><td class="title">OMB APPROVAL</td></tr><tr><td class="side" style="text-align: center;"><p><br>
+										FORM TA-1/A<br></p></td><td width="25%" class="side"><p>OMB Number:   3235-0084</p><hr><p>Estimated average burden hours per response: 1.5</p></td></tr></table><div class="content"><h1>TA-1/A
+						: Filer Information
+					</h1><table><tr class="primaryVeryDark" style="MIN-HEIGHT: 27px"><td style="PADDING-RIGHT: 1px; PADDING-LEFT: 1px; PADDING-BOTTOM: 1px; VERTICAL-ALIGN: middle; BORDER-TOP-STYLE: none; PADDING-TOP: 1px; BORDER-BOTTOM: 5pt solid; BORDER-RIGHT-STYLE: none; BORDER-LEFT-STYLE: none; BACKGROUND-COLOR: #003366"><div style="MARGIN-TOP: 0px" align="left"><font face="Verdana" color="#ffffff">
+											Form Version
+											<span class="xdExpressionBox xdDataBindingUI" title="" tabIndex="-1" style="BORDER-RIGHT: #dcdcdc 1pt; BORDER-TOP: #dcdcdc 1pt; MARGIN-TOP: 0px; MARGIN-BOTTOM: 0px; PADDING-BOTTOM: 0px; BORDER-LEFT: #dcdcdc 1pt; WIDTH: 104px; PADDING-TOP: 0px; BORDER-BOTTOM: #dcdcdc 1pt">X0405</span></font></div></td><td style="PADDING-RIGHT: 1px; PADDING-LEFT: 1px; PADDING-BOTTOM: 1px; VERTICAL-ALIGN: middle; BORDER-TOP-STYLE: none; PADDING-TOP: 1px; BORDER-BOTTOM: 5pt solid; BORDER-RIGHT-STYLE: none; BORDER-LEFT-STYLE: none; BACKGROUND-COLOR: #003366"></td></tr></table><table role="presentation" class="filerInformation"><tr><td></td></tr><tr><td class="label"><font face="Times New Roman"><b>1(a).</b></font>
+								Filer CIK:
+							</td><td><div class="fakeBox2" style="margin-top:5px"><a href="/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001146230" target="_blank" style="color: blue;">0001146230</a></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>1(b).</b></font>
+								Filer CCC:
+							</td><td><div class="fakeBox2" style="margin-top:5px">
+									********
+								</div></td></tr><tr><td class="label"><b><font face="Times New Roman">1(c).</font></b>
+								Is this a LIVE or TEST submission?
+							</td><td><img src="/Images/radio-checked.jpg" alt="radio button checked">
+									 Live 
+									<img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+									 Test
+							</td></tr><tr><td class="label"><b><font face="Times New Roman">1(d).</font></b>
+								Would you like a Return Copy?
+							</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+								 Yes 
+							</td></tr><tr><td class="label"><b><font face="Times New Roman">1(e).</font></b>
+								Is this filing an amendment to a previous filing? 
+							</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">		
+								 Yes 
+							</td></tr><tr><td class="label"><b><font face="Times New Roman">1(e)(i).</font></b>
+								File Number:
+							</td><td><div class="fakeBox2"><a href="/cgi-bin/browse-edgar?action=getcompany&amp;filenum=084-05925" target="_blank" style="color: blue;">084-05925</a></div></td></tr></table><p></p><h3>Submission Contact Information</h3><p></p>
+					The registrant may provide a single e-mail address for contact purposes.
+					<p></p><table role="presentation"><tr><td class="label"><b><font face="Times New Roman">1(f)(i).</font></b>
+								Contact Name:
+							</td><td><div class="fakeBox"><font face="Times New Roman"></font></div></td></tr><tr><td class="label"><b><font face="Times New Roman">1(f)(ii).</font></b>
+								Contact Phone Number:
+							</td><td><div class="fakeBox2"><font face="Times New Roman"></font></div></td></tr><tr><td class="label"><b><font face="Times New Roman">1(f)(iii).</font></b>
+								Contact E-Mail Address:
+							</td><td><div class="fakeBox"><font face="Times New Roman"></font></div></td></tr></table><p></p><h3>Notification Information</h3><p></p>
+						The registrant may provide additional e-mail addresses for those persons 
+						the filer would like to receive notification e-mails regarding the filing.
+						<p></p><table role="presentation"><tr><td class="label"><b><font face="Times New Roman">1(g).</font></b>
+								Notification E-mail Address:
+							</td><td></td></tr></table></div></div></div><h1 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler">TA-1/A
+			: Registrant Information
+		</h1><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation" class="registration"><tr><td class="label"><font color="black"><b>2.</b>
+						Appropriate regulatory agency (check one):
+					</font></td><td><div style="FONT-WEIGHT: normal" align="left"><img src="/Images/radio-checked.jpg" alt="radio button checked">
+							 
+							<font color="black">Securities and Exchange Commission</font>
+							 
+							<img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+							 
+							<font color="black">Federal Deposit Insurance Corporation</font>
+							 
+							<img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+							 
+							<font color="black">Comptroller of the Currency</font>
+							 
+					</div></td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation" class="registration"><tr><td class="label"><font face="Times New Roman"><b>3(a). </b></font>
+					Full Name of Registrant:
+				</td><td><div class="fakeBox">Computershare Inc /TA</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>3(a)(i). </b></font>
+					Previous name, if being amended:
+				</td><td><div class="fakeBox">Computershare Shareholder Services Inc /TA</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>3(b). </b></font>
+					Financial Industry Number (FINS) number:
+				</td><td><div class="fakeBox2">260539</div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"><b>3(c). </b>
+			Address of principal office where transfer agent activities are, or
+			will be, performed:
+		</p><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation" class="registration"><tr><td class="label"><font face="Times New Roman"><b>3(c)(i). </b></font>
+					Address 1
+				</td><td><div class="fakeBox">150 Royall Street</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>3(c)(ii). </b></font>
+					Address 2
+				</td><td><div class="fakeBox"></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>3(c)(iii). </b></font>
+					City
+				</td><td><div class="fakeBox2">Canton</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>3(c)(iv). </b></font>
+					State or Country
+				</td><td><div class="fakeBox">
+				MASSACHUSETTS
+			</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>3(c)(v). </b></font>
+					Postal Code
+				</td><td><div class="fakeBox2">02021-1011</div></td></tr><tr><td class="label"><b><font face="Times New Roman">3(d). </font></b>
+					Is Mailing address different from response to Question 3c?
+					If "yes" provide address(es):
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr><tr><td class="label"><font face="Times New Roman"><b>3(e). </b></font>
+					Telephone Number (Include Area Code)
+				</td><td><div class="fakeBox2">781-575-2000</div></td></tr><tr><td class="label"><b><font face="Times New Roman">4. </font></b>
+					Does Registrant conduct, or will it conduct, transfer agent
+					activities at any location other than that given in Questions
+					3(c) above? If "Yes" provide address (es):
+				</td><td><img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 Yes 
+						<img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 No
+				</td></tr><tr><td class="label">
+				Other Business Location Record:
+				1</td><td></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(i). </b></font>
+				Address 1
+			</td><td><div class="fakeBox">300 S. Wacker Drive</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(ii). </b></font>
+				Address 2
+			</td><td><div class="fakeBox">Suite 820</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(iii). </b></font>
+				City
+			</td><td><div class="fakeBox2">Chicago</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(iv). </b></font>
+				State or Country
+			</td><td><div class="fakeBox">
+				ILLINOIS
+			</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(v). </b></font>
+				Postal Code
+			</td><td><div class="fakeBox2">60606</div></td></tr><tr><td class="label">
+				Other Business Location Record:
+				2</td><td></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(i). </b></font>
+				Address 1
+			</td><td><div class="fakeBox">144 Fernwood Avenue</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(ii). </b></font>
+				Address 2
+			</td><td><div class="fakeBox"></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(iii). </b></font>
+				City
+			</td><td><div class="fakeBox2">Edison</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(iv). </b></font>
+				State or Country
+			</td><td><div class="fakeBox">
+				NEW JERSEY
+			</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(v). </b></font>
+				Postal Code
+			</td><td><div class="fakeBox2">08837</div></td></tr><tr><td class="label">
+				Other Business Location Record:
+				3</td><td></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(i). </b></font>
+				Address 1
+			</td><td><div class="fakeBox">211 Quality Circle</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(ii). </b></font>
+				Address 2
+			</td><td><div class="fakeBox">Suite 210</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(iii). </b></font>
+				City
+			</td><td><div class="fakeBox2">College Station</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(iv). </b></font>
+				State or Country
+			</td><td><div class="fakeBox">
+				TEXAS
+			</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(v). </b></font>
+				Postal Code
+			</td><td><div class="fakeBox2">77845</div></td></tr><tr><td class="label">
+				Other Business Location Record:
+				4</td><td></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(i). </b></font>
+				Address 1
+			</td><td><div class="fakeBox">462 South Fourth Street</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(ii). </b></font>
+				Address 2
+			</td><td><div class="fakeBox"></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(iii). </b></font>
+				City
+			</td><td><div class="fakeBox2">Louisville</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(iv). </b></font>
+				State or Country
+			</td><td><div class="fakeBox">
+				KENTUCKY
+			</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(v). </b></font>
+				Postal Code
+			</td><td><div class="fakeBox2">40202</div></td></tr><tr><td class="label">
+				Other Business Location Record:
+				5</td><td></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(i). </b></font>
+				Address 1
+			</td><td><div class="fakeBox">1505 Energy Park Drive</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(ii). </b></font>
+				Address 2
+			</td><td><div class="fakeBox"></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(iii). </b></font>
+				City
+			</td><td><div class="fakeBox2">Saint Paul</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(iv). </b></font>
+				State or Country
+			</td><td><div class="fakeBox">
+				MINNESOTA
+			</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(v). </b></font>
+				Postal Code
+			</td><td><div class="fakeBox2">55108</div></td></tr><tr><td class="label">
+				Other Business Location Record:
+				6</td><td></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(i). </b></font>
+				Address 1
+			</td><td><div class="fakeBox">9062 Old Annapolis Road</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(ii). </b></font>
+				Address 2
+			</td><td><div class="fakeBox"></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(iii). </b></font>
+				City
+			</td><td><div class="fakeBox2">Columbia</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(iv). </b></font>
+				State or Country
+			</td><td><div class="fakeBox">
+				MARYLAND
+			</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(v). </b></font>
+				Postal Code
+			</td><td><div class="fakeBox2">21045</div></td></tr><tr><td class="label">
+				Other Business Location Record:
+				7</td><td></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(i). </b></font>
+				Address 1
+			</td><td><div class="fakeBox">111 Town Square Place</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(ii). </b></font>
+				Address 2
+			</td><td><div class="fakeBox">Suite 1501</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(iii). </b></font>
+				City
+			</td><td><div class="fakeBox2">Jersey City</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(iv). </b></font>
+				State or Country
+			</td><td><div class="fakeBox">
+				NEW JERSEY
+			</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>4(a)(v). </b></font>
+				Postal Code
+			</td><td><div class="fakeBox2">07310</div></td></tr><tr><td class="label"><b><font face="Times New Roman">5. </font></b>
+					Does registrant act, or will it act,
+					as a transfer agent solely for its own securities,
+					and/or securities of an affiliate(s)?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr><tr><td class="label"><b><font face="Times New Roman">6. </font></b>
+					Has registrant, as a named transfer agent, engaged, or will it
+					engage, a service company to perform any transfer agent functions?
+				</td><td><img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 Yes 
+						<img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 No
+				</td></tr></table><p></p>
+							If "yes," provide the name(s) and address(es) of all
+							service
+							companies engaged, or that will be engaged, by the registrant
+							to perform its transfer agent functions:
+
+				<p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				Engaged sevice company information Related to item 6 Record:
+           	1<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>6(a). </b></font>
+				Name
+			</td><td><div class="fakeBox">Computershare Trust Company of Canada</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>6(b). </b></font>
+				File Number
+			</td><td><div class="fakeBox2"><a href="/cgi-bin/browse-edgar?action=getcompany&amp;filenum=084-06112" target="_blank" style="color: blue;">084-06112</a></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>6(c)(i). </b></font>
+				Address 1
+			</td><td><div class="fakeBox">100 University Avenue, 11th Floor</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>6(c)(ii). </b></font>
+				Address 2
+			</td><td><div class="fakeBox"></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>6(c)(iii). </b></font>
+				City
+			</td><td><div class="fakeBox2">Toronto</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>6(c)(iv). </b></font>
+				State or Country
+			</td><td><div class="fakeBox">
+				ONTARIO, CANADA
+			</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>6(c)(v). </b></font>
+				Postal Code
+			</td><td><div class="fakeBox2">M5J 2Y1</div></td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">7. </font></b>
+					Has registrant been engaged, or will it be engaged as a service
+					company by a named transfer agent to perform transfer agent
+					functions?
+				</td><td><img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 Yes 
+						<img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 No
+				</td></tr></table><p></p>
+							If "Yes" provide the name(s) and File Number(s) of the
+							named transfer agent(s) for which the registrant has been
+							engaged, or will be engaged, as a service company to perform
+							transfer agent functions:
+
+				<p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				Engaged transfer agent company information Related to item 7 Record:
+				1<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>7(a). </b></font>
+				Name
+			</td><td><div class="fakeBox">Citibank, N.A.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(b). </b></font>
+				File Number
+			</td><td><div class="fakeBox2"><a href="/cgi-bin/browse-edgar?action=getcompany&amp;filenum=085-10232" target="_blank" style="color: blue;">085-10232</a></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(i). </b></font>
+				Address 1
+			</td><td><div class="fakeBox">111 Wall Street</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(ii). </b></font>
+				Address 2
+			</td><td><div class="fakeBox"></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(iii). </b></font>
+				City
+			</td><td><div class="fakeBox2">New York</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(iv). </b></font>
+				State or Country
+			</td><td><div class="fakeBox">
+				NEW YORK
+			</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(v). </b></font>
+				Postal Code
+			</td><td><div class="fakeBox2">10043</div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				Engaged transfer agent company information Related to item 7 Record:
+				2<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>7(a). </b></font>
+				Name
+			</td><td><div class="fakeBox">Computershare Trust Company, N.A.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(b). </b></font>
+				File Number
+			</td><td><div class="fakeBox2"><a href="/cgi-bin/browse-edgar?action=getcompany&amp;filenum=085-11340" target="_blank" style="color: blue;">085-11340</a></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(i). </b></font>
+				Address 1
+			</td><td><div class="fakeBox">150 Royall Street</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(ii). </b></font>
+				Address 2
+			</td><td><div class="fakeBox"></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(iii). </b></font>
+				City
+			</td><td><div class="fakeBox2">Canton</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(iv). </b></font>
+				State or Country
+			</td><td><div class="fakeBox">
+				MASSACHUSETTS
+			</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(v). </b></font>
+				Postal Code
+			</td><td><div class="fakeBox2">02021-1011</div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				Engaged transfer agent company information Related to item 7 Record:
+				3<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>7(a). </b></font>
+				Name
+			</td><td><div class="fakeBox">Computershare Trust Company of Canada</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(b). </b></font>
+				File Number
+			</td><td><div class="fakeBox2"><a href="/cgi-bin/browse-edgar?action=getcompany&amp;filenum=084-06112" target="_blank" style="color: blue;">084-06112</a></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(i). </b></font>
+				Address 1
+			</td><td><div class="fakeBox">100 University Avenue, 11th Floor</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(ii). </b></font>
+				Address 2
+			</td><td><div class="fakeBox"></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(iii). </b></font>
+				City
+			</td><td><div class="fakeBox2">Toronto</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(iv). </b></font>
+				State or Country
+			</td><td><div class="fakeBox">
+				ONTARIO, CANADA
+			</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(v). </b></font>
+				Postal Code
+			</td><td><div class="fakeBox2">M5J 2Y1</div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				Engaged transfer agent company information Related to item 7 Record:
+				4<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>7(a). </b></font>
+				Name
+			</td><td><div class="fakeBox">Computershare Investor Services Inc.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(b). </b></font>
+				File Number
+			</td><td><div class="fakeBox2"><a href="/cgi-bin/browse-edgar?action=getcompany&amp;filenum=084-06111" target="_blank" style="color: blue;">084-06111</a></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(i). </b></font>
+				Address 1
+			</td><td><div class="fakeBox">100 University Avenue, 11th Floor</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(ii). </b></font>
+				Address 2
+			</td><td><div class="fakeBox"></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(iii). </b></font>
+				City
+			</td><td><div class="fakeBox2">Toronto</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(iv). </b></font>
+				State or Country
+			</td><td><div class="fakeBox">
+				ONTARIO, CANADA
+			</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(v). </b></font>
+				Postal Code
+			</td><td><div class="fakeBox2">M5J 2Y1</div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				Engaged transfer agent company information Related to item 7 Record:
+				5<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>7(a). </b></font>
+				Name
+			</td><td><div class="fakeBox">The Bank of New York Mellon</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(b). </b></font>
+				File Number
+			</td><td><div class="fakeBox2"><a href="/cgi-bin/browse-edgar?action=getcompany&amp;filenum=085-05006" target="_blank" style="color: blue;">085-05006</a></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(i). </b></font>
+				Address 1
+			</td><td><div class="fakeBox">101 Barclay Street</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(ii). </b></font>
+				Address 2
+			</td><td><div class="fakeBox"></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(iii). </b></font>
+				City
+			</td><td><div class="fakeBox2">New York</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(iv). </b></font>
+				State or Country
+			</td><td><div class="fakeBox">
+				NEW YORK
+			</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(v). </b></font>
+				Postal Code
+			</td><td><div class="fakeBox2">10286</div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				Engaged transfer agent company information Related to item 7 Record:
+				6<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>7(a). </b></font>
+				Name
+			</td><td><div class="fakeBox">Computershare Investor Services Ltd.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(b). </b></font>
+				File Number
+			</td><td><div class="fakeBox2"><a href="/cgi-bin/browse-edgar?action=getcompany&amp;filenum=084-06720" target="_blank" style="color: blue;">084-06720</a></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(i). </b></font>
+				Address 1
+			</td><td><div class="fakeBox">46 Floor Hopewell Centre</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(ii). </b></font>
+				Address 2
+			</td><td><div class="fakeBox">183 Queen's Road East Wanchai K3</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(iii). </b></font>
+				City
+			</td><td><div class="fakeBox2">Hong Kong</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(iv). </b></font>
+				State or Country
+			</td><td><div class="fakeBox">
+				HONG KONG
+			</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(v). </b></font>
+				Postal Code
+			</td><td><div class="fakeBox2">00000</div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				Engaged transfer agent company information Related to item 7 Record:
+				7<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>7(a). </b></font>
+				Name
+			</td><td><div class="fakeBox">Computershare Delaware Trust Company</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(b). </b></font>
+				File Number
+			</td><td><div class="fakeBox2"><a href="/cgi-bin/browse-edgar?action=getcompany&amp;filenum=085-05570" target="_blank" style="color: blue;">085-05570</a></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(i). </b></font>
+				Address 1
+			</td><td><div class="fakeBox">919 North Market Street, Suite 1600</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(ii). </b></font>
+				Address 2
+			</td><td><div class="fakeBox"></div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(iii). </b></font>
+				City
+			</td><td><div class="fakeBox2">Wilmington</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(iv). </b></font>
+				State or Country
+			</td><td><div class="fakeBox">
+				DELAWARE
+			</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>7(c)(v). </b></font>
+				Postal Code
+			</td><td><div class="fakeBox2">19801</div></td></tr></table><h1 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler">TA-1/A
+			: Independent, Non-Issuer Registrant Information
+		</h1><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"><b>
+				Completion of Question 8 on this form is required
+				by all independent, non-issuer registrants whose appropriate
+				regulatory authority is the Securities and Exchange Commission.
+				Those registrants who are not required to complete Question 8
+				should select "Not Applicable".
+          </b></p><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation" class="independentRegistrant"><tr><td class="label"><font color="black"><b>8. </b>
+						Is registrant a:
+					</font></td><td><div class="fakeBox2">Corporation</div></td></tr></table><p>
+								Section for Initial Registration and for Amendments
+								Reporting Additional Persons.
+                    </p><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				1<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">Computershare US Inc.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">06/27/2005</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">Indirect Owner</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">E</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2"></div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				2<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">Computershare Limited</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">06/27/2005</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">Indirect Owner</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">E</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2"></div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				3<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">Richard L. Johnson, Jr.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">11/09/2001</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">Chief Compliance Officer</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">NA</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2">06/28/2024</div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				4<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">Computershare US Services Inc.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">03/14/2007</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">Indirect Owner</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">E</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2"></div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				5<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">Steven R. Rothbloom</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">10/04/2007</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">Director</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">NA</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2"></div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				6<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">ACN 081 035 752 Pty Ltd</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">05/19/2010</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">Indirect Owner</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">E</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2"></div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				7<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">Computershare Investments (UK)(No. 8) Limited</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">01/01/2012</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">Direct Owner</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">E</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2">06/14/2024</div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				8<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">Computershare Holdings Inc.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">01/01/2012</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">Indirect Owner</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">E</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2"></div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				9<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">Kevin M. Brennan</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">07/01/2013</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">Head of Equity Sales + Strategic Clients</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">NA</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2"></div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				10<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">Nicholas S. R. Oldfield</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">07/01/2014</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">CFO, Treasurer, and Director</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">NA</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2"></div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				11<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">Mark L. McDougall</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">07/01/2014</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">Global Chief Information Officer</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">NA</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2"></div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				12<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">Robert M. Fromberg</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">02/01/2016</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">Secretary</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">NA</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2"></div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				13<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">Sheila M. Frierson</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">07/01/2016</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">President, US Plan Managers</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">NA</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2"></div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				14<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">Marc J. Winters</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">12/06/2021</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">Head of Global Core Operations</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">NA</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2"></div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				15<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">Ann M. Bowering</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">07/11/2022</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">President and CEO, US Issuer Services</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">NA</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2"></div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				16<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">Lara K. Daly-Sims</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">01/01/2024</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">Head of Corp. Regulatory Services (US)</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">NA</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2"></div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>
+				corporation or partner information Related to item 8 Record:
+				17<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>8(a)(i). </b></font>
+				Full Name
+			</td><td><div class="fakeBox">Ben Klingenstein</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(ii). </b></font>
+				Relationship Start Date
+			</td><td><div class="fakeBox2">11/01/2021</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iii). </b></font>
+				Title or Status
+			</td><td><div class="fakeBox">Head of Risk and Compliance</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(iv). </b></font>
+				Ownership Code
+			</td><td><div class="fakeBox2">NA</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(v). </b></font>
+				Control Person
+			</td><td><img src="/Images/box-checked.jpg" alt="checkbox checked">
+					 Yes 
+			</td></tr><tr><td class="label"><font face="Times New Roman"><b>8(a)(vi). </b></font>
+					Relationship End Date
+				</td><td><div class="fakeBox2"></div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"><b>9.</b> Does any person or entity not named in the answer to Question 8:
+			</p><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>9(a). </b></font>
+	               directly or indirectly, through agreement or otherwise exercise or 
+	               have the power to exercise control over the management or policies of applicant, or;….
+					</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+							 Yes 
+							<img src="/Images/radio-checked.jpg" alt="radio button checked">
+							 No
+					</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>9(b). </b></font>
+	                 wholly or partially finance the business of the applicant, 
+	                 directly or indirectly, in any manner other than by a public 
+	                 offering of securities made pursuant to the Securities Act of 1933 
+	                 or by credit extended in the ordinary course of business by suppliers, banks and others?…..
+					</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+							 Yes 
+							<img src="/Images/radio-checked.jpg" alt="radio button checked">
+							 No
+					</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></table><h1 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler">TA-1/A
+			: 10. Applicant and Control Affiliate Disciplinary History
+		</h1><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler">
+			The following definitions apply for purposes of
+			answering this Question 10  
+		</p><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td valign="top">Control Affiliate</td><td>- An individual or firm that directly or indirectly controls, is under common control
+					with, or is controlled by applicant. Included are any employees identified in 8(a), 8(b), 8(c) of this form as exercising
+					control. Excluded are any employees who perform solely clerical, administrative support of similar functions, or who, regardless of
+					title, perform no executive duties or have no senior policy making authority. 
+				</td></tr><tr><td valign="top">Investment or investment related</td><td>- Pertaining to securities, commodities, banking, insurance, or real estate
+			  		(including, but not limited to, acting as or being associated with
+			  		a broker dealer, investment company, investment adviser, futures
+			  		sponsor, bank, or savings and loan association).
+			  </td></tr><tr><td valign="top">Involved</td><td>- Doing an act of aiding, abetting, counseling, commanding, inducing,
+			  		conspiring with or failing reasonably to supervise another in
+			  		doing an act.</td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"><b>10(a). </b>
+			In the past ten years has the applicant or a control affiliate
+			been convicted of or plead guilty or nolo contendere ("no contest")
+			to:
+		</p><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(a)(1). </font></b>
+					a felony or misdemeanor involving: investments or an
+					investment-related business, fraud, false statements or omissions,
+					wrongful taking of property, or bribery, forgery, counterfeiting,
+					or extortion?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(a)(2). </font></b>
+					any other felony?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font color="black"><b>10(b). </b>
+						Has any court in the past ten years:
+					</font></td></tr><tr><td class="label"><b><font face="Times New Roman">10(b)(1). </font></b>
+					enjoined the applicant or a control affiliate in connection with
+					any investment-related activity?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(b)(2). </font></b>
+					found that the applicant or control affiliate was involved in a
+					violation of investment-related statutes or regulations?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font color="black"><b>10 (c). </b>
+						Has the U.S. Securities and Exchange Commission or the Commodity
+						Futures Trading Commission ever:
+					</font></td></tr><tr><td class="label"><b><font face="Times New Roman">10(c)(1). </font></b>
+					found the applicant or control affiliate to have made a false
+					statement or omission?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(c)(2). </font></b>
+					found the applicant or control affiliate to have been involved in
+					a violation of its regulation or statutes?
+				</td><td><img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 Yes 
+						<img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 No
+				</td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler">
+				Entity information Related to item 10(c)(2) Record:
+				1</p><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>10(c)(2)(i). </b></font>
+				The individuals named in the Action
+			</td><td><div class="fakeBox">Computershare Trust Company of Canada, Inc.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(c)(2)(ii). </b></font>
+				Title of Action
+			</td><td><div class="fakeBox">In the Matter of Computershare Trust Company of Canada Inc.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(c)(2)(iii). </b></font>
+				Date of Action
+			</td><td><div class="fakeBox2">04/18/2006</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(c)(2)(iv). </b></font>
+				The Court or body taking the Action and its location
+			</td><td><div class="fakeBox">U.S. Securities and Exchange Commission</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(c)(2)(v). </b></font>
+				Description of the Action
+			</td><td><div class="fakeBox3">Without admitting or denying the findings, on April 18, 2006 Computershare Trust Company of Canada, Inc. (CTCC), agreed to settle an administrative action by the SEC in which it was ordered to cease-and-desist from violations of Sections 15(b) and 17A(c) of the Securities Exchange Act of 1934. See, In the Matter of Computershare Trust Company of Canada Inc., Administrative Proceeding 3-12265, Securities Exchange Act Release No. 53668 (April 18, 2006). The proceedings related to CTCC's failure to register with the SEC as a U.S. transfer agent and a U.S. broker-dealer. As part of the settlement, CTCC was ordered to disgorge profits, including prejudgment interest, of $601,868.71 attributable to certain of its services associated with the U.S. during the period from June 2000 to April 2004 when it became registered as a U.S. Transfer Agent, as well as a fine in the amount of $500,000. At the same time, the SEC issued a conditional exemption to permit CTCC and its affiliate, Computershare Investor Services, LLC, to continue to provide plan services to U.S. residents without registering as a U.S. broker-dealer in accordance with Section 15(b). Exchange Act Release No. 53667 (April 18, 2006).</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(c)(2)(vi). </b></font>
+				The disposition of the proceeding
+			</td><td><div class="fakeBox3">See above.</div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler">
+				Entity information Related to item 10(c)(2) Record:
+				2</p><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>10(c)(2)(i). </b></font>
+				The individuals named in the Action
+			</td><td><div class="fakeBox">Georgeson Shareholder Securities Corporation (GSSC)</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(c)(2)(ii). </b></font>
+				Title of Action
+			</td><td><div class="fakeBox">N/A</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(c)(2)(iii). </b></font>
+				Date of Action
+			</td><td><div class="fakeBox2">02/27/2004</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(c)(2)(iv). </b></font>
+				The Court or body taking the Action and its location
+			</td><td><div class="fakeBox">U.S. Securities and Exchange Commission</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(c)(2)(v). </b></font>
+				Description of the Action
+			</td><td><div class="fakeBox3">Violation of Rules 17a-3(1) and (a)(2) and (a)(11); and Rule 17a-5(a)(2).</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(c)(2)(vi). </b></font>
+				The disposition of the proceeding
+			</td><td><div class="fakeBox3">The SEC Northeast Regional Office, 233 Broadway, New York, NY, has asked GSSC for a letter detailing the procedures in place to safeguard against further infractions of these rules.</div></td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(c)(3). </font></b>
+					found the applicant or control affiliate to have been a cause of
+					an investment-related business having its authorization to do
+					business denied, suspended, revoked or restricted?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(c)(4). </font></b>
+					entered an order denying, suspending or revoking the applicant’s
+					or control affiliate’s registration or otherwise disciplined it by
+					restricting its activities?
+				</td><td><img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 Yes 
+						<img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 No
+				</td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler">
+				Entity information Related to item 10(c)(4) Record:
+				1</p><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>10(c)(4)(i). </b></font>
+				The individuals named in the Action
+			</td><td><div class="fakeBox">Registrar and Transfer Company and Thomas L. Montrone</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(c)(4)(ii). </b></font>
+				Title of Action
+			</td><td><div class="fakeBox">In the Matter of Registrar and Transfer Company and Thomas L. Montrone.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(c)(4)(iii). </b></font>
+				Date of Action
+			</td><td><div class="fakeBox2">09/23/2014</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(c)(4)(iv). </b></font>
+				The Court or body taking the Action and its location
+			</td><td><div class="fakeBox">U.S. Securities and Exchange Commission</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(c)(4)(v). </b></font>
+				Description of the Action
+			</td><td><div class="fakeBox3">Administrative Proceeding File No. 3-16157: In this matter, Registrar and Transfer Company ("R&amp;T") and certain of its employees violated Section 5 of the Securities Act; its CEO Thomas L. Montrone ("Montrone") caused R&amp;T's violation of Section 5; and R&amp;T and Montrone failed reasonably to supervise certain R&amp;T employees with respect to their violations of Section 5 in connection with 54 unregistered issuances of purportedly unrestricted shares. Respondents were ordered to cease and desist from committing or causing any violations and any future violations of Sections 5(a) and 5(c) of the Securities Act. R&amp;T has been censured. Montrone has been suspended from association in a supervisory capacity with any transfer agent, broker, dealer, investment advisor, municipal security dealer, municipal advisor or nationally recognized statistically rating organization for a period of twelve months, effective on the second Monday following the entry of the Order.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(c)(4)(vi). </b></font>
+				The disposition of the proceeding
+			</td><td><div class="fakeBox3">R&amp;T will pay the SEC disgorgement, interest, and penalties of $127,667.64; Montrone $25,000. R&amp;T will engage an independent consultant to review and recommend corrective measures of R&amp;T's policies and procedures to prevent future violations of Section 5.</div></td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font color="black"><b>10(d). </b>
+						Has any other Federal regulatory agency or any state regulatory
+						agency :
+					</font></td></tr><tr><td class="label"><b><font face="Times New Roman">10(d)(1). </font></b>
+					ever found the applicant or control affiliate to have made a false
+					statement or omission or to have been dishonest, unfair, or
+					unethical?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(d)(2). </font></b>
+					ever found the applicant or control affiliate to have been
+					involved in a violation of investment-related regulations or
+					statutes?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(d)(3). </font></b>
+					ever found the applicant or control affiliate to have been a cause
+					of an investment-related business having its authorization to do
+					business Denied, suspended, revoked or restricted?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(d)(4). </font></b>
+					in the past ten years entered an order against the applicant or
+					control affiliate in connection with investment-related activity?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(d)(5). </font></b>
+					ever denied, suspended, or revoked applicant’s or control
+					affiliate’s registration or license, or prevented it from
+					associating with an investment-related business, or otherwise
+					disciplined it by restricting its activities?
+				</td><td><img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 Yes 
+						<img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 No
+				</td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler">
+				Entity information Related to item 10(d)(5) Record:
+				1</p><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>10(d)(5)(i). </b></font>
+				The individuals named in the Action
+			</td><td><div class="fakeBox">Georgeson Shareholder Securities Corporation (GSSC)</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(d)(5)(ii). </b></font>
+				Title of Action
+			</td><td><div class="fakeBox">N/A</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(d)(5)(iii). </b></font>
+				Date of Action
+			</td><td><div class="fakeBox2">12/06/1999</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(d)(5)(iv). </b></font>
+				The Court or body taking the Action and its location
+			</td><td><div class="fakeBox">Minnesota Department of Commerce</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(d)(5)(v). </b></font>
+				Description of the Action
+			</td><td><div class="fakeBox3">Withdrawal of broker-dealer application</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(d)(5)(vi). </b></font>
+				The disposition of the proceeding
+			</td><td><div class="fakeBox3">Ordered pursuant to State Statute Section 80A.05 subd.1 (1994) that GSSC's application for broker-dealer be withdrawn since the application was pending with the department with no activity for 120 days.</div></td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(d)(6). </font></b>
+					ever revoked or suspended the applicant’s or a control affiliate’s
+					license as an attorney or accountant?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p><b xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler">10(e). </b>Has any self-regulatory organization or commodities exchange ever:	
+			
+		<table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(e)(1). </font></b>
+					found the applicant or a control affiliate to have made a false
+					statement or omission?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(e)(2). </font></b>
+					found the applicant or a control affiliate to have been involved
+					in a violation of its rules?
+				</td><td><img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 Yes 
+						<img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 No
+				</td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler">
+				Entity information Related to item 10(e)(2) Record:
+				1</p><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(i). </b></font>
+				The individuals named in the Action
+			</td><td><div class="fakeBox">Computershare Securities Corporation</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(ii). </b></font>
+				Title of Action
+			</td><td><div class="fakeBox">Letter of Acceptance, Waiver, and Consent (AWC)</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(iii). </b></font>
+				Date of Action
+			</td><td><div class="fakeBox2">02/13/2006</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(iv). </b></font>
+				The Court or body taking the Action and its location
+			</td><td><div class="fakeBox">National Association of Securities Dealers Regulation, Inc.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(v). </b></font>
+				Description of the Action
+			</td><td><div class="fakeBox3">Computershare Securities Corporation (CRD 107023, Chicago, Illinois) submitted a Letter of Acceptance, Waiver and Consent in which the firm was censured and fined $60,000. Without admitting or denying the findings, the firm consented to the described sanctions and to the entry of findings that it executed securities transactions while failing to maintain its minimum required net capital. The findings stated that the firm failed to comply with SEC Rule 17a-3(a) in that it prepared inaccurate trial balances and net capital computations for numerous months. The findings also stated that the firm failed to comply with SEC Rule 17a-5 in that it filed inaccurate NASD Financial Operational Combined Uniform Single (FOCUS) Part IIA Reports for several months. (NASD Case E8A2005005301)</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(vi). </b></font>
+				The disposition of the proceeding
+			</td><td><div class="fakeBox3">See Above.</div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler">
+				Entity information Related to item 10(e)(2) Record:
+				2</p><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(i). </b></font>
+				The individuals named in the Action
+			</td><td><div class="fakeBox">Georgeson Securities Corporation</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(ii). </b></font>
+				Title of Action
+			</td><td><div class="fakeBox">CRD 46749, New York, New York NASD Case 2006004077101</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(iii). </b></font>
+				Date of Action
+			</td><td><div class="fakeBox2">07/10/2007</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(iv). </b></font>
+				The Court or body taking the Action and its location
+			</td><td><div class="fakeBox">National Association of Securities Dealers</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(v). </b></font>
+				Description of the Action
+			</td><td><div class="fakeBox3">Georgeson Securities Corporation (CRD 46749, New York, New York) submitted a Letter of Acceptance, Waiver and Consent in which the firm was censured and fined $30,000. Without admitting or denying the findings, the firm consented to the described sanctions and to the entry of findings that it failed to maintain and preserve all of its electronic communications as required by SEC Rule 17a-4. The findings stated that the firm electronically backed-up electronic communications at the end of each day, but failed to capture, maintain and preserve any electronic communication deleted from a user's deleted items folder during the day.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(vi). </b></font>
+				The disposition of the proceeding
+			</td><td><div class="fakeBox3">See Above.</div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler">
+				Entity information Related to item 10(e)(2) Record:
+				3</p><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(i). </b></font>
+				The individuals named in the Action
+			</td><td><div class="fakeBox">Georgeson Securities Corporation</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(ii). </b></font>
+				Title of Action
+			</td><td><div class="fakeBox">CRD 46749, New York, New York FINRA Case 2009016205701</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(iii). </b></font>
+				Date of Action
+			</td><td><div class="fakeBox2">01/21/2011</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(iv). </b></font>
+				The Court or body taking the Action and its location
+			</td><td><div class="fakeBox">Financial Industry Regulatory Authority</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(v). </b></font>
+				Description of the Action
+			</td><td><div class="fakeBox3">Georgeson Securities Corporation (CRD 46749, New York, New York) submitted a Letter of Acceptance, Waiver and Consent in which the firm was censured and fined $10,000. Without admitting or denying the findings, the firm consented to the described sanctions and to the entry of findings that it failed to adequately ensure that it maintained a complete record of all free-credits due to customers. The findings stated that this caused the firm's customer reserve computation and books and record to be inaccurate. The findings also stated that the firm failed to include in its customer reserve computation $134,715.60 of customer checks it received on a specific day, thereby miscalculating its customer reserve. The findings also included that instead, the firm relied on a bank statement to determine the credit amounts to include in its reserve formula; the bank statement did not reflect checks that the firm received on the date of the bank statement.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(vi). </b></font>
+				The disposition of the proceeding
+			</td><td><div class="fakeBox3">See Above.</div></td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler">
+				Entity information Related to item 10(e)(2) Record:
+				4</p><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(i). </b></font>
+				The individuals named in the Action
+			</td><td><div class="fakeBox">Georgeson Securities Corporation</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(ii). </b></font>
+				Title of Action
+			</td><td><div class="fakeBox">CRD 46749, New York, New York FINRA Case 2016050194001</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(iii). </b></font>
+				Date of Action
+			</td><td><div class="fakeBox2">12/21/2016</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(iv). </b></font>
+				The Court or body taking the Action and its location
+			</td><td><div class="fakeBox">Financial Industry Regulatory Authority</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(v). </b></font>
+				Description of the Action
+			</td><td><div class="fakeBox3">Georgeson Securities Corporation (CRD #46749) was found to have violated Exchange Act Rule 17a-4, NASD Rules 3110 and 2110, and FINRA Rules 4511 and 2010. The Firm failed to: maintain electronic records in the write once read many ("WORM") format; provide a 90-day notice to its designated examination authority prior to using electronic storage media; implement an audit system regarding the inputting of records in electronic storage media; obtain an attestation from its third-party vendor; and the firm's supervisory system for records storage was deemed not reasonably designed.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(e)(2)(vi). </b></font>
+				The disposition of the proceeding
+			</td><td><div class="fakeBox3">Disposition of the action or the claim: Without admitting or denying the factual allegations, the Firm submitted a Letter of Acceptance, Waiver and Consent in which the Firm was censured and fined $650,000.</div></td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(e)(3). </font></b>
+					found the applicant or a control affiliate to have been the cause
+					of an investment-related business losing its authorization to do
+					business?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(e)(4). </font></b>
+					disciplined the applicant or a control affiliate by expelling or
+					suspending it from membership, by barring or suspending its
+					association with other members, or by otherwise restricting its
+					activities?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(f). </font></b>
+					Has any foreign government, court, regulatory agency or exchange
+					ever entered an order against the applicant or a control affiliate
+					related to investments or fraud?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(g). </font></b>
+					Is the applicant or a control affiliate now the subject of a
+					proceeding that could result in a yes answer for questions 10(a) –
+					10(f) ?
+				</td><td><img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 Yes 
+						<img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 No
+				</td></tr></table><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler">
+				Entity information Related to item 10(g) Record:
+				1</p><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><font face="Times New Roman"><b>10(g)(i). </b></font>
+				The individuals named in the Action
+			</td><td><div class="fakeBox">Georgeson LLC (GLLC)</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(g)(ii). </b></font>
+				Title of Action
+			</td><td><div class="fakeBox">U.S. District Court of Massachusetts Docket Number 17CR-10367</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(g)(iii). </b></font>
+				Date of Action
+			</td><td><div class="fakeBox2">11/30/2017</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(g)(iv). </b></font>
+				The Court or body taking the Action and its location
+			</td><td><div class="fakeBox">U.S. District Court of Massachusetts</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(g)(v). </b></font>
+				Description of the Action
+			</td><td><div class="fakeBox3">In connection with a Deferred Prosecution Agreement ("DPA"), an information containing a single felony count of conspiracy was filed against GLLC. The information states that, in or about and between September 2007 and March 2012, GLLC and others conspired to commit: (1) wire fraud and honest services wire fraud by engaging in a scheme to defraud Institutional Shareholder Services ("ISS") of confidential client voting information regarding whether and how ISS's clients had voted on particular shareholder proposals and of the honest and faithful services of an employee, by providing that employee with tickets to concerts and sporting events; and (2) wire fraud by engaging in a scheme to defraud clients of GLLC by sending them invoices for at least a portion of the cost of the tickets provided to the ISS employee, which falsely described those charges as legitimate expenses that were properly passed on to the clients. The DPA term expired on November 30, 2020. The court dismissed the criminal information on January 4, 2021.</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>10(g)(vi). </b></font>
+				The disposition of the proceeding
+			</td><td><div class="fakeBox3">A DPA was entered on November 30, 2017. A fine of $4.5 million was paid on December 4, 2017. The DPA provides that, if GLLC fully complies with all of its obligations under the DPA, the U.S. Attorney's Office will dismiss the information with prejudice.</div></td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(h). </font></b>
+					Has a bonding company denied, paid out on, or revoked a bond for
+					the applicant or a control affiliate?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation"><tr><td class="label"><b><font face="Times New Roman">10(i). </font></b>
+					Does the applicant or a control affiliate have any unsatisfied
+					judgments or liens against it?
+				</td><td><img src="/Images/radio-unchecked.jpg" alt="radio button unchecked">
+						 Yes 
+						<img src="/Images/radio-checked.jpg" alt="radio button checked">
+						 No
+				</td></tr></table><h1 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler">TA-1/A
+			: Signature
+		</h1><p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p>      
+						ATTENTION: INTENTIONAL MISSTATEMENTS OR OMISSIONS
+						OF FACT CONSTITUTE FEDERAL
+						CRIMINAL VIOLATIONS. See 18 U.S.C. 1001
+						and 15 U.S.C. 78ff(a)
+      <p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p> 
+						SIGNATURE: The registrant submitting this form,
+						and as required, the SEC
+						supplement and Schedules A-D,
+						And the
+						executing official hereby represent that all the information
+						contained herein is true, correct and complete.
+		<p xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler"></p><table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ta1="http://www.sec.gov/edgar/ta/taonefiler" role="presentation" class="independentRegistrant"><tr><td class="label"><font face="Times New Roman"><b>11(a). </b></font>
+					Signature of Official responsible for Form:
+				</td><td><div class="fakeBox">Mike Rugani</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>11(b). </b></font>
+					Telephone Number:
+				</td><td><div class="fakeBox2">612-244-1224</div></td></tr><tr><td class="label"><font face="Times New Roman"><b>11(c). </b></font>
+					Title of Signing Officer:
+				</td><td><div class="fakeBox">Senior Compliance Officer </div></td></tr><tr><td class="label"><font face="Times New Roman"><b>11(d). </b></font>
+					Date Signed (Month/Day/Year):
+				</td><td><div class="fakeBox2">06/12/2025</div></td></tr></table>

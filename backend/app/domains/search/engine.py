@@ -29,6 +29,7 @@ class RetrievedChunk:
     upload_id: Optional[str] = None
     contract_id: Optional[str] = None
     contract_name: Optional[str] = None
+    contract_number: Optional[str] = None
     text: str = ""
     page_numbers: list[int] = field(default_factory=list)
     section_heading: Optional[str] = None
@@ -89,6 +90,11 @@ class HybridRetrievalEngine:
         """Execute a tenant-safe hybrid search with tracing and citation generation.
 
         All queries include tenant_id filter. Never returns cross-tenant data.
+
+        In addition to vector/BM25 search, runs an ILIKE fallback on the
+        upload filename and contract number so that users can find contracts
+        by contract number (e.g. "C-202606-5"), document name ("MSA"), or
+        other identifiers that may not appear in chunk text.
         """
         span = SearchTelemetry.trace_search(query, strategy, self.tenant_id)
         start = time.monotonic()
@@ -104,6 +110,47 @@ class HybridRetrievalEngine:
                 results = await self._bm25_search(query, filters, clause_type, contract_id)
             else:
                 results = await self._hybrid_search(query, filters, clause_type, contract_id)
+
+            # ── ILIKE fallback: match contract number, filename, or contract name ──
+            # This catches searches like "C-202606-5", "MSA", "Master Services"
+            # that may not appear in chunk text or be tokenized correctly by BM25.
+            ilike_results = await self._ilike_search(query, filters, contract_id)
+            if ilike_results:
+                # Collect upload_ids from ILIKE matches so we can filter
+                # unrelated semantic results — when a user searches by
+                # contract number or exact name, they want only that contract.
+                ilike_upload_ids = {r.upload_id for r in ilike_results if r.upload_id}
+                existing_ids = {r.chunk_id for r in results}
+
+                for ir in ilike_results:
+                    if ir.chunk_id not in existing_ids:
+                        ir.score = 10.0
+                        results.insert(0, ir)
+                        existing_ids.add(ir.chunk_id)
+                    else:
+                        for r in results:
+                            if r.chunk_id == ir.chunk_id:
+                                r.score = max(r.score, 5.0)
+                                break
+
+                # Filter out semantic results from unrelated contracts when
+                # we have ILIKE matches. This prevents "C-202606-5" from
+                # returning chunks from every other contract via vector similarity.
+                if ilike_upload_ids:
+                    filtered = []
+                    for r in results:
+                        # Always keep ILIKE matches (score 10.0)
+                        if r.score >= 10.0:
+                            filtered.append(r)
+                        # Keep semantic results only if they belong to
+                        # one of the ILIKE-matched contracts
+                        elif r.upload_id in ilike_upload_ids:
+                            filtered.append(r)
+                        # Also keep findings and obligations (entity search
+                        # is handled separately in the service layer)
+                        elif r.chunk_id and r.chunk_id.startswith(("finding-", "obligation-")):
+                            filtered.append(r)
+                    results = filtered
 
             # Reranking preparation (V1 identity, V2+ cross-encoder)
             rerank_candidates = [
@@ -295,6 +342,90 @@ class HybridRetrievalEngine:
             results.append(chunk)
 
         return results
+
+    async def _ilike_search(
+        self, query: str, filters: Optional[dict] = None,
+        contract_id: Optional[str] = None,
+    ) -> list[RetrievedChunk]:
+        """ILIKE search on upload filename and contract number.
+
+        Catches searches for contract numbers (e.g. "C-202606-5"),
+        document names ("MSA", "Master Services"), and other identifiers
+        that may not appear in chunk text or be tokenized by BM25.
+        """
+        # Normalize query: strip common noise, use as ILIKE pattern
+        pattern = f"%{query}%"
+        params = {"tenant_id": self.tenant_id, "pattern": pattern, "limit": self.TOP_K}
+
+        conditions = ["c.tenant_id = :tenant_id", "c.is_active = TRUE", "c.is_duplicate = FALSE"]
+        if contract_id:
+            conditions.append("c.upload_id = :contract_id")
+            params["contract_id"] = contract_id
+
+        # Search across upload filename and contract number from review metadata
+        sql = f"""
+            SELECT c.chunk_id, c.upload_id, c.text, c.page_numbers,
+                   c.section_heading, c.clause_type, c.token_count,
+                   u.filename AS contract_name,
+                   cr.metadata->>'contract_number' AS contract_number,
+                   10.0 AS rank
+            FROM chunks c
+            LEFT JOIN upload_sessions u ON u.upload_id = c.upload_id AND u.tenant_id = c.tenant_id
+            LEFT JOIN contract_reviews cr ON cr.upload_id = c.upload_id AND cr.tenant_id = c.tenant_id
+            WHERE {' AND '.join(conditions)}
+              AND (
+                    u.filename ILIKE :pattern
+                    OR cr.metadata->>'contract_number' ILIKE :pattern
+                    OR cr.metadata->>'name' ILIKE :pattern
+                  )
+            ORDER BY
+                CASE
+                    WHEN u.filename ILIKE :pattern THEN 0
+                    WHEN cr.metadata->>'contract_number' ILIKE :pattern THEN 1
+                    ELSE 2
+                END,
+                LENGTH(u.filename) ASC
+            LIMIT :limit
+        """
+        try:
+            result = await self.session.execute(text(sql), params)
+            rows = result.fetchall()
+        except Exception:
+            # Fallback if contract_reviews join fails (e.g. no metadata column)
+            sql_fallback = f"""
+                SELECT c.chunk_id, c.upload_id, c.text, c.page_numbers,
+                       c.section_heading, c.clause_type, c.token_count,
+                       u.filename AS contract_name,
+                       NULL AS contract_number,
+                       10.0 AS rank
+                FROM chunks c
+                LEFT JOIN upload_sessions u ON u.upload_id = c.upload_id AND u.tenant_id = c.tenant_id
+                WHERE {' AND '.join(conditions)}
+                  AND u.filename ILIKE :pattern
+                ORDER BY LENGTH(u.filename) ASC
+                LIMIT :limit
+            """
+            result = await self.session.execute(text(sql_fallback), params)
+            rows = result.fetchall()
+
+        return [
+            RetrievedChunk(
+                chunk_id=f"ilike-{r.chunk_id}",
+                upload_id=str(r.upload_id) if r.upload_id else None,
+                contract_name=r.contract_name,
+                contract_id=str(r.upload_id) if r.upload_id else None,
+                text=r.text or "",
+                page_numbers=r.page_numbers or [],
+                section_heading=r.section_heading,
+                clause_type=r.clause_type,
+                token_count=r.token_count,
+                score=float(r.rank),
+                vector_score=0.0,
+                bm25_score=float(r.rank),
+                strategy="keyword",
+            )
+            for r in rows
+        ]
 
     async def _embed_query(self, query: str) -> list[float]:
         """Generate embedding for a search query using the configured provider.

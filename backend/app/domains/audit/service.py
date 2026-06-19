@@ -1,13 +1,14 @@
-"""Audit service — query audit events from governance_audit_events and review_status_history."""
+"""Audit service — unified query across governance and review audit tables."""
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 
-from sqlalchemy import select, func, text as sa_text, union
+from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.audit.schemas import (
@@ -18,6 +19,46 @@ from app.domains.audit.schemas import (
 logger = logging.getLogger(__name__)
 
 
+def derive_event_status(event_type: str, metadata: Optional[dict[str, Any]]) -> str:
+    """Resolve outcome status from metadata or event type naming."""
+    if metadata and metadata.get("status"):
+        return str(metadata["status"])
+    et = (event_type or "").lower()
+    if any(token in et for token in ("failure", "failed", "error", "rejected")):
+        return "failure"
+    if any(token in et for token in ("denied", "blocked", "forbidden")):
+        return "blocked"
+    return "success"
+
+
+def derive_event_severity(event_type: str, metadata: Optional[dict[str, Any]], status: str) -> str:
+    if metadata and metadata.get("severity"):
+        return str(metadata["severity"])
+    if status == "blocked":
+        return "high"
+    if status == "failure":
+        return "medium"
+    et = (event_type or "").lower()
+    if any(token in et for token in ("escalated", "breach", "critical")):
+        return "high"
+    if any(token in et for token in ("auth.", "security.")):
+        return "medium"
+    return "info"
+
+
+def _parse_metadata(raw: Any) -> dict[str, Any]:
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
 @dataclass
 class AuditService:
     """Queries audit events from multiple audit tables."""
@@ -26,42 +67,132 @@ class AuditService:
     tenant_id: str
 
     async def query_events(self, params: AuditQueryParams) -> AuditQueryResponse:
-        """Query audit events with filtering and pagination.
+        """Query audit events with filtering and pagination via UNION ALL."""
+        offset = (params.page - 1) * params.page_size
+        conditions_gov: list[str] = ["g.tenant_id = :tenant_id"]
+        conditions_rev: list[str] = ["r.tenant_id = :tenant_id"]
+        bind: dict[str, Any] = {"tenant_id": self.tenant_id}
 
-        Searches across governance_audit_events and review_status_history
-        tables. Pagination is performed at the DB level for performance.
-        """
-        # Get total count across both tables
-        gov_count = await self._count_governance_events(params)
-        review_count = await self._count_review_events(params)
-        total = gov_count + review_count
+        if params.event_type:
+            conditions_gov.append("g.event_type = :event_type")
+            bind["event_type"] = params.event_type
+            if params.event_type != "review_status_change":
+                conditions_rev.append("1 = 0")
+        if params.resource_type:
+            conditions_gov.append("g.entity_type = :resource_type")
+            bind["resource_type"] = params.resource_type
+            if params.resource_type != "review":
+                conditions_rev.append("1 = 0")
+        if params.resource_id:
+            conditions_gov.append("g.entity_id::text = :resource_id")
+            conditions_rev.append("r.review_id::text = :resource_id")
+            bind["resource_id"] = params.resource_id
+        if params.actor_id:
+            conditions_gov.append("g.actor_id = :actor_id")
+            conditions_rev.append("r.changed_by = :actor_id")
+            bind["actor_id"] = params.actor_id
+        if params.action:
+            conditions_gov.append("g.event_type = :action")
+            bind["action"] = params.action
+        if params.from_date:
+            conditions_gov.append("g.created_at >= :from_date")
+            conditions_rev.append("r.created_at >= :from_date")
+            bind["from_date"] = params.from_date
+        if params.to_date:
+            conditions_gov.append("g.created_at <= :to_date")
+            conditions_rev.append("r.created_at <= :to_date")
+            bind["to_date"] = params.to_date
+        if params.status:
+            conditions_gov.append(
+                "COALESCE(g.metadata->>'status', 'success') = :status"
+            )
+            if params.status != "success":
+                conditions_rev.append("1 = 0")
+            bind["status"] = params.status
+
+        gov_where = " AND ".join(conditions_gov)
+        rev_where = " AND ".join(conditions_rev)
+
+        count_sql = sa_text(f"""
+            SELECT COUNT(*)::int FROM (
+                SELECT g.event_id FROM governance_audit_events g WHERE {gov_where}
+                UNION ALL
+                SELECT r.history_id FROM review_status_history r WHERE {rev_where}
+            ) combined
+        """)
+        total = (await self.session.execute(count_sql, bind)).scalar() or 0
         total_pages = max(1, (total + params.page_size - 1) // params.page_size)
 
-        # Query governance events with DB pagination
-        gov_events = await self._query_governance_events_paginated(params)
+        query_sql = sa_text(f"""
+            SELECT * FROM (
+                SELECT
+                    g.event_id::text AS event_id,
+                    g.event_type,
+                    g.event_type AS action,
+                    g.entity_type AS resource_type,
+                    g.entity_id::text AS resource_id,
+                    g.actor_id,
+                    g.previous_state AS before_state,
+                    g.new_state AS after_state,
+                    g.change_summary AS description,
+                    g.correlation_id,
+                    g.metadata,
+                    g.source,
+                    g.created_at
+                FROM governance_audit_events g
+                WHERE {gov_where}
+                UNION ALL
+                SELECT
+                    ('review-' || r.history_id::text) AS event_id,
+                    'review_status_change' AS event_type,
+                    ('status_change: ' || r.from_status || ' -> ' || r.to_status) AS action,
+                    'review' AS resource_type,
+                    r.review_id::text AS resource_id,
+                    r.changed_by AS actor_id,
+                    jsonb_build_object('status', r.from_status) AS before_state,
+                    jsonb_build_object('status', r.to_status) AS after_state,
+                    r.reason AS description,
+                    NULL AS correlation_id,
+                    '{{}}'::jsonb AS metadata,
+                    'review_service' AS source,
+                    r.created_at
+                FROM review_status_history r
+                WHERE {rev_where}
+            ) combined
+            ORDER BY created_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        rows = (await self.session.execute(
+            query_sql, {**bind, "limit": params.page_size, "offset": offset}
+        )).fetchall()
 
-        # Query review events with DB pagination
-        review_events = await self._query_review_events_paginated(params)
-
-        # Merge and sort (both queries return time-descending data)
-        all_events: list[AuditEventItem] = []
-        gi, ri = 0, 0
-        while gi < len(gov_events) and ri < len(review_events):
-            if gov_events[gi].created_at >= review_events[ri].created_at:
-                all_events.append(gov_events[gi])
-                gi += 1
-            else:
-                all_events.append(review_events[ri])
-                ri += 1
-        all_events.extend(gov_events[gi:])
-        all_events.extend(review_events[ri:])
-
-        # Apply pagination on merged results
-        start = (params.page - 1) * params.page_size
-        page_events = all_events[start:start + params.page_size]
+        events = []
+        for row in rows:
+            meta = _parse_metadata(row.metadata)
+            status = derive_event_status(row.event_type, meta)
+            events.append(
+                AuditEventItem(
+                    event_id=row.event_id,
+                    event_type=row.event_type,
+                    action=row.action,
+                    resource_type=row.resource_type,
+                    resource_id=row.resource_id,
+                    actor_id=row.actor_id,
+                    before_state=row.before_state,
+                    after_state=row.after_state,
+                    description=row.description,
+                    correlation_id=row.correlation_id,
+                    status=status,
+                    severity=derive_event_severity(row.event_type, meta, status),
+                    source=row.source,
+                    ip_address=meta.get("ip_address"),
+                    error_message=meta.get("error_message"),
+                    created_at=row.created_at,
+                )
+            )
 
         return AuditQueryResponse(
-            events=page_events,
+            events=events,
             total=total,
             page=params.page,
             page_size=params.page_size,
@@ -70,65 +201,54 @@ class AuditService:
 
     async def get_summary(self, period_days: int = 7) -> AuditSummaryResponse:
         """Get summary of audit activity for the period."""
-        # Count governance events
-        gov_count_sql = sa_text("""
-            SELECT COUNT(*)::int FROM governance_audit_events
-            WHERE tenant_id = :tenant_id
-              AND created_at > NOW() - :period::interval
-        """)
-        result = await self.session.execute(
-            gov_count_sql, {"tenant_id": self.tenant_id, "period": f"{period_days} days"},
-        )
-        gov_count = result.scalar() or 0
+        period = f"{period_days} days"
+        gov_count = (await self.session.execute(
+            sa_text("""
+                SELECT COUNT(*)::int FROM governance_audit_events
+                WHERE tenant_id = :tenant_id
+                  AND created_at > NOW() - :period::interval
+            """),
+            {"tenant_id": self.tenant_id, "period": period},
+        )).scalar() or 0
 
-        # Count review history events
-        review_count_sql = sa_text("""
-            SELECT COUNT(*)::int FROM review_status_history
-            WHERE tenant_id = :tenant_id
-              AND created_at > NOW() - :period::interval
-        """)
-        result = await self.session.execute(
-            review_count_sql, {"tenant_id": self.tenant_id, "period": f"{period_days} days"},
-        )
-        review_count = result.scalar() or 0
+        review_count = (await self.session.execute(
+            sa_text("""
+                SELECT COUNT(*)::int FROM review_status_history
+                WHERE tenant_id = :tenant_id
+                  AND created_at > NOW() - :period::interval
+            """),
+            {"tenant_id": self.tenant_id, "period": period},
+        )).scalar() or 0
 
         total = gov_count + review_count
 
-        # Events by type
-        by_type_sql = sa_text("""
-            SELECT event_type, COUNT(*)::int AS count
-            FROM governance_audit_events
-            WHERE tenant_id = :tenant_id
-              AND created_at > NOW() - :period::interval
-            GROUP BY event_type
-            ORDER BY count DESC
-            LIMIT 20
-        """)
-        result = await self.session.execute(
-            by_type_sql, {"tenant_id": self.tenant_id, "period": f"{period_days} days"},
-        )
+        by_type_rows = (await self.session.execute(
+            sa_text("""
+                SELECT event_type, COUNT(*)::int AS count
+                FROM governance_audit_events
+                WHERE tenant_id = :tenant_id
+                  AND created_at > NOW() - :period::interval
+                GROUP BY event_type
+                ORDER BY count DESC
+                LIMIT 20
+            """),
+            {"tenant_id": self.tenant_id, "period": period},
+        )).fetchall()
         by_type = [
             AuditEventTypeCount(event_type=row.event_type, count=row.count)
-            for row in result.fetchall()
+            for row in by_type_rows
         ]
-
-        # Add review status changes as a type
         if review_count > 0:
-            by_type.append(AuditEventTypeCount(
-                event_type="review_status_change",
-                count=review_count,
-            ))
+            by_type.append(AuditEventTypeCount(event_type="review_status_change", count=review_count))
 
-        # Unique actors
-        actors_sql = sa_text("""
-            SELECT COUNT(DISTINCT actor_id)::int FROM governance_audit_events
-            WHERE tenant_id = :tenant_id
-              AND created_at > NOW() - :period::interval
-        """)
-        result = await self.session.execute(
-            actors_sql, {"tenant_id": self.tenant_id, "period": f"{period_days} days"},
-        )
-        unique_actors = result.scalar() or 0
+        unique_actors = (await self.session.execute(
+            sa_text("""
+                SELECT COUNT(DISTINCT actor_id)::int FROM governance_audit_events
+                WHERE tenant_id = :tenant_id
+                  AND created_at > NOW() - :period::interval
+            """),
+            {"tenant_id": self.tenant_id, "period": period},
+        )).scalar() or 0
 
         return AuditSummaryResponse(
             total_events=total,
@@ -136,122 +256,3 @@ class AuditService:
             unique_actors=unique_actors,
             period_days=period_days,
         )
-
-    async def _count_governance_events(self, params: AuditQueryParams) -> int:
-        """Count governance_audit_events matching filters."""
-        conditions, bind = self._build_governance_conditions(params)
-        sql = sa_text(f"SELECT COUNT(*)::int FROM governance_audit_events WHERE {' AND '.join(conditions)}")
-        result = await self.session.execute(sql, bind)
-        return result.scalar() or 0
-
-    async def _count_review_events(self, params: AuditQueryParams) -> int:
-        """Count review_status_history matching filters."""
-        conditions, bind = self._build_review_conditions(params)
-        sql = sa_text(f"SELECT COUNT(*)::int FROM review_status_history WHERE {' AND '.join(conditions)}")
-        result = await self.session.execute(sql, bind)
-        return result.scalar() or 0
-
-    async def _query_governance_events_paginated(self, params: AuditQueryParams) -> list[AuditEventItem]:
-        """Query governance_audit_events with DB-level pagination."""
-        conditions, bind = self._build_governance_conditions(params)
-        offset = (params.page - 1) * params.page_size
-        sql = sa_text(f"""
-            SELECT event_id, event_type, previous_state, new_state, change_summary,
-                   entity_type, entity_id,
-                   actor_id, correlation_id, created_at
-            FROM governance_audit_events
-            WHERE {' AND '.join(conditions)}
-            ORDER BY created_at DESC
-            LIMIT :limit OFFSET :offset
-        """)
-        result = await self.session.execute(sql, {**bind, "limit": params.page_size, "offset": offset})
-        return [
-            AuditEventItem(
-                event_id=str(row.event_id),
-                event_type=row.event_type,
-                action=row.event_type,
-                resource_type=row.entity_type,
-                resource_id=str(row.entity_id) if row.entity_id else "",
-                actor_id=row.actor_id,
-                before_state=row.previous_state,
-                after_state=row.new_state,
-                description=row.change_summary,
-                correlation_id=row.correlation_id,
-                created_at=row.created_at,
-            )
-            for row in result.fetchall()
-        ]
-
-    async def _query_review_events_paginated(self, params: AuditQueryParams) -> list[AuditEventItem]:
-        """Query review_status_history with DB-level pagination."""
-        conditions, bind = self._build_review_conditions(params)
-        offset = (params.page - 1) * params.page_size
-        sql = sa_text(f"""
-            SELECT history_id, review_id, from_status, to_status,
-                   changed_by, reason, created_at
-            FROM review_status_history
-            WHERE {' AND '.join(conditions)}
-            ORDER BY created_at DESC
-            LIMIT :limit OFFSET :offset
-        """)
-        result = await self.session.execute(sql, {**bind, "limit": params.page_size, "offset": offset})
-        return [
-            AuditEventItem(
-                event_id=f"review-{row.history_id}",
-                event_type="review_status_change",
-                action=f"status_change: {row.from_status} -> {row.to_status}",
-                resource_type="review",
-                resource_id=str(row.review_id),
-                actor_id=row.changed_by,
-                before_state={"status": row.from_status},
-                after_state={"status": row.to_status},
-                description=row.reason,
-                created_at=row.created_at,
-            )
-            for row in result.fetchall()
-        ]
-
-    def _build_governance_conditions(self, params: AuditQueryParams) -> tuple[list[str], dict]:
-        """Build WHERE conditions and bind params for governance_audit_events."""
-        conditions = ["tenant_id = :tenant_id"]
-        bind: dict = {"tenant_id": self.tenant_id}
-        if params.event_type:
-            conditions.append("event_type = :event_type")
-            bind["event_type"] = params.event_type
-        if params.resource_type:
-            conditions.append("entity_type = :resource_type")
-            bind["resource_type"] = params.resource_type
-        if params.resource_id:
-            conditions.append("entity_id = :resource_id")
-            bind["resource_id"] = params.resource_id
-        if params.actor_id:
-            conditions.append("actor_id = :actor_id")
-            bind["actor_id"] = params.actor_id
-        if params.action:
-            conditions.append("event_type = :action")
-            bind["action"] = params.action
-        if params.from_date:
-            conditions.append("created_at >= :from_date")
-            bind["from_date"] = params.from_date
-        if params.to_date:
-            conditions.append("created_at <= :to_date")
-            bind["to_date"] = params.to_date
-        return conditions, bind
-
-    def _build_review_conditions(self, params: AuditQueryParams) -> tuple[list[str], dict]:
-        """Build WHERE conditions and bind params for review_status_history."""
-        conditions = ["tenant_id = :tenant_id"]
-        bind: dict = {"tenant_id": self.tenant_id}
-        if params.resource_id:
-            conditions.append("review_id = :resource_id")
-            bind["resource_id"] = params.resource_id
-        if params.actor_id:
-            conditions.append("changed_by = :actor_id")
-            bind["actor_id"] = params.actor_id
-        if params.from_date:
-            conditions.append("created_at >= :from_date")
-            bind["from_date"] = params.from_date
-        if params.to_date:
-            conditions.append("created_at <= :to_date")
-            bind["to_date"] = params.to_date
-        return conditions, bind

@@ -320,6 +320,10 @@ async def get_audit_logs(
     resource_id: Optional[str] = Query(None, description="Filter by resource ID"),
     actor_id: Optional[str] = Query(None, description="Filter by actor ID"),
     action: Optional[str] = Query(None, description="Filter by action"),
+    status: Optional[str] = Query(None, description="Outcome: success, failure, blocked"),
+    days: Optional[int] = Query(None, ge=1, le=365, description="Lookback window in days"),
+    from_date: Optional[str] = Query(None, description="Start date (ISO format)"),
+    to_date: Optional[str] = Query(None, description="End date (ISO format)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -331,7 +335,12 @@ async def get_audit_logs(
     Delegates to the AuditService which queries governance_audit_events
     and review_status_history tables. All queries are tenant-isolated.
     """
-    from datetime import datetime
+    from datetime import datetime, timedelta, timezone
+
+    resolved_from = datetime.fromisoformat(from_date) if from_date else None
+    resolved_to = datetime.fromisoformat(to_date) if to_date else None
+    if days and not resolved_from:
+        resolved_from = datetime.now(timezone.utc) - timedelta(days=days)
 
     params = AuditQueryParams(
         event_type=event_type,
@@ -339,8 +348,9 @@ async def get_audit_logs(
         resource_id=resource_id,
         actor_id=actor_id,
         action=action,
-        from_date=None,
-        to_date=None,
+        status=status,
+        from_date=resolved_from,
+        to_date=resolved_to,
         page=page,
         page_size=page_size,
     )
