@@ -368,11 +368,104 @@ async def apply_template_to_review(
 
 
 @router.get(
+    "/bundles",
+    summary="Get recommended clause bundles",
+    description="Returns related clause types that should be applied together as a bundle.",
+)
+async def get_bundles(
+    clause_type: str = Query(..., description="The clause type to find bundles for"),
+    service: RedlineTemplateService = Depends(get_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Get recommended clause bundles for a given clause type.
+
+    For example, requesting bundles for 'gdpr' returns:
+    ['data_privacy', 'cross_border_transfer', 'data_breach', 'dpa']
+    """
+    # Define clause bundles based on legal domain knowledge
+    BUNDLES: dict[str, list[dict[str, str]]] = {
+        "gdpr": [
+            {"clause_type": "gdpr", "label": "GDPR Compliance", "required": True},
+            {"clause_type": "cross_border_transfer", "label": "Cross-Border Transfer", "required": True},
+            {"clause_type": "data_breach", "label": "Data Breach Notification", "required": True},
+            {"clause_type": "dpa", "label": "Data Processing Agreement", "required": False},
+            {"clause_type": "scc", "label": "Standard Contractual Clauses", "required": False},
+        ],
+        "data_privacy": [
+            {"clause_type": "gdpr", "label": "GDPR Compliance", "required": True},
+            {"clause_type": "cross_border_transfer", "label": "Cross-Border Transfer", "required": True},
+            {"clause_type": "data_breach", "label": "Data Breach Notification", "required": True},
+        ],
+        "confidentiality": [
+            {"clause_type": "confidentiality", "label": "Confidentiality", "required": True},
+            {"clause_type": "nda", "label": "Non-Disclosure Agreement", "required": True},
+            {"clause_type": "return_of_information", "label": "Return of Information", "required": False},
+            {"clause_type": "non_compete", "label": "Non-Compete", "required": False},
+        ],
+        "indemnification": [
+            {"clause_type": "indemnification", "label": "Indemnification", "required": True},
+            {"clause_type": "liability", "label": "Limitation of Liability", "required": True},
+            {"clause_type": "insurance", "label": "Insurance Requirements", "required": False},
+        ],
+        "liability": [
+            {"clause_type": "liability", "label": "Limitation of Liability", "required": True},
+            {"clause_type": "indemnification", "label": "Indemnification", "required": True},
+            {"clause_type": "consequential_damages", "label": "Consequential Damages", "required": False},
+            {"clause_type": "insurance", "label": "Insurance Requirements", "required": False},
+        ],
+        "termination": [
+            {"clause_type": "termination", "label": "Termination", "required": True},
+            {"clause_type": "notice_period", "label": "Notice Period", "required": True},
+            {"clause_type": "auto_renewal", "label": "Auto-Renewal", "required": False},
+            {"clause_type": "for_cause_termination", "label": "For-Cause Termination", "required": False},
+        ],
+        "intellectual_property": [
+            {"clause_type": "intellectual_property", "label": "Intellectual Property", "required": True},
+            {"clause_type": "ip_ownership", "label": "IP Ownership", "required": True},
+            {"clause_type": "license", "label": "License Grant", "required": True},
+            {"clause_type": "non_compete", "label": "Non-Compete", "required": False},
+        ],
+    }
+
+    # Find matching bundle — exact match or partial match
+    bundle = BUNDLES.get(clause_type)
+    if not bundle:
+        # Try to find a bundle where this clause_type appears
+        for key, items in BUNDLES.items():
+            if any(item["clause_type"] == clause_type for item in items):
+                bundle = items
+                break
+
+    if not bundle:
+        return {"clause_type": clause_type, "bundle": [], "total": 0}
+
+    # Check which templates exist for each clause type
+    enriched = []
+    for item in bundle:
+        templates = await service.list_templates(clause_type=item["clause_type"], limit=1)
+        enriched.append({
+            **item,
+            "has_template": len(templates) > 0,
+            "template_name": templates[0]["name"] if templates else None,
+        })
+
+    return {
+        "clause_type": clause_type,
+        "bundle": enriched,
+        "total": len(enriched),
+        "applied": sum(1 for b in enriched if b["has_template"]),
+        "missing": sum(1 for b in enriched if not b["has_template"]),
+    }
+
+
+@router.get(
     "/analytics",
     summary="Get template analytics (usage stats, trends)",
 )
 async def get_analytics(
     service: RedlineTemplateService = Depends(get_service),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
     _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
 ):
     """Get template analytics including usage stats and coverage trends."""
@@ -382,11 +475,62 @@ async def get_analytics(
     avg_accept = (
         sum(t.get("accept_rate", 0) for t in templates) / max(len(templates), 1)
     )
+
+    # Coverage trends from snapshots
+    from sqlalchemy import text as sa_text
+    trends_result = await db.execute(
+        sa_text("""
+            SELECT snapshot_date, coverage_pct, total_findings, total_templates
+            FROM coverage_snapshots
+            WHERE tenant_id = :tenant_id
+            ORDER BY snapshot_date DESC
+            LIMIT 14
+        """),
+        {"tenant_id": tenant_id},
+    )
+    trends = [dict(r._mapping) for r in trends_result.fetchall()]
+
+    # Record today's snapshot (idempotent — one per day)
+    from datetime import date, datetime, timezone
+    today = date.today()
+    await db.execute(
+        sa_text("""
+            INSERT INTO coverage_snapshots (snapshot_id, tenant_id, total_findings, total_templates, templates_used, templates_missing, coverage_pct, snapshot_date)
+            SELECT gen_random_uuid(), :tenant_id, :total_findings, :total_templates, :templates_used, :templates_missing, :coverage_pct, :snapshot_date
+            WHERE NOT EXISTS (
+                SELECT 1 FROM coverage_snapshots
+                WHERE tenant_id = :tenant_id2
+                  AND snapshot_date::date = :today
+            )
+        """),
+        {
+            "tenant_id": tenant_id,
+            "tenant_id2": tenant_id,
+            "total_findings": coverage.get("total_findings", 0),
+            "total_templates": coverage.get("total_templates", 0),
+            "templates_used": coverage.get("templates_used", 0),
+            "templates_missing": coverage.get("templates_missing", 0),
+            "coverage_pct": coverage.get("coverage_pct", 0),
+            "snapshot_date": datetime.now(timezone.utc),
+            "today": today,
+        },
+    )
+    await db.commit()
+
     return {
         "coverage": coverage,
         "total_templates": len(templates),
         "total_usage": total_usage,
         "avg_accept_rate": round(avg_accept, 2),
+        "trends": [
+            {
+                "date": t["snapshot_date"].isoformat() if hasattr(t["snapshot_date"], "isoformat") else str(t["snapshot_date"]),
+                "coverage_pct": t["coverage_pct"],
+                "total_findings": t["total_findings"],
+                "total_templates": t["total_templates"],
+            }
+            for t in trends
+        ],
         "by_status": {
             "active": sum(1 for t in templates if t.get("status") == "active"),
             "ai_draft": sum(1 for t in templates if t.get("status") == "ai_draft"),

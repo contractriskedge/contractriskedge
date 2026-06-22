@@ -168,4 +168,14 @@ export const redlineTemplateApi = {
       template_name: string;
       finding_resolved: boolean;
     }>("/redline-templates/apply-to-review", data),
+
+  // Bundles
+  getBundles: (clauseType: string) =>
+    api.get<{
+      clause_type: string;
+      bundle: { clause_type: string; label: string; required: boolean; has_template: boolean; template_name: string | null }[];
+      total: number;
+      applied: number;
+      missing: number;
+    }>(`/redline-templates/bundles?clause_type=${clauseType}`),
 };
