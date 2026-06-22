@@ -6,7 +6,7 @@ Tasks without tenant_id are rejected at submission time.
 
 from __future__ import annotations
 
-from celery import Celery
+from celery import Celery, signals
 from celery.schedules import crontab
 from kombu import Queue
 
@@ -14,6 +14,8 @@ from app.config import settings
 from app.kernel.database.orm_registry import register_orm_models
 
 # Register FK targets (tenants, etc.) before any worker task touches the ORM.
+# Note: This runs in the parent process before fork. After fork, each child
+# process re-registers via worker_process_init below.
 register_orm_models()
 
 celery_app = Celery(
@@ -164,3 +166,32 @@ celery_app.conf.imports = (
     "app.workers.email_worker",
     "app.workers.tasks",
 )
+
+
+# ── Fork Safety ────────────────────────────────────────────────────
+# Celery uses ``prefork`` pool by default, which forks worker processes.
+# After fork, the child process inherits the parent's async event loop
+# and SQLAlchemy engine in an inconsistent state, which can cause
+# SIGSEGV (signal 11) when the child tries to create a new sync session.
+#
+# We reset the WorkerLoop after each fork so each child gets a fresh
+# event loop and engine.  This also avoids ``Event loop is closed`` and
+# ``Future attached to a different loop`` errors.
+
+
+@signals.worker_process_init.connect
+def _reset_worker_loop_after_fork(**kwargs) -> None:
+    """Reset the WorkerLoop after Celery forks a new worker process.
+
+    The parent process's event loop and engine are invalid in the child.
+    We must clear them so the child creates fresh ones on first use.
+    """
+    from workers.worker_loop import worker_loop
+
+    worker_loop.reset()
+    logger = logging.getLogger(__name__)
+    logger.info("WorkerLoop reset after fork (pid=%s)", os.getpid())
+
+
+import logging
+import os

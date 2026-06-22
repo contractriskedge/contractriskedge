@@ -138,6 +138,20 @@ class WorkerLoop:
                 id(self._loop),
             )
 
+    def reset(self) -> None:
+        """Reset the worker loop state after a fork.
+
+        Called by ``worker_process_init`` signal after Celery forks.
+        The parent's event loop and engine are invalid in the child.
+        We clear them so the child creates fresh ones on first use.
+        """
+        with self._lock:
+            self._loop = None
+            self._loop_thread = None
+            self._factory = None
+            self._started = False
+            logger.info("WorkerLoop reset (pid=%s)", os.getpid())
+
     def shutdown(self) -> None:
         """Shut down the event loop and dispose the database engine.
 
