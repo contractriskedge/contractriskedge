@@ -30,7 +30,7 @@ No code changes needed to add providers later.
 
 **Deliverable:** Users can create and manage signature requests locally.
 
-### Sprint 30.2 — DocuSign Integration (Awaiting API Credentials)
+### Sprint 30.2 — DocuSign Integration (⏳ Awaiting API Credentials)
 * OAuth2 JWT authentication
 * Send envelope
 * Embedded signing
@@ -41,14 +41,45 @@ No code changes needed to add providers later.
 
 **Deliverable:** End-to-end signing with DocuSign sandbox.
 
-### Sprint 30.3 — Contract Lifecycle Integration
-* "Prepare for Signature" → "Send for Signature" workflow
-* Contract status updates (preparing → sent → partially_signed → completed)
-* Executed contract storage
-* Notifications
-* Dashboard updates
+### Sprint 30.3 — Contract Lifecycle Integration (✅ In Progress — Parallel Track)
+* Central ContractLifecycleService with full state machine
+* Contract status transitions (preparing → sent → partially_signed → executed)
+* Executed contract storage (PDF + certificate + audit log)
+* Notification framework (in-app + email)
+* Dashboard updates (pending signatures, executed this month)
+* Activity timeline (signature events in existing feed)
 
 **Deliverable:** Fully integrated lifecycle from negotiation through execution.
+
+---
+
+## Parallel Work Tracks
+
+Since Sprint 30.2 is blocked on DocuSign credentials, all
+provider-independent work is being done in parallel:
+
+### Track A: Contract Lifecycle (Sprint 30.3)
+| Component | Status | Description |
+|-----------|--------|-------------|
+| ContractLifecycleService | ✅ Complete | Central state machine with full transition map |
+| Contract statuses | ✅ Complete | preparing_signature → sent → partially_signed → executed |
+| ExecutedDocumentRepository | ✅ Complete | Stores executed PDF, certificate, audit log |
+| NotificationService | ✅ Complete | In-app + email notifications for all events |
+
+### Track B: Infrastructure
+| Component | Status | Description |
+|-----------|--------|-------------|
+| EmailService | ✅ Complete | Generic email with SMTP/SendGrid/SES/Console support |
+| StorageService | ✅ Complete | Abstract storage with Local/S3/Azure/SharePoint |
+| Celery + Redis | ⏳ Pending | Background jobs for async processing |
+
+### Track C: DocuSign Integration (Blocked)
+| Component | Status | Description |
+|-----------|--------|-------------|
+| OAuth2 JWT auth | ⏳ Blocked | Requires DocuSign integration key + private key |
+| Send envelope | ⏳ Blocked | Requires working auth |
+| Webhook validation | ⏳ Blocked | Requires DocuSign Connect setup |
+| Status sync | ⏳ Blocked | Requires webhook endpoint |
 
 ---
 
