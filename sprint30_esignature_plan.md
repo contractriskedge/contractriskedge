@@ -1,7 +1,7 @@
 # Sprint 30: E-Signature Integration
 
 **Goal:** Complete the contract lifecycle by adding electronic signature support.
-**Duration:** 2 weeks (3 phases across future sprints)
+**Status:** ✅ Foundation complete — awaiting DocuSign API credentials
 
 ---
 
@@ -15,6 +15,40 @@ Instead of building three providers simultaneously, this sprint implements:
 
 The abstract `SignatureProvider` interface already supports all three.
 No code changes needed to add providers later.
+
+---
+
+## Sprint Breakdown
+
+### Sprint 30.1 — Foundation (✅ Complete)
+* Database migrations
+* ORM models with enterprise fields
+* Repository layer
+* Signature service
+* REST APIs (CRUD + prepare/send/void/remind)
+* UI scaffolding (wizard, list, signer management, audit trail, certificate)
+
+**Deliverable:** Users can create and manage signature requests locally.
+
+### Sprint 30.2 — DocuSign Integration (Awaiting API Credentials)
+* OAuth2 JWT authentication
+* Send envelope
+* Embedded signing
+* Status polling
+* Webhook processing
+* Audit trail
+* Certificate retrieval
+
+**Deliverable:** End-to-end signing with DocuSign sandbox.
+
+### Sprint 30.3 — Contract Lifecycle Integration
+* "Prepare for Signature" → "Send for Signature" workflow
+* Contract status updates (preparing → sent → partially_signed → completed)
+* Executed contract storage
+* Notifications
+* Dashboard updates
+
+**Deliverable:** Fully integrated lifecycle from negotiation through execution.
 
 ---
 
@@ -60,6 +94,45 @@ declined               ← NEW
 expired                ← NEW
 voided                 ← NEW
 ```
+
+---
+
+## Architecture: Separation of Concerns
+
+The provider implementation is a **thin adapter**. Business logic stays in the service layer.
+
+```
+API Router
+    ↓
+Signature Service  ← owns: status transitions, audit events, notifications, DB updates
+    ↓
+Signature Repository  ← owns: data access
+    ↓
+SignatureProvider Interface  ← thin adapter: send, status, certificate, webhook
+           ↓
+      DocuSign Provider  ← only: HTTP calls to DocuSign API
+```
+
+This means:
+- **Service** owns business rules (status transitions, audit logging, notification dispatch)
+- **Provider** only translates between our domain and the vendor API
+- Future providers are added by implementing the interface — no service changes needed
+
+---
+
+## Asynchronous Processing
+
+Sending documents, downloading certificates, and processing webhooks should
+not block HTTP requests. Use background jobs (Celery / Redis Queue) for:
+
+| Operation              | Why Async                          |
+|------------------------|------------------------------------|
+| Send envelope          | Provider API latency (1-5s)        |
+| Process webhook        | Must not block webhook response    |
+| Download completed PDF | Large file, provider API latency   |
+| Download certificate   | Provider API latency               |
+| Reminder emails        | Scheduled, not user-facing         |
+| Retry failed calls     | Exponential backoff                |
 
 ---
 
@@ -349,38 +422,45 @@ DOCUSIGN_BASE_URL=https://demo.docusign.net/restapi
 
 ---
 
-## Sprint Tasks (Phase 1 — DocuSign Only)
+---
 
-### Day 1-2: Foundation
-- [ ] Create Alembic migration for signature tables (with all enterprise fields)
-- [ ] Update ORM models with enterprise fields
-- [ ] Update Pydantic schemas
-- [ ] Update repository
+## Definition of Done
 
-### Day 3-5: Backend API
-- [ ] Implement signature request CRUD (with prepare step)
-- [ ] Implement signer management
-- [ ] Implement send/void/remind actions
-- [ ] Implement certificate and audit trail
+Before Sprint 30 can be marked complete, ALL of the following must pass:
 
-### Day 6-8: DocuSign Provider
-- [ ] Implement OAuth2 JWT authentication
-- [ ] Implement send_envelope
-- [ ] Implement get_status, void, signing URL
-- [ ] Implement certificate and audit trail
-- [ ] Implement webhook validation
+### Foundation (Sprint 30.1)
+- [ ] Create signature request with signers
+- [ ] Add multiple signers with signing order
+- [ ] Update signer details
+- [ ] Remove signer from request
+- [ ] Move request through workflow: draft → preparing → sent
+- [ ] Void signature request
+- [ ] List and filter signature requests by status
+- [ ] No TypeScript errors
+- [ ] No backend lint/type issues
 
-### Day 9-11: Frontend
-- [ ] Build SignatureCreateWizard (with enterprise fields)
-- [ ] Build SignatureRequestList with status tabs
-- [ ] Build SignerList with auth type, title, company
-- [ ] Build SignatureAuditTrail
-- [ ] Build SignatureCertificate
-- [ ] Add Signature tab to Contract Detail
+### DocuSign Integration (Sprint 30.2)
+- [ ] OAuth2 JWT authentication with DocuSign
+- [ ] Send envelope to DocuSign
+- [ ] Sequential signing order works
+- [ ] Embedded signing flow works
+- [ ] Email signing flow works
+- [ ] Webhook validation (HMAC signature)
+- [ ] Duplicate webhook handling (idempotency)
+- [ ] Status transitions: sent → viewed → signed → completed
+- [ ] Decline handling: sent → declined
+- [ ] Expiration handling: sent → expired
+- [ ] Audit trail generation from webhook events
+- [ ] Completion certificate download (PDF)
+- [ ] Executed PDF storage
 
-### Day 12-14: Integration & Testing
-- [ ] Wire signature into contract lifecycle (status transitions)
-- [ ] Add signature request button to negotiation center
-- [ ] E2E testing with DocuSign sandbox
-- [ ] Webhook reliability and idempotency
-- [ ] Error handling (network, auth, validation)
+### Lifecycle Integration (Sprint 30.3)
+- [ ] Contract status updated to "preparing_signature" when request created
+- [ ] Contract status updated to "sent_for_signature" when sent
+- [ ] Contract status updated to "partially_signed" on partial completion
+- [ ] Contract status updated to "completed" when fully executed
+- [ ] Contract status updated to "declined" / "expired" / "voided" as appropriate
+- [ ] Signature request button in negotiation center
+- [ ] Signature tab in contract detail view
+- [ ] Reminder functionality for pending signers
+- [ ] End-to-end tests passing with DocuSign sandbox
