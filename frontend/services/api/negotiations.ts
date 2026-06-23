@@ -6,145 +6,31 @@
 "use client";
 
 import { api } from "@/services/api/client";
+import type {
+  NegotiationSessionSummary,
+  ClauseContent,
+  CommentItem,
+  RedlineEntry,
+  NegotiationIssue,
+  Participant,
+  NegotiationSession,
+  NegotiationKpis,
+  AiRewriteResponse,
+  AiCoachResponse,
+  NegotiationStage,
+  IssueSeverity,
+  IssueStatus,
+  RiskLevel,
+} from "./negotiation.types";
 
-// ── Types ────────────────────────────────────────────────────────
-
-export interface NegotiationSessionSummary {
-  id: string;
-  contractTitle: string;
-  counterparty: string;
-  stage: string;
-  healthScore: number;
-  startedAt: string;
-  updatedAt: string;
-}
-
-export interface ClauseContent {
-  clauseId: string;
-  title: string;
-  sectionNumber: string;
-  content: string;
-  riskLevel: string;
-  category: string;
-}
-
-export interface DocumentVersion {
-  id: string;
-  label: string;
-  timestamp: string;
-  author: string;
-  authorAvatar: string;
-  status: string;
-  content: ClauseContent[];
-  wordCount: number;
-  changeSummary: string;
-}
-
-export interface CommentItem {
-  id: string;
-  author: string;
-  authorAvatar: string;
-  authorRole: string;
-  content: string;
-  timestamp: string;
-  status: string;
-  mentions: string[];
-  replies: CommentItem[];
-  clauseId?: string;
-  resolvedBy?: string;
-  resolvedAt?: string;
-}
-
-export interface RedlineEntry {
-  id: string;
-  type: string;
-  clauseId: string;
-  sectionNumber: string;
-  title: string;
-  originalText: string;
-  modifiedText: string;
-  author: string;
-  authorAvatar: string;
-  timestamp: string;
-  riskLevel: string;
-  category: string;
-  status: string;
-  aiGenerated: boolean;
-  aiConfidence?: number;
-  negotiationImpact?: string;
-  benchmarkDeviation?: number;
-  comments: CommentItem[];
-}
-
-export interface NegotiationIssue {
-  id: string;
-  title: string;
-  description: string;
-  clauseId: string;
-  sectionNumber: string;
-  severity: string;
-  status: string;
-  assignee: string;
-  assigneeAvatar: string;
-  dueDate: string;
-  createdBy: string;
-  createdAt: string;
-  updatedAt: string;
-  category: string;
-  escalationLevel: number;
-  comments: CommentItem[];
-  tags: string[];
-}
-
-export interface Participant {
-  id: string;
-  name: string;
-  avatar: string;
-  role: string;
-  department: string;
-  isOnline: boolean;
-  lastActive: string;
-  reviewedClauses: number;
-  pendingApprovals: number;
-}
-
-export interface ActivityEntry {
-  id: string;
-  type: string;
-  user: string;
-  userAvatar: string;
-  action: string;
-  description: string;
-  timestamp: string;
-  clauseId?: string;
-  versionId?: string;
-}
-
-export interface NegotiationSession {
-  id: string;
-  contractTitle: string;
-  counterparty: string;
-  stage: string;
-  versions: DocumentVersion[];
-  currentVersionId: string;
-  redlines: RedlineEntry[];
-  issues: NegotiationIssue[];
-  participants: Participant[];
-  insights: unknown[];
-  playbooks: unknown[];
-  workflow: Record<string, unknown>;
-  analytics: Record<string, unknown>;
-  activities: ActivityEntry[];
-  healthScore: number;
-  startedAt: string;
-  updatedAt: string;
-}
+// ── API-specific Types (not shared with components) ──────────────
 
 export interface NegotiationKpiData {
   total_sessions: number;
   active_sessions: number;
   by_stage: Record<string, number>;
   escalated_count: number;
+  sparkline_data?: Record<string, number[]>;
 }
 
 export interface PaginatedResponse<T> {
@@ -160,13 +46,14 @@ export interface PaginatedResponse<T> {
 // ── Create / Update Request Types ───────────────────────────────
 
 export interface CreateNegotiationRequest {
+  contractId?: string;
   contractTitle: string;
   counterparty: string;
   clauses?: ClauseContent[];
 }
 
 export interface UpdateNegotiationRequest {
-  stage?: string;
+  stage?: NegotiationStage;
   healthScore?: number;
 }
 
@@ -176,7 +63,7 @@ export interface CreateRedlineRequest {
   title: string;
   originalText: string;
   modifiedText?: string;
-  riskLevel?: string;
+  riskLevel?: RiskLevel;
 }
 
 export interface UpdateRedlineStatusRequest {
@@ -187,15 +74,15 @@ export interface CreateIssueRequest {
   clauseId?: string;
   title: string;
   description?: string;
-  severity?: string;
+  severity?: IssueSeverity;
   assignee?: string;
   dueDate?: string;
   category?: string;
 }
 
 export interface UpdateIssueRequest {
-  status?: string;
-  severity?: string;
+  status?: IssueStatus;
+  severity?: IssueSeverity;
   assignee?: string;
   escalationLevel?: number;
 }
@@ -207,16 +94,6 @@ export interface CreateCommentRequest {
   parentId?: string;
   content: string;
   mentions?: string[];
-}
-
-export interface AddParticipantRequest {
-  name: string;
-  role?: string;
-  department?: string;
-}
-
-export interface UpdateParticipantRequest {
-  role?: string;
 }
 
 // ── API Service ─────────────────────────────────────────────────
@@ -247,6 +124,9 @@ export const negotiationsService = {
   createSession: (body: CreateNegotiationRequest) =>
     api.post<NegotiationSession>(`${NEGOTIATIONS_BASE}/`, body),
 
+  resumeOrCreateFromReview: (body: { reviewId: string; counterparty?: string }) =>
+    api.post<NegotiationSession>(`${NEGOTIATIONS_BASE}/from-review`, body),
+
   updateSession: (id: string, body: UpdateNegotiationRequest) =>
     api.patch<NegotiationSession>(`${NEGOTIATIONS_BASE}/${id}`, body),
 
@@ -254,15 +134,6 @@ export const negotiationsService = {
     api.delete<void>(`${NEGOTIATIONS_BASE}/${id}`),
 
   // ── Redlines ────────────────────────────────────────────────
-  listRedlines: (sessionId: string, clauseId?: string) => {
-    const query = new URLSearchParams();
-    if (clauseId) query.set("clauseId", clauseId);
-    const qs = query.toString();
-    return api.get<RedlineEntry[]>(
-      qs ? `${NEGOTIATIONS_BASE}/${sessionId}/redlines?${qs}` : `${NEGOTIATIONS_BASE}/${sessionId}/redlines`,
-    );
-  },
-
   createRedline: (sessionId: string, body: CreateRedlineRequest) =>
     api.post<RedlineEntry>(`${NEGOTIATIONS_BASE}/${sessionId}/redlines`, body),
 
@@ -270,9 +141,6 @@ export const negotiationsService = {
     api.patch<RedlineEntry>(`${NEGOTIATIONS_BASE}/${sessionId}/redlines/${redlineId}`, body),
 
   // ── Issues ──────────────────────────────────────────────────
-  listIssues: (sessionId: string) =>
-    api.get<NegotiationIssue[]>(`${NEGOTIATIONS_BASE}/${sessionId}/issues`),
-
   createIssue: (sessionId: string, body: CreateIssueRequest) =>
     api.post<NegotiationIssue>(`${NEGOTIATIONS_BASE}/${sessionId}/issues`, body),
 
@@ -280,36 +148,215 @@ export const negotiationsService = {
     api.patch<NegotiationIssue>(`${NEGOTIATIONS_BASE}/${sessionId}/issues/${issueId}`, body),
 
   // ── Comments ────────────────────────────────────────────────
-  listComments: (sessionId: string, params?: { redlineId?: string; issueId?: string }) => {
-    const query = new URLSearchParams();
-    if (params?.redlineId) query.set("redlineId", params.redlineId);
-    if (params?.issueId) query.set("issueId", params.issueId);
-    const qs = query.toString();
-    return api.get<CommentItem[]>(
-      qs ? `${NEGOTIATIONS_BASE}/${sessionId}/comments?${qs}` : `${NEGOTIATIONS_BASE}/${sessionId}/comments`,
-    );
-  },
-
   createComment: (sessionId: string, body: CreateCommentRequest) =>
     api.post<CommentItem>(`${NEGOTIATIONS_BASE}/${sessionId}/comments`, body),
-
-  resolveComment: (sessionId: string, commentId: string) =>
-    api.patch<CommentItem>(`${NEGOTIATIONS_BASE}/${sessionId}/comments/${commentId}/resolve`),
-
-  // ── Participants ────────────────────────────────────────────
-  listParticipants: (sessionId: string) =>
-    api.get<Participant[]>(`${NEGOTIATIONS_BASE}/${sessionId}/participants`),
-
-  addParticipant: (sessionId: string, body: AddParticipantRequest) =>
-    api.post<Participant>(`${NEGOTIATIONS_BASE}/${sessionId}/participants`, body),
-
-  updateParticipant: (sessionId: string, participantId: string, body: UpdateParticipantRequest) =>
-    api.patch<Participant>(`${NEGOTIATIONS_BASE}/${sessionId}/participants/${participantId}`, body),
-
-  removeParticipant: (sessionId: string, participantId: string) =>
-    api.delete<void>(`${NEGOTIATIONS_BASE}/${sessionId}/participants/${participantId}`),
 
   // ── Activities ──────────────────────────────────────────────
   getActivities: (sessionId: string) =>
     api.get<ActivityEntry[]>(`${NEGOTIATIONS_BASE}/${sessionId}/activities`),
+
+  // ── AI Rewrite ──────────────────────────────────────────────
+  aiRewrite: (sessionId: string, clauseId: string, body: {
+    clause_text: string;
+    strategy?: string;
+    context?: string;
+  }) =>
+    api.post<{
+      original_text: string;
+      rewritten_text: string;
+      strategy: string;
+      changes: { description: string }[];
+      model_used: string;
+    }>(`${NEGOTIATIONS_BASE}/${sessionId}/clauses/${clauseId}/rewrite`, body),
+
+  // ── AI Explanation ──────────────────────────────────────────
+  aiExplain: (sessionId: string, clauseId: string, body: {
+    original_text: string;
+    rewritten_text: string;
+    strategy: string;
+  }) =>
+    api.post<{
+      explanation: string;
+      changes: { description: string }[];
+      risks_addressed: string[];
+      benefits: string[];
+    }>(`${NEGOTIATIONS_BASE}/${sessionId}/clauses/${clauseId}/explain`, body),
+
+  // ── AI Coach ────────────────────────────────────────────────
+  aiCoach: (sessionId: string, clauseId: string, body: {
+    clause_text: string;
+    question: string;
+  }) =>
+    api.post<{
+      risks: string[];
+      policy_conflicts: string[];
+      recommended_alternative?: string;
+      explanation: string;
+    }>(`${NEGOTIATIONS_BASE}/${sessionId}/clauses/${clauseId}/coach`, body),
+
+  // ── Clause Comments ─────────────────────────────────────────
+  addClauseComment: (sessionId: string, clauseId: string, body: {
+    body: string;
+    parent_comment_id?: string;
+    finding_id?: string;
+  }) =>
+    api.post<Record<string, unknown>>(
+      `${NEGOTIATIONS_BASE}/${sessionId}/clauses/${clauseId}/comments`,
+      body,
+    ),
+
+  getClauseComments: (sessionId: string, clauseId: string, findingId?: string) => {
+    const qs = findingId ? `?findingId=${findingId}` : "";
+    return api.get<Record<string, unknown>[]>(
+      `${NEGOTIATIONS_BASE}/${sessionId}/clauses/${clauseId}/comments${qs}`,
+    );
+  },
+
+  resolveClauseComment: (sessionId: string, clauseId: string, commentId: string) =>
+    api.post<{ status: string; comment_id: string }>(
+      `${NEGOTIATIONS_BASE}/${sessionId}/clauses/${clauseId}/comments/${commentId}/resolve`,
+    ),
+
+  // ── Clause Bundle Apply ─────────────────────────────────────
+  applyClauseBundle: (sessionId: string, clauseId: string, body: {
+    clause_type: string;
+    target_clause_id: string;
+  }) =>
+    api.post<{
+      status: string;
+      session_id: string;
+      clause_type: string;
+      redline_ids: string[];
+      templates_applied: number;
+      message: string;
+    }>(`${NEGOTIATIONS_BASE}/${sessionId}/clauses/${clauseId}/apply-bundle`, body),
+
+  // ── Voting ──────────────────────────────────────────────────
+  castVote: (sessionId: string, body: {
+    clause_id: string;
+    finding_id?: string;
+    voter_name: string;
+    voter_role: string;
+    vote: string;
+    comment?: string;
+  }) =>
+    api.post<{ vote_id: string; clause_id: string; voter_role: string; vote: string; message: string }>(
+      `${NEGOTIATIONS_BASE}/${sessionId}/votes`, body,
+    ),
+
+  getClauseVotes: (sessionId: string, clauseId: string) =>
+    api.get<Record<string, unknown>[]>(
+      `${NEGOTIATIONS_BASE}/${sessionId}/clauses/${clauseId}/votes`,
+    ),
+
+  getVoteSummary: (sessionId: string) =>
+    api.get<Record<string, unknown>[]>(`${NEGOTIATIONS_BASE}/${sessionId}/votes/summary`),
+
+  // ── Clause Score ────────────────────────────────────────────
+  getClauseScore: (sessionId: string, clauseId: string) =>
+    api.get<{
+      clause_id: string;
+      risk_score: number;
+      negotiability_score: number;
+      readability_score: number;
+      market_standard_score: number;
+      overall_score: number;
+    }>(`${NEGOTIATIONS_BASE}/${sessionId}/clauses/${clauseId}/score`),
+
+  // ── Dependency Warnings ─────────────────────────────────────
+  getClauseDependencies: (sessionId: string, clauseId: string) =>
+    api.get<{
+      clause_id: string;
+      clause_type: string;
+      warnings: { affected_clause: string; relationship: string; impact: string; description: string }[];
+    }>(`${NEGOTIATIONS_BASE}/${sessionId}/clauses/${clauseId}/dependencies`),
+
+  // ── Negotiation History ─────────────────────────────────────
+  getClauseHistory: (sessionId: string, clauseId: string) =>
+    api.get<{
+      version_number: number;
+      label: string;
+      author: string;
+      timestamp: string;
+      action: string;
+      clause_id: string;
+      original_text: string;
+      modified_text: string;
+      explanation?: string;
+    }[]>(`${NEGOTIATIONS_BASE}/${sessionId}/clauses/${clauseId}/history`),
+
+  // ── Counterparty Comparison ─────────────────────────────────
+  getCounterpartyComparison: (sessionId: string, clauseId: string) =>
+    api.get<{
+      clause_id: string;
+      our_position: string;
+      vendor_position: string;
+      final_position?: string;
+      diff_additions: string[];
+      diff_deletions: string[];
+    }>(`${NEGOTIATIONS_BASE}/${sessionId}/clauses/${clauseId}/comparison`),
+
+  // ── Negotiation Summary ─────────────────────────────────────
+  getNegotiationSummary: (sessionId: string) =>
+    api.get<{
+      session_id: string;
+      total_clauses: number;
+      clauses_modified: number;
+      clauses_accepted: number;
+      clauses_pending: number;
+      clauses_escalated: number;
+      risk_score_before: number;
+      risk_score_after: number;
+      estimated_time_saved_hours: number;
+      votes_cast: number;
+      votes_approved: number;
+      votes_rejected: number;
+      ai_rewrites_used: number;
+      generated_at: string;
+    }>(`${NEGOTIATIONS_BASE}/${sessionId}/summary`),
+
+  // ── Chat History ────────────────────────────────────────────
+  getChatMessages: (sessionId: string) =>
+    api.get<{
+      id: string;
+      session_id: string;
+      role: string;
+      content: string;
+      clause_id?: string;
+      metadata?: Record<string, unknown>;
+      created_at: string;
+    }[]>(`${NEGOTIATIONS_BASE}/${sessionId}/chat`),
+
+  addChatMessage: (sessionId: string, body: {
+    role: "user" | "assistant";
+    content: string;
+    clause_id?: string;
+    metadata?: Record<string, unknown>;
+  }) =>
+    api.post<{
+      id: string;
+      session_id: string;
+      role: string;
+      content: string;
+      clause_id?: string;
+      metadata?: Record<string, unknown>;
+      created_at: string;
+    }>(`${NEGOTIATIONS_BASE}/${sessionId}/chat`, body),
+
+  clearChatMessages: (sessionId: string) =>
+    api.delete<void>(`${NEGOTIATIONS_BASE}/${sessionId}/chat`),
+
+  // ── Strategies ──────────────────────────────────────────────
+  getStrategies: () =>
+    api.get<{
+      strategies: {
+        strategy_id: string;
+        name: string;
+        description: string;
+        icon: string;
+        prompt_template: string;
+        is_default: boolean;
+        is_active: boolean;
+      }[];
+    }>("/negotiations/strategies"),
 };

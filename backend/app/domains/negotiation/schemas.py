@@ -34,6 +34,9 @@ class ClauseContentSchema(BaseModel):
     content: str
     risk_level: str = Field(alias="riskLevel")
     category: str
+    negotiability_score: Optional[float] = Field(None, alias="negotiabilityScore")
+    readability_score: Optional[float] = Field(None, alias="readabilityScore")
+    market_standard_score: Optional[float] = Field(None, alias="marketStandardScore")
 
     model_config = {"populate_by_name": True}
 
@@ -66,6 +69,7 @@ class CommentItemSchema(BaseModel):
     replies: list[CommentItemSchema] = Field(default_factory=list)
     attachment_url: Optional[str] = Field(None, alias="attachmentUrl")
     clause_id: Optional[str] = Field(None, alias="clauseId")
+    finding_id: Optional[str] = Field(None, alias="findingId")
     resolved_by: Optional[str] = Field(None, alias="resolvedBy")
     resolved_at: Optional[datetime] = Field(None, alias="resolvedAt")
 
@@ -173,6 +177,7 @@ class NegotiationSessionResponse(BaseModel):
     health_score: float = Field(alias="healthScore")
     started_at: datetime = Field(alias="startedAt")
     updated_at: datetime = Field(alias="updatedAt")
+    metadata: Optional[dict[str, Any]] = Field(None, alias="metadata")
 
     model_config = {"populate_by_name": True}
 
@@ -199,6 +204,13 @@ class NegotiationCreateRequest(BaseModel):
     contract_title: str = Field(..., alias="contractTitle")
     counterparty: str
     clauses: Optional[list[ClauseContentSchema]] = None
+
+    model_config = {"populate_by_name": True}
+
+
+class ResumeFromReviewRequest(BaseModel):
+    review_id: str = Field(..., alias="reviewId")
+    counterparty: Optional[str] = None
 
     model_config = {"populate_by_name": True}
 
@@ -250,9 +262,18 @@ class CommentCreateRequest(BaseModel):
     redline_id: Optional[str] = Field(None, alias="redlineId")
     issue_id: Optional[str] = Field(None, alias="issueId")
     clause_id: Optional[str] = Field(None, alias="clauseId")
+    finding_id: Optional[str] = Field(None, alias="findingId")
     parent_id: Optional[str] = Field(None, alias="parentId")
     content: str
     mentions: list[str] = Field(default_factory=list)
+
+    model_config = {"populate_by_name": True}
+
+
+class ClauseCommentCreateRequest(BaseModel):
+    body: str = Field(..., min_length=1, max_length=5000)
+    parent_comment_id: Optional[str] = Field(None, alias="parentCommentId")
+    finding_id: Optional[str] = Field(None, alias="findingId")
 
     model_config = {"populate_by_name": True}
 
@@ -281,3 +302,27 @@ class NegotiationKpiResponse(BaseModel):
     active_sessions: int = 0
     by_stage: dict[str, int] = Field(default_factory=dict)
     escalated_count: int = 0
+    # Time-series data for KPI sparkline charts
+    sparkline_data: dict[str, list[int]] = Field(default_factory=dict)
+
+
+# ── Negotiation Strategy Config ───────────────────────────────────
+
+class NegotiationStrategyConfig(BaseModel):
+    strategy_id: str
+    name: str
+    description: str
+    icon: str  # emoji
+    prompt_template: str
+    is_default: bool = False
+    is_active: bool = True
+
+
+DEFAULT_STRATEGIES: list[dict] = [
+    {"strategy_id": "balanced", "name": "Balanced", "description": "Fair middle-ground language protecting both parties' interests", "icon": "⚖️", "prompt_template": "Rewrite the following clause to be balanced and commercially reasonable, protecting both parties' interests fairly.", "is_default": True},
+    {"strategy_id": "customer_protective", "name": "Customer Protective", "description": "Maximizes protections for the customer", "icon": "🛡️", "prompt_template": "Rewrite the following clause to be customer-protective, maximizing protections and favorable terms for the customer while remaining enforceable.", "is_default": False},
+    {"strategy_id": "supplier_protective", "name": "Supplier Protective", "description": "Pro-supplier wording minimizing liability", "icon": "🏢", "prompt_template": "Rewrite the following clause to be supplier-protective, minimizing the supplier's liability and obligations while remaining legally enforceable.", "is_default": False},
+    {"strategy_id": "legal_standard", "name": "Legal Standard", "description": "Industry-standard neutral language", "icon": "📋", "prompt_template": "Rewrite the following clause to use industry-standard legal language that is neutral and commonly accepted in similar agreements.", "is_default": False},
+    {"strategy_id": "aggressive", "name": "Aggressive", "description": "Maximally favorable to your side", "icon": "⚡", "prompt_template": "Rewrite the following clause to be maximally favorable to our position, pushing the boundaries of what is commercially acceptable while remaining legally defensible.", "is_default": False},
+    {"strategy_id": "fallback", "name": "Fallback Position", "description": "Pre-approved compromise language", "icon": "🤝", "prompt_template": "Rewrite the following clause as a fallback compromise position that offers reasonable concessions while maintaining essential protections.", "is_default": False},
+]

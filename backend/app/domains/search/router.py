@@ -13,7 +13,7 @@ from app.kernel.security.rbac import require_permission
 from app.kernel.security.permissions import Permissions
 from app.domains.search.schemas import (
     SearchRequest, SearchResponse, AutocompleteRequest, AutocompleteResponse,
-    SearchPulseResponse
+    SearchPulseResponse, SearchClickRequest,
 )
 from app.domains.search.service import SearchService
 
@@ -43,6 +43,7 @@ async def search_pulse(
 )
 
 
+@router.post("", response_model=SearchResponse, include_in_schema=False)
 @router.post("/", response_model=SearchResponse)
 async def search(
     body: SearchRequest,
@@ -58,6 +59,7 @@ async def search(
 )
 
 
+@router.get("", response_model=SearchResponse, include_in_schema=False)
 @router.get("/", response_model=SearchResponse)
 async def search_get(
     q: str = Query(..., min_length=1, max_length=500),
@@ -149,21 +151,12 @@ async def search_clauses(
 
 @router.post("/click")
 async def log_click(
-    query_id: str = Query(...),
-    result_position: int = Query(..., ge=0),
-    entity_type: str = Query(...),
-    entity_id: str = Query(...),
-    chunk_id: Optional[str] = Query(None),
-    score: Optional[float] = Query(None),
+    body: SearchClickRequest,
     service: SearchService = Depends(get_search_service),
     _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
 ):
     """Log a search result click for ranking quality measurement."""
-    await service.log_click(
-        query_id=query_id, result_position=result_position,
-        entity_type=entity_type, entity_id=entity_id,
-        chunk_id=chunk_id, score=score
-)
+    await service.log_click_from_request(body)
     return {"status": "logged"}
 
 

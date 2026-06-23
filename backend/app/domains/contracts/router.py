@@ -465,8 +465,12 @@ async def get_contract(
     service: ReviewService = Depends(get_review_service),
     _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
 ):
-    """Get a single contract by review ID."""
+    """Get a single contract by review ID (or upload ID fallback)."""
     review = await service.get_review(contract_id)
+    if not review:
+        review = await service.review_repo.get_review_by_upload(contract_id, service.tenant_id)
+        if review:
+            review = service._review_to_detail(review)
     if not review:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Contract not found")

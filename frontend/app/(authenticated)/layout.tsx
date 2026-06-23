@@ -14,6 +14,7 @@
 "use client";
 
 import React, { useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { TopNav } from "@/components/dashboard/TopNav";
@@ -34,6 +35,7 @@ export default function AuthenticatedLayout({
   children: React.ReactNode;
 }) {
   const { user, logout } = useAuth();
+  const router = useRouter();
   const { isDark, toggleTheme, fontSize, setFontSize, prefersReducedMotion } = useTheme();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeView, setActiveView] = useState<ViewType>("ingestion");
@@ -124,10 +126,11 @@ export default function AuthenticatedLayout({
               "workflow-intelligence-dashboard": "/workflow-intelligence-dashboard",
               "ai-operations-dashboard": "/ai-operations-dashboard",
               "tenant-settings": "/tenant-settings",
-              "ai-operations-dashboard": "/ai-operations-dashboard",
-              relationships: "/relationships",
+              "review-dashboard": "/reviews",
+              "activity-center": "/activity",
             };
-            window.location.href = routeMap[view] || "/ingestion";
+            const target = routeMap[view] || "/reviews";
+            router.push(target);
           }}
           collapsed={sidebarCollapsed}
           onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}

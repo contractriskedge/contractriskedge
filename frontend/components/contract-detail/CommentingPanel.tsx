@@ -275,9 +275,8 @@ export function CommentingPanel({ comments, contractId, currentPage }: Commentin
       const mentions = [...newComment.matchAll(/@(\w+(?:\s+\w+)?)/g)].map((m) => m[1].trim());
 
       await addCommentMutation.mutateAsync({
-        content: newComment.trim(),
-        parent_id: replyToId || undefined,
-        page_number: replyToId ? undefined : currentPage,
+        body: newComment.trim(),
+        parent_comment_id: replyToId || undefined,
         mentions,
       });
 

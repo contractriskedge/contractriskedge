@@ -2,7 +2,8 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Search, Menu, LogOut, User as UserIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Search, Menu, LogOut, User as UserIcon, ArrowRight } from "lucide-react";
 import { NotificationBell } from "@/components/notifications/NotificationCenter";
 
 interface TopNavProps {
@@ -12,9 +13,12 @@ interface TopNavProps {
 }
 
 export function TopNav({ user, onLogout, onToggleSidebar }: TopNavProps) {
+  const router = useRouter();
   const [showProfile, setShowProfile] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, right: 16 });
+  const [searchQuery, setSearchQuery] = useState("");
   const profileButtonRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const updateMenuPosition = useCallback(() => {
     const el = profileButtonRef.current;
@@ -46,6 +50,27 @@ export function TopNav({ user, onLogout, onToggleSidebar }: TopNavProps) {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [showProfile]);
+
+  // Global search shortcut: Cmd+K or Ctrl+K
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, []);
+
+  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && searchQuery.trim()) {
+      e.preventDefault();
+      router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
+      setSearchQuery("");
+      searchInputRef.current?.blur();
+    }
+  }, [searchQuery, router]);
 
   const handleLogout = useCallback(() => {
     setShowProfile(false);
@@ -94,10 +119,23 @@ export function TopNav({ user, onLogout, onToggleSidebar }: TopNavProps) {
         <div className="relative hidden sm:block">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
+            ref={searchInputRef}
             type="text"
-            placeholder="Search contracts, clauses..."
+            value={searchQuery || ""}
+            onChange={e => setSearchQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            placeholder='Search contracts, clauses... (⌘K)'
             className="input pl-10 w-64 lg:w-80"
           />
+          {searchQuery && (
+            <button
+              onClick={() => router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}`)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gold-500 hover:text-gold-600 hover:bg-gold-50 rounded transition-colors"
+              title="Search"
+            >
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 

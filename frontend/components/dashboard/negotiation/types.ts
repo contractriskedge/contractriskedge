@@ -1,15 +1,68 @@
 // ── Enterprise Negotiation & Redline Center Types ─────────────────────────
+// UI-specific types. Core data types are imported from shared.
 
-export type RiskLevel = "critical" | "high" | "medium" | "low" | "info";
+import type {
+  RiskLevel,
+  NegotiationStage,
+  RedlineType,
+  IssueSeverity,
+  IssueStatus,
+  ParticipantRole,
+  CommentStatus,
+  VoteValue,
+  ClauseContent,
+  RedlineEntry,
+  NegotiationIssue,
+  CommentItem,
+  Participant,
+  DocumentVersion,
+  NegotiationSession,
+  NegotiationVote,
+  VoteSummary,
+  ClauseScoreData as ClauseScore,
+  NegotiationKpis,
+  NegotiationSummary,
+  HistoryEntry,
+  CounterpartyComparison,
+  PositionComparison,
+  ClauseDependency,
+  AiRewriteResponse,
+  AiCoachResponse,
+  ApplyBundleResponse,
+} from "@/services/api/negotiation.types";
 
-export type NegotiationStage = "drafting" | "review" | "negotiating" | "approved" | "executed" | "escalated";
-export type RedlineType = "addition" | "deletion" | "modification" | "comment" | "suggestion";
-export type IssueSeverity = "blocker" | "critical" | "major" | "minor" | "info";
-export type IssueStatus = "open" | "in-review" | "resolved" | "escalated" | "accepted";
-export type ParticipantRole = "owner" | "reviewer" | "approver" | "viewer" | "external";
-export type CommentStatus = "active" | "resolved" | "archived";
+// Re-export shared types for convenience
+export type {
+  RiskLevel,
+  NegotiationStage,
+  RedlineType,
+  IssueSeverity,
+  IssueStatus,
+  ParticipantRole,
+  CommentStatus,
+  VoteValue,
+  ClauseContent,
+  RedlineEntry,
+  NegotiationIssue,
+  CommentItem,
+  Participant,
+  DocumentVersion,
+  NegotiationSession,
+  NegotiationVote,
+  VoteSummary,
+  ClauseScore,
+  NegotiationKpis,
+  NegotiationSummary,
+  HistoryEntry,
+  CounterpartyComparison,
+  PositionComparison,
+  ClauseDependency,
+  AiRewriteResponse,
+  AiCoachResponse,
+  ApplyBundleResponse,
+};
 
-// ── Negotiation KPI ──────────────────────────────────────────────────────
+// ── Negotiation KPI (UI-specific) ────────────────────────────────────────
 
 export interface NegotiationKpi {
   id: string;
@@ -25,20 +78,6 @@ export interface NegotiationKpi {
   drillDownView?: string;
 }
 
-// ── Document Version ─────────────────────────────────────────────────────
-
-export interface DocumentVersion {
-  id: string;
-  label: string;
-  timestamp: string;
-  author: string;
-  authorAvatar: string;
-  status: "draft" | "current" | "superseded" | "approved";
-  content: ClauseContent[];
-  wordCount: number;
-  changeSummary: string;
-}
-
 export interface ClauseContent {
   clauseId: string;
   title: string;
@@ -46,6 +85,9 @@ export interface ClauseContent {
   content: string;
   riskLevel: RiskLevel;
   category: string;
+  negotiabilityScore?: number;
+  readabilityScore?: number;
+  marketStandardScore?: number;
 }
 
 // ── Redline / Diff ───────────────────────────────────────────────────────
@@ -118,6 +160,7 @@ export interface CommentItem {
   replies: CommentItem[];
   attachmentUrl?: string;
   clauseId?: string;
+  findingId?: string;
   resolvedBy?: string;
   resolvedAt?: string;
 }
@@ -242,5 +285,131 @@ export interface NegotiationSession {
 
 // ── View Mode ────────────────────────────────────────────────────────────
 
-export type CompareMode = "side-by-side" | "inline" | "unified";
+export type CompareMode = "side-by-side" | "inline" | "unified" | "track-changes";
 export type PanelMode = "edit" | "review" | "compare" | "final";
+
+// ── Voting ───────────────────────────────────────────────────────────────
+
+export type VoteValue = "approve" | "reject" | "pending";
+
+export interface NegotiationVote {
+  voteId: string;
+  sessionId: string;
+  clauseId: string;
+  findingId?: string;
+  voterName: string;
+  voterRole: "legal" | "security" | "business" | "procurement" | string;
+  vote: VoteValue;
+  comment?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VoteSummary {
+  clauseId: string;
+  total: number;
+  approved: number;
+  rejected: number;
+  pending: number;
+  votes: NegotiationVote[];
+}
+
+// ── Clause Score ─────────────────────────────────────────────────────────
+
+export interface ClauseScore {
+  clauseId: string;
+  riskScore: number;
+  negotiabilityScore: number;
+  readabilityScore: number;
+  marketStandardScore: number;
+  overallScore: number;
+}
+
+// ── AI Explanation ───────────────────────────────────────────────────────
+
+export interface AiExplanation {
+  explanation: string;
+  changes: { description: string }[];
+  risksAddressed: string[];
+  benefits: string[];
+}
+
+// ── AI Coach ─────────────────────────────────────────────────────────────
+
+export interface CoachResponse {
+  risks: string[];
+  policyConflicts: string[];
+  recommendedAlternative?: string;
+  explanation: string;
+}
+
+// ── Dependency Warning ───────────────────────────────────────────────────
+
+export interface DependencyWarning {
+  affectedClause: string;
+  relationship: "direct" | "implied" | "related";
+  impact: "high" | "medium" | "low";
+  description: string;
+}
+
+export interface DependencyWarnings {
+  clauseId: string;
+  clauseType: string;
+  warnings: DependencyWarning[];
+}
+
+// ── Negotiation Summary ──────────────────────────────────────────────────
+
+export interface NegotiationSummary {
+  sessionId: string;
+  totalClauses: number;
+  clausesModified: number;
+  clausesAccepted: number;
+  clausesPending: number;
+  clausesEscalated: number;
+  riskScoreBefore: number;
+  riskScoreAfter: number;
+  estimatedTimeSavedHours: number;
+  votesCast: number;
+  votesApproved: number;
+  votesRejected: number;
+  aiRewritesUsed: number;
+  generatedAt: string;
+}
+
+// ── Negotiation History Entry ────────────────────────────────────────────
+
+export interface HistoryEntry {
+  versionNumber: number;
+  label: string;
+  author: string;
+  timestamp: string;
+  action: "created" | "ai_rewrite" | "legal_edit" | "vendor_edit" | "accepted";
+  clauseId: string;
+  originalText: string;
+  modifiedText: string;
+  explanation?: string;
+}
+
+// ── Counterparty Comparison ──────────────────────────────────────────────
+
+export interface CounterpartyComparison {
+  clauseId: string;
+  ourPosition: string;
+  vendorPosition: string;
+  finalPosition?: string;
+  diffAdditions: string[];
+  diffDeletions: string[];
+}
+
+// ── Negotiation Strategy ─────────────────────────────────────────────────
+
+export interface NegotiationStrategy {
+  strategyId: string;
+  name: string;
+  description: string;
+  icon: string;
+  promptTemplate: string;
+  isDefault: boolean;
+  isActive: boolean;
+}

@@ -340,19 +340,35 @@ export function LeftSidebar({
 
         {/* Playbooks Tab */}
         {activeTab === "playbooks" && (
-          <div className="space-y-2 pt-1">
-            {playbooks.map(pb => (
-              <PlaybookCard key={pb.id} playbook={pb} />
-            ))}
+          <div className="space-y-2 pt-1 px-2">
+            {playbooks.length === 0 ? (
+              <div className="text-center py-6 text-gray-400">
+                <BookOpen className="w-5 h-5 mx-auto mb-1 opacity-50" />
+                <p className="text-[10px]">No playbooks available</p>
+                <p className="text-[8px] mt-1">Playbooks provide guidance on clause negotiation strategies</p>
+              </div>
+            ) : (
+              playbooks.map(pb => (
+                <PlaybookCard key={pb.id} playbook={pb} />
+              ))
+            )}
           </div>
         )}
 
         {/* Participants Tab */}
         {activeTab === "participants" && (
-          <div className="space-y-0.5 pt-1">
-            {participants.map(p => (
-              <ParticipantBadge key={p.id} participant={p} />
-            ))}
+          <div className="space-y-0.5 pt-1 px-2">
+            {participants.length === 0 ? (
+              <div className="text-center py-6 text-gray-400">
+                <User className="w-5 h-5 mx-auto mb-1 opacity-50" />
+                <p className="text-[10px]">No team members</p>
+                <p className="text-[8px] mt-1">Add participants to collaborate on this negotiation</p>
+              </div>
+            ) : (
+              participants.map(p => (
+                <ParticipantBadge key={p.id} participant={p} />
+              ))
+            )}
           </div>
         )}
       </div>

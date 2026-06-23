@@ -5,18 +5,37 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.search.engine import HybridRetrievalEngine, RetrievedChunk, RetrievalResult
 from app.domains.search.repository import SearchRepository
-from app.domains.search.schemas import SearchRequest, SearchResponse, SearchResultItem
+from app.domains.search.schemas import SearchRequest, SearchResponse, SearchResultItem, SearchClickRequest
 from app.kernel.security.auth import UserContext
 
 logger = logging.getLogger(__name__)
+
+_ENTITY_ID_PREFIX_RE = re.compile(r"^(ilike-|finding-|obligation-)")
+
+
+def _normalize_entity_id(raw: str) -> str:
+    """Strip synthetic search result prefixes before persisting click IDs."""
+    return _ENTITY_ID_PREFIX_RE.sub("", raw)
+
+
+def _parse_uuid(value: Optional[str]) -> Optional[uuid.UUID]:
+    if not value:
+        return None
+    try:
+        return uuid.UUID(_normalize_entity_id(value))
+    except ValueError:
+        return None
 
 
 @dataclass
@@ -61,6 +80,7 @@ class SearchService:
             # in review metadata, not in the chunks table).
             upload_ids = [c.upload_id for c in result.results if c.upload_id]
             contract_numbers: dict[str, str] = {}
+            review_ids: dict[str, str] = {}
             if upload_ids:
                 try:
                     from sqlalchemy import text as sa_text
@@ -69,6 +89,7 @@ class SearchService:
                         sa_text(f"""
                             SELECT DISTINCT ON (cr.upload_id)
                                 cr.upload_id::text,
+                                cr.review_id::text,
                                 cr.metadata->>'contract_number' AS contract_number
                             FROM contract_reviews cr
                             WHERE cr.upload_id IN ({','.join(ids_list)})
@@ -77,19 +98,24 @@ class SearchService:
                         {"tid": self.tenant_id},
                     )
                     for row in cn_result.fetchall():
+                        upload_key = str(row.upload_id)
+                        review_ids[upload_key] = str(row.review_id)
                         if row.contract_number:
-                            contract_numbers[str(row.upload_id)] = row.contract_number
+                            contract_numbers[upload_key] = row.contract_number
                 except Exception:
                     pass
 
             for chunk in result.results:
                 snippet = HybridRetrievalEngine.generate_snippet(chunk.text, request.query)
-                cn = chunk.contract_number or contract_numbers.get(chunk.upload_id) if chunk.upload_id else None
+                upload_key = chunk.upload_id or ""
+                review_id = review_ids.get(upload_key)
+                cn = chunk.contract_number or contract_numbers.get(upload_key) if upload_key else None
                 results.append(SearchResultItem(
                     chunk_id=chunk.chunk_id,
                     entity_type="chunk",
                     upload_id=chunk.upload_id,
-                    contract_id=chunk.contract_id,
+                    review_id=review_id,
+                    contract_id=review_id or chunk.contract_id,
                     contract_name=chunk.contract_name,
                     contract_number=cn,
                     page_numbers=chunk.page_numbers,
@@ -148,6 +174,7 @@ class SearchService:
                     chunk_id=f"finding-{row.finding_id}",
                     entity_type="finding",
                     entity_id=str(row.finding_id),
+                    review_id=str(row.review_id) if row.review_id else None,
                     contract_id=str(row.review_id) if row.review_id else None,
                     contract_name=row.contract_name,
                     contract_number=row.contract_number,
@@ -207,6 +234,7 @@ class SearchService:
                     chunk_id=f"obligation-{row.id}",
                     entity_type="obligation",
                     entity_id=str(row.id),
+                    review_id=str(row.contract_uuid_id) if row.contract_uuid_id else None,
                     contract_id=str(row.contract_uuid_id) if row.contract_uuid_id else None,
                     contract_name=row.contract_name,
                     contract_number=row.contract_number,
@@ -238,6 +266,46 @@ class SearchService:
             strategy=request.strategy,
             latency_ms=latency_ms,
         )
+
+    async def log_click_from_request(self, request: SearchClickRequest) -> None:
+        """Log a search click using the frontend JSON payload."""
+        repo = SearchRepository(self.session, tenant_id=self.tenant_id)
+        sq = await repo.log_query(
+            tenant_id=self.tenant_id,
+            user_id=self.user.id if self.user else None,
+            query_text=request.query,
+            result_count=0,
+            latency_ms=0,
+            strategy="click",
+        )
+        entity_uuid = _parse_uuid(request.entity_id)
+        if entity_uuid is None:
+            logger.warning("Skipping search click with non-UUID entity_id: %s", request.entity_id)
+            return
+
+        chunk_uuid = None
+        if request.entity_type == "chunk":
+            chunk_uuid = _parse_uuid(request.chunk_id or request.entity_id)
+
+        try:
+            await repo.log_click(
+                query_id=str(sq.query_id),
+                tenant_id=self.tenant_id,
+                result_position=request.result_position,
+                entity_type=request.entity_type,
+                entity_id=str(entity_uuid),
+                chunk_id=str(chunk_uuid) if chunk_uuid else None,
+                score=request.score,
+            )
+        except IntegrityError:
+            # Best-effort analytics — don't fail the UI if FK constraints reject stale IDs.
+            logger.warning(
+                "Search click not persisted (entity_type=%s entity_id=%s chunk_id=%s)",
+                request.entity_type,
+                entity_uuid,
+                chunk_uuid,
+                exc_info=True,
+            )
 
     async def log_click(
         self, query_id: str, result_position: int,

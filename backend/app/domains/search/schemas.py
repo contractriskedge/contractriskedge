@@ -20,10 +20,21 @@ class SearchRequest(BaseModel):
     page_size: int = Field(default=20, ge=1, le=100)
 
 
+class SearchClickRequest(BaseModel):
+    """Track a search result click for ranking quality measurement."""
+    query: str = Field(..., min_length=1, max_length=500)
+    result_position: int = Field(..., ge=0, description="0-based position in the result list")
+    entity_type: str = Field(..., min_length=1, max_length=50)
+    entity_id: str = Field(..., min_length=1, max_length=100)
+    chunk_id: Optional[str] = Field(default=None, description="Raw chunk UUID when applicable")
+    score: Optional[float] = None
+
+
 class SearchResultItem(BaseModel):
     """A single search result item with citation metadata."""
     chunk_id: str
     entity_type: str = Field(default="chunk", description="Entity type: chunk, finding, obligation, redline")
+    review_id: Optional[str] = Field(default=None, description="Contract review ID for navigation")
     contract_id: Optional[str] = None
     contract_name: Optional[str] = None
     contract_number: Optional[str] = None

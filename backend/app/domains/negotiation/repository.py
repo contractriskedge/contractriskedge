@@ -45,6 +45,29 @@ class NegotiationRepository:
         await self.session.flush()
         return session_obj
 
+    async def get_latest_session_for_contract(
+        self, contract_id: str,
+    ) -> Optional[NegotiationSession]:
+        """Return the most recently updated session linked to a review/contract."""
+        query = (
+            select(NegotiationSession)
+            .where(
+                and_(
+                    NegotiationSession.tenant_id == self.tenant_id,
+                    NegotiationSession.contract_id == contract_id,
+                )
+            )
+            .order_by(NegotiationSession.updated_at.desc())
+            .limit(1)
+            .options(
+                selectinload(NegotiationSession.versions),
+                selectinload(NegotiationSession.redlines),
+                selectinload(NegotiationSession.issues),
+            )
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
     async def get_session(self, session_id: str) -> Optional[NegotiationSession]:
         """Get a session with all nested children loaded."""
         query = (
@@ -184,11 +207,59 @@ class NegotiationRepository:
         )
         escalated = (await self.session.execute(escalated_query)).scalar() or 0
 
+        # Generate sparkline data (weekly session creation counts for last 12 weeks)
+        from datetime import timedelta
+        sparkline_data: dict[str, list[int]] = {
+            "sessions_created": [],
+            "redlines_created": [],
+            "issues_resolved": [],
+        }
+        now = datetime.now(timezone.utc)
+        for week_offset in range(11, -1, -1):
+            week_start = now - timedelta(weeks=week_offset + 1)
+            week_end = now - timedelta(weeks=week_offset)
+
+            # Sessions created in this week
+            sq = select(func.count()).select_from(NegotiationSession).where(
+                and_(
+                    NegotiationSession.tenant_id == self.tenant_id,
+                    NegotiationSession.created_at >= week_start,
+                    NegotiationSession.created_at < week_end,
+                )
+            )
+            sparkline_data["sessions_created"].append((await self.session.execute(sq)).scalar() or 0)
+
+            # Redlines created in this week
+            try:
+                rq = select(func.count()).select_from(NegotiationRedline).where(
+                    and_(
+                        NegotiationRedline.created_at >= week_start,
+                        NegotiationRedline.created_at < week_end,
+                    )
+                )
+                sparkline_data["redlines_created"].append((await self.session.execute(rq)).scalar() or 0)
+            except Exception:
+                sparkline_data["redlines_created"].append(0)
+
+            # Issues resolved in this week
+            try:
+                iq = select(func.count()).select_from(NegotiationIssue).where(
+                    and_(
+                        NegotiationIssue.status.in_(["resolved", "accepted"]),
+                        NegotiationIssue.updated_at >= week_start,
+                        NegotiationIssue.updated_at < week_end,
+                    )
+                )
+                sparkline_data["issues_resolved"].append((await self.session.execute(iq)).scalar() or 0)
+            except Exception:
+                sparkline_data["issues_resolved"].append(0)
+
         return {
             "total_sessions": total,
             "active_sessions": active,
             "by_stage": by_stage,
             "escalated_count": escalated,
+            "sparkline_data": sparkline_data,
         }
 
     # ── Versions ─────────────────────────────────────────────────
@@ -205,6 +276,34 @@ class NegotiationRepository:
             update(NegotiationVersion)
             .where(NegotiationVersion.version_id == version_id)
             .values(status=status)
+            .returning(NegotiationVersion)
+        )
+        result = await self.session.execute(query)
+        await self.session.flush()
+        return result.scalar_one_or_none()
+
+    async def update_version_clauses(
+        self,
+        version_id: str,
+        clauses: list[dict],
+        *,
+        change_summary: Optional[str] = None,
+        label: Optional[str] = None,
+    ) -> Optional[NegotiationVersion]:
+        """Replace clause snapshots on a document version."""
+        word_count = sum(len(str(c.get("content", "")).split()) for c in clauses)
+        values: dict[str, Any] = {
+            "clauses": clauses,
+            "word_count": word_count,
+        }
+        if change_summary is not None:
+            values["change_summary"] = change_summary
+        if label is not None:
+            values["label"] = label
+        query = (
+            update(NegotiationVersion)
+            .where(NegotiationVersion.version_id == version_id)
+            .values(**values)
             .returning(NegotiationVersion)
         )
         result = await self.session.execute(query)
@@ -464,6 +563,32 @@ class NegotiationRepository:
         result = await self.session.execute(query)
         await self.session.flush()
         return result.rowcount > 0
+
+    # ── Votes ────────────────────────────────────────────────────
+
+    async def create_vote(self, vote: "NegotiationVote") -> "NegotiationVote":
+        """Create a new vote."""
+        self.session.add(vote)
+        await self.session.flush()
+        return vote
+
+    async def list_votes(
+        self, session_id: str, clause_id: Optional[str] = None
+    ) -> list["NegotiationVote"]:
+        """List votes for a session, optionally filtered by clause, scoped to tenant."""
+        from app.domains.negotiation.models import NegotiationVote as VoteModel
+
+        conditions = [VoteModel.session_id == session_id]
+        if clause_id:
+            conditions.append(VoteModel.clause_id == clause_id)
+        query = (
+            select(VoteModel)
+            .join(NegotiationSession, NegotiationSession.session_id == VoteModel.session_id)
+            .where(and_(*conditions, NegotiationSession.tenant_id == self.tenant_id))
+            .order_by(VoteModel.created_at.desc())
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
 
     # ── Activity / Audit Log ─────────────────────────────────────
     # Uses governance_audit_events table (reuse, not duplicate)

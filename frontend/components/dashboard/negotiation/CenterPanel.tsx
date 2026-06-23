@@ -5,13 +5,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   MessageSquare, Check, X, AlertTriangle, Lightbulb, User, Clock,
   ChevronDown, ChevronRight, Maximize2, Minimize2, FileText,
-  GitBranch, Brain, ExternalLink,
+  GitBranch, Brain, ExternalLink, PenTool, Sparkles,
 } from "lucide-react";
 import type {
   RedlineEntry, ClauseContent, CommentItem, CompareMode, PanelMode,
   DocumentVersion, AiNegotiationInsight,
 } from "./types";
-import { DiffViewer, ClauseDiffSummary } from "./DiffEngine";
+import { DiffViewer, ClauseDiffSummary, TrackChangesDiffViewer } from "./DiffEngine";
 
 // ── Inline Comment Thread ────────────────────────────────────────────────
 
@@ -104,7 +104,7 @@ function AiHighlightBadge({ insight }: { insight: AiNegotiationInsight }) {
 // ── Redline Entry Card ───────────────────────────────────────────────────
 
 function RedlineCard({
-  redline, isExpanded, onToggle, onAccept, onReject, insights,
+  redline, isExpanded, onToggle, onAccept, onReject, insights, onComment, sessionId,
 }: {
   redline: RedlineEntry;
   isExpanded: boolean;
@@ -112,7 +112,11 @@ function RedlineCard({
   onAccept: () => void;
   onReject: () => void;
   insights: AiNegotiationInsight[];
+  onComment?: (redlineId: string, body: string) => void;
+  sessionId?: string;
 }) {
+  const [commentText, setCommentText] = useState("");
+  const [showCommentInput, setShowCommentInput] = useState(false);
   const typeIcon = redline.type === "addition" ? "text-green-500" :
     redline.type === "deletion" ? "text-red-500" : "text-amber-500";
   const typeLabel = redline.type === "addition" ? "Addition" :
@@ -197,6 +201,41 @@ function RedlineCard({
                 </div>
               )}
 
+              {/* Comment input */}
+              {showCommentInput && (
+                <div className="flex gap-1.5">
+                  <input
+                    value={commentText}
+                    onChange={e => setCommentText(e.target.value)}
+                    placeholder="Add a comment..."
+                    className="flex-1 px-2 py-1 text-[10px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-gold-400"
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        if (commentText.trim() && onComment) {
+                          onComment(redline.id, commentText.trim());
+                          setCommentText("");
+                          setShowCommentInput(false);
+                        }
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      if (commentText.trim() && onComment) {
+                        onComment(redline.id, commentText.trim());
+                        setCommentText("");
+                        setShowCommentInput(false);
+                      }
+                    }}
+                    disabled={!commentText.trim()}
+                    className="px-2 py-1 bg-gold-500 hover:bg-gold-600 disabled:bg-gray-300 text-white rounded-lg text-[10px] transition-colors"
+                  >
+                    Send
+                  </button>
+                </div>
+              )}
+
               {/* Actions */}
               {redline.status === "pending" && (
                 <div className="flex items-center gap-2 pt-1">
@@ -212,8 +251,11 @@ function RedlineCard({
                   >
                     <X className="w-3 h-3" /> Reject
                   </button>
-                  <button className="flex items-center gap-1 px-2.5 py-1 border border-gray-200 dark:border-navy-600 hover:bg-gray-50 dark:hover:bg-navy-700 rounded-md text-[10px] font-medium text-gray-600 dark:text-gray-300 transition-colors">
-                    <MessageSquare className="w-3 h-3" /> Comment
+                  <button
+                    onClick={() => setShowCommentInput(!showCommentInput)}
+                    className="flex items-center gap-1 px-2.5 py-1 border border-gray-200 dark:border-navy-600 hover:bg-gray-50 dark:hover:bg-navy-700 rounded-md text-[10px] font-medium text-gray-600 dark:text-gray-300 transition-colors"
+                  >
+                    <MessageSquare className="w-3 h-3" /> {showCommentInput ? "Cancel" : "Comment"}
                   </button>
                   <div className="flex items-center gap-1 ml-auto text-[9px] text-gray-400">
                     <User className="w-2.5 h-2.5" />
@@ -255,12 +297,17 @@ interface CenterPanelProps {
   insights: AiNegotiationInsight[];
   onRedlineAccept: (redlineId: string) => void;
   onRedlineReject: (redlineId: string) => void;
+  onCreateRedline?: () => void;
+  onAiRewrite?: () => void;
+  onRedlineComment?: (redlineId: string, body: string) => void;
+  sessionId?: string;
 }
 
 export function CenterPanel({
   clauses, redlines, activeClauseId, compareMode, panelMode,
   versions, currentVersionId, insights,
   onRedlineAccept, onRedlineReject,
+  onCreateRedline, onAiRewrite, onRedlineComment, sessionId,
 }: CenterPanelProps) {
   const [expandedRedlines, setExpandedRedlines] = useState<Set<string>>(new Set());
   const [fullscreen, setFullscreen] = useState(false);
@@ -320,6 +367,14 @@ export function CenterPanel({
               <FileText className="w-10 h-10 mx-auto mb-3 opacity-50" />
               <p className="text-sm">No redlines for this clause</p>
               <p className="text-xs mt-1">Select a different clause or create a new redline</p>
+              <div className="flex items-center justify-center gap-2 mt-3">
+                <button onClick={onCreateRedline} className="inline-flex items-center gap-1 px-2.5 py-1 bg-navy-700 hover:bg-navy-800 text-white rounded-md text-[10px] font-medium transition-colors">
+                  <PenTool className="w-3 h-3" /> Create Redline
+                </button>
+                <button onClick={onAiRewrite} className="inline-flex items-center gap-1 px-2.5 py-1 bg-purple-500 hover:bg-purple-600 text-white rounded-md text-[10px] font-medium transition-colors">
+                  <Sparkles className="w-3 h-3" /> AI Rewrite
+                </button>
+              </div>
             </div>
           ) : (
             clauseRedlines.map(redline => (
@@ -331,6 +386,8 @@ export function CenterPanel({
                 onAccept={() => onRedlineAccept(redline.id)}
                 onReject={() => onRedlineReject(redline.id)}
                 insights={insights}
+                onComment={onRedlineComment}
+                sessionId={sessionId}
               />
             ))
           )}
@@ -383,12 +440,21 @@ export function CenterPanel({
 
       {/* Diff View */}
       <div className="px-3 py-2 border-b border-gray-100 dark:border-navy-700">
-        <DiffViewer
-          original={originalContent}
-          modified={modifiedContent}
-          redlines={clauseRedlines}
-          mode={compareMode}
-        />
+        {compareMode === "track-changes" ? (
+          <TrackChangesDiffViewer
+            original={originalContent}
+            modified={modifiedContent}
+            redlines={clauseRedlines}
+            mode={compareMode}
+          />
+        ) : (
+          <DiffViewer
+            original={originalContent}
+            modified={modifiedContent}
+            redlines={clauseRedlines}
+            mode={compareMode}
+          />
+        )}
       </div>
 
       {/* Redlines for this clause */}
@@ -403,7 +469,17 @@ export function CenterPanel({
           <div className="text-center py-8 text-gray-400">
             <Check className="w-8 h-8 mx-auto mb-2 opacity-50" />
             <p className="text-xs">No redlines for this clause</p>
+            <p className="text-[10px] mt-1">Use AI Rewrite or create a manual redline</p>
+            <div className="flex items-center justify-center gap-2 mt-3">
+              <button className="inline-flex items-center gap-1 px-2 py-1 bg-purple-500 hover:bg-purple-600 text-white rounded-md text-[9px] font-medium transition-colors">
+                <Sparkles className="w-2.5 h-2.5" /> AI Rewrite
+              </button>
+              <button className="inline-flex items-center gap-1 px-2 py-1 bg-navy-700 hover:bg-navy-800 text-white rounded-md text-[9px] font-medium transition-colors">
+                <PenTool className="w-2.5 h-2.5" /> Create Redline
+              </button>
+            </div>
           </div>
+
         ) : (
           clauseRedlines.map(redline => (
             <RedlineCard

@@ -9,6 +9,7 @@ import {
   X, Maximize2, Minimize2, Loader2,
 } from "lucide-react";
 import type { AiNegotiationInsight, NegotiationPlaybook, FallbackClause, NegotiationAnalytics } from "./types";
+import { negotiationsService } from "@/services/api/negotiations";
 
 // ── AI Insight Card ──────────────────────────────────────────────────────
 
@@ -190,40 +191,16 @@ interface RightPanelProps {
   analytics: NegotiationAnalytics;
   onApplyInsight: (insight: AiNegotiationInsight) => void;
   onApplyFallback: (fb: FallbackClause) => void;
+  sessionId?: string;
 }
 
 type RightTab = "copilot" | "insights" | "fallbacks" | "analytics";
 
 export function RightPanel({
-  insights, playbooks, analytics, onApplyInsight, onApplyFallback,
+  insights, playbooks, analytics, onApplyInsight, onApplyFallback, sessionId,
 }: RightPanelProps) {
   const [activeTab, setActiveTab] = useState<RightTab>("copilot");
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      content: "I've analyzed this contract against your playbooks. Here are your top negotiation opportunities:",
-      timestamp: new Date(),
-    },
-    {
-      id: "opp-1",
-      role: "assistant",
-      content: "🔴 **Liability Cap** — 82% success rate\nCurrent 24-month cap is above market median. Consider offering 18-month compromise with full carve-out protection.",
-      timestamp: new Date(),
-    },
-    {
-      id: "opp-2",
-      role: "assistant",
-      content: "🟡 **Indemnification** — 74% success rate\n3-year survival period is above market. Vendor may accept 2-year compromise with sunset clause.",
-      timestamp: new Date(),
-    },
-    {
-      id: "opp-3",
-      role: "assistant",
-      content: "🟢 **Termination** — 68% success rate\nNo-early-termination-fee language is strong leverage. 85% of enterprise buyers successfully include this.",
-      timestamp: new Date(),
-    },
-  ]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -232,7 +209,7 @@ export function RightPanel({
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!chatInput.trim() || isStreaming) return;
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -244,30 +221,72 @@ export function RightPanel({
     setChatInput("");
     setIsStreaming(true);
 
-    // Simulate AI response
-    setTimeout(() => {
-      const responses: Record<string, string> = {
-        "liability": "The 24-month liability cap is in the 75th percentile for enterprise SaaS. I recommend offering an 18-month compromise with full carve-out protection. This approach has an 82% success rate in similar negotiations.",
-        "indemnification": "The 3-year survival period is above market median (2 years). Vendor's pushback is expected. Consider a 2-year compromise with a sunset clause for pre-existing claims.",
-        "sla": "The enhanced SLA credits (10%/20%/50%) are aggressive but defensible given platform criticality. The termination right for sustained failure is your strongest leverage point.",
-        "default": "I've analyzed this clause against your playbook and market benchmarks. The recommended approach is to maintain your position while offering a reasonable compromise on secondary terms. Would you like me to generate specific fallback language?",
-      };
-      const matchedKey = Object.keys(responses).find(k => chatInput.toLowerCase().includes(k));
-      const responseText = responses[matchedKey || "default"];
+    try {
+      // Use the first available clause ID from insights or a fallback
+      const clauseId = insights[0]?.clauseId || "default";
+      const response = await negotiationsService.aiCoach(
+        sessionId || "",
+        clauseId,
+        {
+          clause_text: chatInput.trim(),
+          question: chatInput.trim(),
+        },
+      );
+
       const aiMsg: ChatMessage = {
         id: `ai-${Date.now()}`,
         role: "assistant",
-        content: responseText,
+        content: response.explanation || "I've analyzed the clause. See the risks and recommendations above.",
         timestamp: new Date(),
         citations: [
-          { text: "Market data from 500+ enterprise SaaS agreements", source: "Benchmark Database" },
-          { text: "Negotiation playbook v2.3", source: "Corporate Legal" },
+          ...(response.risks?.length
+            ? [{ text: `Risks identified: ${response.risks.join(", ")}`, source: "AI Coach" }]
+            : []),
+          ...(response.policy_conflicts?.length
+            ? [{ text: `Policy conflicts: ${response.policy_conflicts.join(", ")}`, source: "Policy Engine" }]
+            : []),
         ],
       };
       setChatMessages(prev => [...prev, aiMsg]);
+    } catch (error) {
+      const errorMsg: ChatMessage = {
+        id: `ai-${Date.now()}`,
+        role: "assistant",
+        content: "Sorry, I encountered an error analyzing that. Please try again or contact support.",
+        timestamp: new Date(),
+      };
+      setChatMessages(prev => [...prev, errorMsg]);
+    } finally {
       setIsStreaming(false);
-    }, 1500);
+    }
   };
+
+  // Add welcome message on mount / session change using analytics data
+  useEffect(() => {
+    if (chatMessages.length === 0) {
+      const topDisputes = analytics.clauseDisputeFrequency
+        .slice(0, 3)
+        .map(d => d.clause)
+        .join(", ");
+
+      const welcomeContent = analytics.totalSessions > 0
+        ? `I've analyzed this contract against your playbooks. ` +
+          `${analytics.totalSessions} similar sessions on record, ` +
+          `${analytics.concessionRate}% avg concession rate.` +
+          (topDisputes ? ` Key areas: ${topDisputes}.` : "") +
+          ` How can I help?`
+        : `Welcome! I'm your AI negotiation copilot. I can help analyze clauses, ` +
+          `identify risks, and suggest fallback language. What would you like to explore?`;
+
+      const welcomeMsg: ChatMessage = {
+        id: "welcome",
+        role: "assistant",
+        content: welcomeContent,
+        timestamp: new Date(),
+      };
+      setChatMessages([welcomeMsg]);
+    }
+  }, [analytics, chatMessages.length]);
 
   const tabs: { id: RightTab; label: string; icon: React.ReactNode }[] = [
     { id: "copilot", label: "AI Copilot", icon: <Brain className="w-3.5 h-3.5" /> },

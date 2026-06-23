@@ -774,6 +774,30 @@ export async function getValidToken(): Promise<string | null> {
   return null;
 }
 
+// ── Path normalization ────────────────────────────────────────────
+// FastAPI routes registered as @router.get("/") redirect `/resource` →
+// `/resource/` with an absolute backend URL. When the browser follows that
+// redirect from the Next.js proxy (localhost:3000), it becomes cross-origin
+// and CORS blocks the response. Ensure single-segment collection paths use a
+// trailing slash before the query string (e.g. `/search/?q=foo`).
+
+function normalizeApiPath(path: string): string {
+  const qIndex = path.indexOf("?");
+  const pathname = qIndex >= 0 ? path.slice(0, qIndex) : path;
+  const query = qIndex >= 0 ? path.slice(qIndex) : "";
+
+  if (pathname.endsWith("/")) {
+    return path;
+  }
+
+  const segments = pathname.split("/").filter(Boolean);
+  if (segments.length === 1) {
+    return `/${segments[0]}/${query}`;
+  }
+
+  return path;
+}
+
 // ── Core Request Function ─────────────────────────────────────────
 
 interface RequestOptions {
@@ -830,8 +854,10 @@ async function request<T>(
     ? combineSignals(externalSignal, controller.signal)
     : controller.signal;
 
+  const normalizedPath = normalizeApiPath(path);
+
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetch(`${API_BASE}${normalizedPath}`, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
@@ -917,8 +943,9 @@ async function requestWithRetry<T>(
   // Mutations (POST, PUT, PATCH, DELETE) are never coalesced.
   const method = options.method ?? "GET";
   if (method === "GET" && options.coalesce !== false) {
+    const normalizedPath = normalizeApiPath(path);
     return requestCoalescer.dedup(
-      `${API_BASE}${path}`,
+      `${API_BASE}${normalizedPath}`,
       () => executeWithRetry<T>(path, options, maxRetries),
       { method: "GET", signal: options.signal },
     );

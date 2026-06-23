@@ -2,7 +2,7 @@
 
 import React, { useMemo } from "react";
 import { motion } from "framer-motion";
-import { Plus, Minus, Pencil, AlertTriangle, Info, Brain } from "lucide-react";
+import { Plus, Minus, Pencil, AlertTriangle, Info, Brain, Eye } from "lucide-react";
 import type { DiffBlock, RedlineEntry, CompareMode, RiskLevel } from "./types";
 
 // ── Sentence-Aware Semantic Diff Engine ─────────────────────────────────
@@ -463,3 +463,198 @@ export function ClauseDiffSummary({ redlines }: { redlines: RedlineEntry[] }) {
 // ── Re-export computeDiff for use by other components ────────────────────
 
 export { computeDiff };
+
+
+// ══════════════════════════════════════════════════════════════════════════
+// Word-Style Track Changes Rendering
+// ── Insertions in green underline
+// ── Deletions in red strikethrough
+// ── Modified text highlighted yellow
+// ══════════════════════════════════════════════════════════════════════════
+
+function computeWordLevelChanges(original: string, modified: string): {
+  segments: { text: string; type: "unchanged" | "inserted" | "deleted" | "modified" }[];
+  stats: { insertions: number; deletions: number; modifications: number };
+} {
+  const origWords = original.split(/(\s+)/);
+  const modWords = modified.split(/(\s+)/);
+
+  // LCS on word level
+  const m = origWords.length, n = modWords.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (origWords[i - 1].toLowerCase() === modWords[j - 1].toLowerCase()) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  // Trace back
+  const rev: { text: string; type: "unchanged" | "inserted" | "deleted" }[] = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && origWords[i - 1].toLowerCase() === modWords[j - 1].toLowerCase()) {
+      rev.push({ text: origWords[i - 1], type: "unchanged" });
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      rev.push({ text: modWords[j - 1], type: "inserted" });
+      j--;
+    } else {
+      rev.push({ text: origWords[i - 1], type: "deleted" });
+      i--;
+    }
+  }
+  const raw = rev.reverse();
+
+  // Merge adjacent same-type segments
+  const merged: { text: string; type: "unchanged" | "inserted" | "deleted" | "modified" }[] = [];
+  for (const seg of raw) {
+    const last = merged[merged.length - 1];
+    if (last && last.type === seg.type) {
+      last.text += seg.text;
+    } else {
+      merged.push({ ...seg });
+    }
+  }
+
+  // Convert deleted+inserted pairs to "modified" when adjacent
+  const final: typeof merged = [];
+  for (let idx = 0; idx < merged.length; idx++) {
+    const seg = merged[idx];
+    if (seg.type === "deleted" && idx + 1 < merged.length && merged[idx + 1].type === "inserted") {
+      final.push({ text: seg.text + merged[idx + 1].text, type: "modified" });
+      idx++;
+    } else {
+      final.push(seg);
+    }
+  }
+
+  const stats = {
+    insertions: raw.filter(s => s.type === "inserted").length,
+    deletions: raw.filter(s => s.type === "deleted").length,
+    modifications: final.filter(s => s.type === "modified").length,
+  };
+
+  return { segments: final, stats };
+}
+
+
+export function TrackChangesView({ original, modified }: { original: string; modified: string }) {
+  const { segments, stats } = useMemo(
+    () => computeWordLevelChanges(original, modified),
+    [original, modified],
+  );
+
+  return (
+    <div className="border border-gray-200 dark:border-navy-600 rounded-lg overflow-hidden bg-white dark:bg-navy-800">
+      <div className="px-3 py-1.5 bg-gray-100 dark:bg-navy-800 border-b border-gray-200 dark:border-navy-700 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+          <Eye className="w-3 h-3" />
+          Track Changes
+        </div>
+        <div className="flex items-center gap-2 text-[9px] text-gray-400">
+          <span className="text-green-600 font-medium">+{stats.insertions} insertions</span>
+          <span className="text-red-600 font-medium">-{stats.deletions} deletions</span>
+          <span className="text-amber-600 font-medium">~{stats.modifications} modified</span>
+        </div>
+      </div>
+      <div className="p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">
+        {segments.length === 0 ? (
+          <span className="text-gray-400 italic">No changes</span>
+        ) : (
+          segments.map((seg, idx) => {
+            if (seg.type === "unchanged") {
+              return <span key={idx} className="text-gray-800 dark:text-gray-200">{seg.text}</span>;
+            }
+            if (seg.type === "inserted") {
+              return (
+                <span
+                  key={idx}
+                  className="text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 rounded-sm underline decoration-green-500 decoration-2 underline-offset-2"
+                  title="Inserted"
+                >
+                  {seg.text}
+                </span>
+              );
+            }
+            if (seg.type === "deleted") {
+              return (
+                <span
+                  key={idx}
+                  className="text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30 rounded-sm line-through decoration-red-500 decoration-2"
+                  title="Deleted"
+                >
+                  {seg.text}
+                </span>
+              );
+            }
+            if (seg.type === "modified") {
+              return (
+                <span
+                  key={idx}
+                  className="text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 rounded-sm"
+                  title="Modified"
+                >
+                  {seg.text}
+                </span>
+              );
+            }
+            return <span key={idx}>{seg.text}</span>;
+          })
+        )}
+      </div>
+      {/* Legend */}
+      <div className="px-3 py-1.5 bg-gray-50 dark:bg-navy-900 border-t border-gray-100 dark:border-navy-700 flex items-center gap-3 text-[9px] text-gray-400">
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-3 h-3 bg-green-100 border border-green-500 rounded" />
+          Insertion
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-3 h-3 bg-red-100 border border-red-500 rounded line-through" />
+          Deletion
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-3 h-3 bg-amber-100 border border-amber-500 rounded" />
+          Modified
+        </span>
+      </div>
+    </div>
+  );
+}
+
+
+// ── Track Changes Diff Viewer (drop-in replacement for DiffViewer) ───────
+
+export function TrackChangesDiffViewer({
+  original, modified, redlines, mode, clauseTitle, riskLevel,
+}: DiffViewerProps) {
+  // In "track-changes" mode, show the Word-style view
+  if (mode === "inline") {
+    return (
+      <div className="space-y-2">
+        {clauseTitle && (
+          <div className="flex items-center gap-2 px-1">
+            <h4 className="text-sm font-semibold text-navy-900 dark:text-white">{clauseTitle}</h4>
+            {riskLevel && riskLevel !== "low" && (
+              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                riskLevel === "critical" ? "bg-red-100 text-red-700" :
+                riskLevel === "high" ? "bg-orange-100 text-orange-700" :
+                "bg-yellow-100 text-yellow-700"
+              }`}>
+                <AlertTriangle className="w-2.5 h-2.5" />
+                {riskLevel.toUpperCase()}
+              </span>
+            )}
+          </div>
+        )}
+        <TrackChangesView original={original} modified={modified} />
+      </div>
+    );
+  }
+  // Fall back to existing modes for side-by-side and unified
+  if (mode === "side-by-side") return <SideBySideCompare original={original} modified={modified} redlines={redlines} />;
+  return <UnifiedDiff original={original} modified={modified} />;
+}

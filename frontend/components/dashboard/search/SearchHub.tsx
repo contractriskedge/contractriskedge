@@ -84,7 +84,9 @@ function toSearchResult(item: SearchResultItem, index: number): SearchResult {
       chunk_id: item.chunk_id,
       entity_id: item.entity_id ?? "",
       entity_type: entityType,
-      contract_id: item.contract_id ?? "",
+      review_id: item.review_id ?? item.contract_id ?? "",
+      contract_id: item.review_id ?? item.contract_id ?? "",
+      upload_id: item.upload_id ?? "",
       contract_number: item.contract_number ?? "",
       strategy: item.strategy,
       page_numbers: item.page_numbers.join(", "),
@@ -99,6 +101,30 @@ function toSearchResult(item: SearchResultItem, index: number): SearchResult {
     keywordScore: item.strategy === "keyword" || item.strategy === "hybrid" ? item.score : undefined,
     hybridScore: item.strategy === "hybrid" ? item.score : undefined,
   };
+}
+
+function getSearchResultHref(result: SearchResult): string | null {
+  const meta = result.metadata ?? {};
+  const entityType = String(meta.entity_type || result.type);
+  const reviewId = String(meta.review_id || meta.contract_id || "");
+  const entityId = String(meta.entity_id || "");
+
+  if (entityType === "obligation" && entityId) {
+    return `/obligations/${entityId}`;
+  }
+  if (entityType === "finding" && reviewId) {
+    const params = new URLSearchParams({ reviewId });
+    if (entityId) params.set("findingId", entityId);
+    return `/reviews/ai-workspace?${params.toString()}`;
+  }
+  if (reviewId) {
+    return `/contracts/${reviewId}`;
+  }
+  return null;
+}
+
+function stripSyntheticId(id: string): string {
+  return id.replace(/^(ilike-|finding-|obligation-)/, "");
 }
 
 // ── Default KPI cards (derived from search data) ────────────────
@@ -149,7 +175,7 @@ function buildKpis(totalResults: number, avgScore: number, queryCount: number): 
 export function SearchHub() {
   const router = useRouter();
 
-  // Core search state
+  // Core search state — read initial query from URL ?q= param
   const [query, setQuery] = useState("");
   const [searchMode, setSearchMode] = useState<SearchMode>("hybrid");
   const [activeCategory, setActiveCategory] = useState("all");
@@ -182,6 +208,16 @@ export function SearchHub() {
   const { data: popularData } = usePopularQueries();
   const { data: pulseData } = useSearchPulse();
   const trackClick = useTrackSearchClick();
+
+  // ── Read ?q= from URL on mount ───────────────────────────────
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("q");
+    if (q) {
+      setQuery(q);
+    }
+  }, []);
 
   // ── Debounce query input ──────────────────────────────────────
 
@@ -295,24 +331,29 @@ export function SearchHub() {
 
   const handleResultSelect = useCallback((result: SearchResult) => {
     setSelectedResultId((prev) => (prev === result.id ? null : result.id));
-    // Track the click
+    const position = results.findIndex((r) => r.id === result.id);
+    const entityType = String(result.metadata?.entity_type || result.type);
+    const entityId = stripSyntheticId(String(result.metadata?.entity_id || result.id));
+
     trackClick.mutate({
       query: debouncedQuery ?? "",
-      result_id: result.id,
-      position: results.findIndex((r) => r.id === result.id) + 1,
+      result_position: Math.max(position, 0),
+      entity_type: entityType,
+      entity_id: entityId,
+      chunk_id: entityType === "chunk" ? stripSyntheticId(String(result.metadata?.chunk_id || result.id)) : undefined,
+      score: result.confidence,
     });
-    // Navigate to the contract detail page
-    const contractId = result.metadata?.contract_id || result.metadata?.entity_id;
-    if (contractId) {
-      router.push(`/contracts/${contractId}`);
+
+    const href = getSearchResultHref(result);
+    if (href) {
+      router.push(href);
     }
   }, [debouncedQuery, results, trackClick, router]);
 
   const handlePreview = useCallback((result: SearchResult) => {
-    // Navigate to the contract detail page for quick access
-    const contractId = result.metadata?.contract_id || result.metadata?.entity_id;
-    if (contractId) {
-      router.push(`/contracts/${contractId}`);
+    const href = getSearchResultHref(result);
+    if (href) {
+      router.push(href);
     }
   }, [router]);
 

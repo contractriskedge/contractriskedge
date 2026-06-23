@@ -59,12 +59,12 @@ def get_workflow_engine() -> Optional[WorkflowExecutionEngine]:
 
 logger = logging.getLogger(__name__)
 
-# Valid stage transitions
+# Valid stage transitions — allows forward progression and reasonable skips
 STAGE_TRANSITIONS = {
-    "drafting": ["review"],
-    "review": ["negotiating", "approved"],
-    "negotiating": ["review", "approved", "escalated"],
-    "approved": ["executed"],
+    "drafting": ["review", "negotiating"],
+    "review": ["negotiating", "approved", "drafting"],
+    "negotiating": ["review", "approved", "escalated", "drafting"],
+    "approved": ["executed", "negotiating", "review", "drafting"],
     "executed": [],
     "escalated": ["negotiating", "approved"],
 }
@@ -127,7 +127,151 @@ class NegotiationService:
         # Start a workflow instance for this negotiation
         await self._sync_workflow(session_id, "drafting", body.contract_title)
 
+        if body.contract_id:
+            try:
+                await self.import_from_review(session_id, body.contract_id)
+            except Exception:
+                logger.exception(
+                    "Failed to import review %s into session %s",
+                    body.contract_id[:8] if body.contract_id else "?",
+                    session_id[:8],
+                )
+
         return await self._build_session_response(session_id)
+
+    async def _session_needs_import(self, session_id: str, review_id: Optional[str] = None) -> bool:
+        """True when a review-linked session has not yet received redlines."""
+        session = await self.repo.get_session(session_id)
+        if not session or not session.contract_id:
+            return False
+        if review_id and session.contract_id != review_id:
+            return False
+        return not session.redlines
+
+    async def import_from_review(self, session_id: str, review_id: str) -> dict[str, Any]:
+        """Import findings, redlines, and clause snapshots from an AI review.
+
+        Idempotent: skips when redlines already exist on the session.
+        """
+        if not await self._session_needs_import(session_id, review_id):
+            return {"imported": False, "reason": "already_populated"}
+
+        from app.domains.negotiation.review_import import (
+            build_clauses_from_findings,
+            build_extra_clauses_from_redlines,
+            load_review_import_data,
+            map_finding_to_issue,
+            map_review_redline,
+        )
+        from app.domains.review.repository import ReviewRepository
+
+        review_repo = ReviewRepository(self.repo.session, self.tenant_id)
+        findings, redlines = await load_review_import_data(
+            review_repo, review_id, self.tenant_id,
+        )
+
+        finding_by_id = {str(f.finding_id): f for f in findings}
+        clauses = build_clauses_from_findings(findings)
+        clause_ids = {c["clause_id"] for c in clauses}
+        clauses.extend(build_extra_clauses_from_redlines(redlines, clause_ids))
+
+        session = await self.repo.get_session(session_id)
+        if not session:
+            return {"imported": False, "reason": "session_not_found"}
+
+        current_version = None
+        for v in session.versions or []:
+            if v.status == VersionStatus.CURRENT.value:
+                current_version = v
+                break
+
+        if current_version:
+            await self.repo.update_version_clauses(
+                current_version.version_id,
+                clauses,
+                change_summary=f"Imported from AI review ({len(findings)} findings, {len(redlines)} redlines)",
+                label="AI Review Import",
+            )
+
+        issues_created = 0
+        if not session.issues:
+            for finding in findings:
+                if finding.resolution in ("resolved", "dismissed", "false_positive"):
+                    continue
+                await self.repo.create_issue(
+                    map_finding_to_issue(session_id, finding, self.actor_id)
+                )
+                issues_created += 1
+
+        for redline in redlines:
+            finding = finding_by_id.get(str(redline.finding_id)) if redline.finding_id else None
+            await self.repo.create_redline(
+                map_review_redline(session_id, redline, finding, self.actor_id)
+            )
+
+        await self.repo.log_audit(
+            session_id=session_id,
+            event_type="negotiation.review_imported",
+            actor_id=self.actor_id,
+            new_state={
+                "review_id": review_id,
+                "clauses": len(clauses),
+                "redlines": len(redlines),
+                "issues": issues_created,
+            },
+            change_summary=(
+                f"Imported {len(redlines)} redlines and {len(findings)} findings from AI review"
+            ),
+        )
+
+        return {
+            "imported": True,
+            "clauses": len(clauses),
+            "redlines": len(redlines),
+            "issues": issues_created,
+        }
+
+    async def resume_or_create_from_review(
+        self,
+        review_id: str,
+        counterparty: Optional[str] = None,
+    ) -> NegotiationSessionResponse:
+        """Find or create a negotiation session for a review and import review data."""
+        from app.domains.ingestion.models import UploadSession
+        from app.domains.review.models import ContractReview
+        from app.domains.review.repository import ReviewRepository
+        from sqlalchemy import select
+
+        review_repo = ReviewRepository(self.repo.session, self.tenant_id)
+        review = await review_repo.get_review(review_id, self.tenant_id)
+        if not review:
+            raise ValueError(f"Review {review_id} not found")
+
+        existing = await self.repo.get_latest_session_for_contract(review_id)
+        if existing:
+            if await self._session_needs_import(existing.session_id, review_id):
+                await self.import_from_review(existing.session_id, review_id)
+            result = await self._build_session_response(existing.session_id)
+            if not result:
+                raise ValueError(f"Session {existing.session_id} not found")
+            return result
+
+        review_row = await self.repo.session.execute(
+            select(ContractReview, UploadSession.filename)
+            .outerjoin(UploadSession, ContractReview.upload_id == UploadSession.upload_id)
+            .where(ContractReview.review_id == review_id)
+        )
+        row = review_row.one_or_none()
+        filename = row[1] if row else None
+        contract_title = filename or f"Review {review_id[:8]}"
+
+        return await self.create_session(
+            NegotiationCreateRequest(
+                contract_id=review_id,
+                contract_title=contract_title,
+                counterparty=counterparty or "",
+            )
+        )
 
     async def get_session(self, session_id: str) -> Optional[NegotiationSessionResponse]:
         """Get full session detail with all children."""
@@ -157,41 +301,64 @@ class NegotiationService:
         return summaries, total
 
     async def update_session(
-        self, session_id: str, body: NegotiationUpdateRequest
+        self, session_id: str, body: Optional[NegotiationUpdateRequest] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> Optional[NegotiationSessionResponse]:
-        """Update session stage and/or health score."""
+        """Update session stage, health score, and/or metadata.
+
+        Args:
+            session_id: The session to update.
+            body: Optional NegotiationUpdateRequest with stage/health_score changes.
+            metadata: Optional metadata dict to merge into the session's metadata_json.
+        """
         kwargs = {}
-        if body.stage is not None:
-            # Validate stage transition
+
+        # Handle metadata updates — merge with existing
+        if metadata is not None:
             current = await self.repo.get_session(session_id)
             if not current:
                 return None
-            if body.stage not in STAGE_TRANSITIONS.get(current.stage, []):
-                allowed = STAGE_TRANSITIONS.get(current.stage, [])
-                raise ValueError(
-                    f"Cannot transition from '{current.stage}' to '{body.stage}'. "
-                    f"Allowed transitions: {allowed}"
-                )
-            kwargs["stage"] = body.stage
-            if body.stage in ("approved", "executed"):
-                kwargs["completed_at"] = datetime.now(timezone.utc)
+            merged = {**(current.metadata_json or {}), **metadata}
+            kwargs["metadata_json"] = merged
 
-            await self.repo.log_audit(
-                session_id=session_id,
-                event_type="negotiation.stage_changed",
-                actor_id=self.actor_id,
-                previous_state={"stage": current.stage},
-                new_state={"stage": body.stage},
-                change_summary=f"Stage changed from {current.stage} to {body.stage}",
-            )
+        if body is not None:
+            if body.stage is not None:
+                # Validate stage transition
+                current = await self.repo.get_session(session_id)
+                if not current:
+                    return None
+                if body.stage not in STAGE_TRANSITIONS.get(current.stage, []):
+                    allowed = STAGE_TRANSITIONS.get(current.stage, [])
+                    raise ValueError(
+                        f"Cannot transition from '{current.stage}' to '{body.stage}'. "
+                        f"Allowed transitions: {allowed}"
+                    )
+                kwargs["stage"] = body.stage
+                if body.stage in ("approved", "executed"):
+                    kwargs["completed_at"] = datetime.now(timezone.utc)
 
-            # Sync workflow on stage change
-            await self._sync_workflow(
-                session_id, body.stage, current.contract_title
-            )
+                try:
+                    await self.repo.log_audit(
+                        session_id=session_id,
+                        event_type="negotiation.stage_changed",
+                        actor_id=self.actor_id,
+                        previous_state={"stage": current.stage},
+                        new_state={"stage": body.stage},
+                        change_summary=f"Stage changed from {current.stage} to {body.stage}",
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to log audit for stage change: {e}")
 
-        if body.health_score is not None:
-            kwargs["health_score"] = body.health_score
+                # Sync workflow on stage change (fire-and-forget)
+                try:
+                    await self._sync_workflow(
+                        session_id, body.stage, current.contract_title
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to sync workflow for stage change: {e}")
+
+            if body.health_score is not None:
+                kwargs["health_score"] = body.health_score
 
         if not kwargs:
             return await self._build_session_response(session_id)
@@ -752,6 +919,7 @@ class NegotiationService:
             healthScore=session.health_score,
             startedAt=session.started_at,
             updatedAt=session.updated_at,
+            metadata=session.metadata_json or {},
         )
 
     def _redline_to_dict(self, r: NegotiationRedline) -> dict[str, Any]:
@@ -909,18 +1077,21 @@ async def on_review_finalized(event) -> None:
             contract_title = filename or f"Review {review_id[:8]}"
 
             # Check if a negotiation session already exists for this review
-            existing = await session.execute(
-                select(NegotiationSession.session_id)
-                .where(
-                    NegotiationSession.tenant_id == tenant_id,
-                    NegotiationSession.contract_id == review_id,
-                )
-            )
-            if existing.scalar_one_or_none():
-                logger.info(
-                    "Negotiation session already exists for review %s — skipping",
-                    review_id[:8],
-                )
+            existing = await repo.get_latest_session_for_contract(review_id)
+            if existing:
+                if await svc._session_needs_import(existing.session_id, review_id):
+                    await svc.import_from_review(existing.session_id, review_id)
+                    await session.commit()
+                    logger.info(
+                        "Imported review data into existing negotiation session %s for review %s",
+                        existing.session_id[:8],
+                        review_id[:8],
+                    )
+                else:
+                    logger.info(
+                        "Negotiation session already exists for review %s — skipping",
+                        review_id[:8],
+                    )
                 return
 
             # Create the negotiation session

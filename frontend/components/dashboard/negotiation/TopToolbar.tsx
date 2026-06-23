@@ -6,7 +6,8 @@ import {
   ArrowLeftRight, Check, X, Sparkles, UserPlus, Download, Clock,
   Shield, AlertTriangle, GitBranch, FileText, Eye, Edit3,
   Columns, AlignLeft, FileDiff, MoreHorizontal, Play, Pause,
-  ChevronDown, Search, SlidersHorizontal,
+  ChevronDown, Search, SlidersHorizontal, Highlighter,
+  Archive, Copy, Lock, Unlock,
 } from "lucide-react";
 import type { CompareMode, PanelMode, NegotiationWorkflow, NegotiationStage } from "./types";
 
@@ -24,14 +25,17 @@ interface TopToolbarProps {
   onExport: () => void;
   onAssignReviewer: () => void;
   onStageChange: (stage: NegotiationStage) => void;
+  onSessionAction?: (action: "archive" | "clone" | "lock" | "unlock") => void;
 }
 
 export function TopToolbar({
   contractTitle, counterparty, compareMode, panelMode, workflow,
   onCompareModeChange, onPanelModeChange, onGenerateAiRedlines,
   onApproveAll, onRejectAll, onExport, onAssignReviewer, onStageChange,
+  onSessionAction,
 }: TopToolbarProps) {
   const [showWorkflowMenu, setShowWorkflowMenu] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
 
   const stageColors: Record<NegotiationStage, string> = {
     drafting: "bg-gray-100 text-gray-600 dark:bg-navy-700 dark:text-gray-400",
@@ -115,6 +119,13 @@ export function TopToolbar({
           {/* Compare Mode Toggle */}
           <div className="flex items-center border border-gray-200 dark:border-navy-600 rounded-md overflow-hidden">
             <button
+              onClick={() => onCompareModeChange("track-changes")}
+              className={`p-1.5 ${compareMode === "track-changes" ? "bg-navy-100 dark:bg-navy-600 text-navy-700 dark:text-white" : "text-gray-400 hover:text-navy-600 dark:hover:text-gray-300"} transition-colors`}
+              title="Track Changes (Word-style)"
+            >
+              <Highlighter className="w-3.5 h-3.5" />
+            </button>
+            <button
               onClick={() => onCompareModeChange("side-by-side")}
               className={`p-1.5 ${compareMode === "side-by-side" ? "bg-navy-100 dark:bg-navy-600 text-navy-700 dark:text-white" : "text-gray-400 hover:text-navy-600 dark:hover:text-gray-300"} transition-colors`}
               title="Side by side"
@@ -195,10 +206,44 @@ export function TopToolbar({
             <Download className="w-3.5 h-3.5" />
           </button>
 
-          {/* More */}
-          <button className="p-1.5 text-gray-400 hover:text-navy-600 dark:hover:text-gray-300 rounded-md transition-colors">
-            <MoreHorizontal className="w-3.5 h-3.5" />
-          </button>
+          {/* Session Actions */}
+          <div className="relative">
+            <button
+              onClick={() => setShowMoreMenu(!showMoreMenu)}
+              className="p-1.5 text-gray-400 hover:text-navy-600 dark:hover:text-gray-300 rounded-md transition-colors"
+              title="Session actions"
+            >
+              <MoreHorizontal className="w-3.5 h-3.5" />
+            </button>
+            {showMoreMenu && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="absolute top-full right-0 mt-1 bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-600 rounded-lg shadow-lg z-10 py-1 w-36"
+              >
+                <button onClick={() => { setShowMoreMenu(false); onSessionAction?.("archive"); }}
+                  className="w-full text-left px-3 py-1.5 text-[10px] hover:bg-gray-50 dark:hover:bg-navy-700 flex items-center gap-1.5 text-gray-600 dark:text-gray-300"
+                >
+                  <Archive className="w-3 h-3" /> Archive
+                </button>
+                <button onClick={() => { setShowMoreMenu(false); onSessionAction?.("clone"); }}
+                  className="w-full text-left px-3 py-1.5 text-[10px] hover:bg-gray-50 dark:hover:bg-navy-700 flex items-center gap-1.5 text-gray-600 dark:text-gray-300"
+                >
+                  <Copy className="w-3 h-3" /> Clone
+                </button>
+                <button onClick={() => { setShowMoreMenu(false); onSessionAction?.("lock"); }}
+                  className="w-full text-left px-3 py-1.5 text-[10px] hover:bg-gray-50 dark:hover:bg-navy-700 flex items-center gap-1.5 text-gray-600 dark:text-gray-300"
+                >
+                  <Lock className="w-3 h-3" /> Lock
+                </button>
+                <button onClick={() => { setShowMoreMenu(false); onSessionAction?.("unlock"); }}
+                  className="w-full text-left px-3 py-1.5 text-[10px] hover:bg-gray-50 dark:hover:bg-navy-700 flex items-center gap-1.5 text-gray-600 dark:text-gray-300"
+                >
+                  <Unlock className="w-3 h-3" /> Unlock
+                </button>
+              </motion.div>
+            )}
+          </div>
         </div>
       </div>
 

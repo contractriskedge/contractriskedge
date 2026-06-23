@@ -4,23 +4,33 @@ import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X, AlertTriangle, User, Calendar, Clock, MessageSquare, Flag,
-  ArrowUpCircle, CheckCircle, Tag, Paperclip, Send, ChevronDown,
-  ChevronRight, MoreHorizontal,
+  ArrowUpCircle, CheckCircle, Tag, Send, Loader2,
 } from "lucide-react";
-import type { NegotiationIssue, CommentItem } from "./types";
+import type { NegotiationIssue } from "./types";
+import { negotiationsService } from "@/services/api/negotiations";
 
 // ── Issue Detail Drawer ──────────────────────────────────────────────────
 
 interface IssueDetailDrawerProps {
   issue: NegotiationIssue | null;
+  sessionId: string;
   isOpen: boolean;
   onClose: () => void;
   onStatusChange: (issueId: string, status: string) => void;
   onEscalate: (issueId: string) => void;
+  onCommentAdded?: () => void;
 }
 
-export function IssueDetailDrawer({ issue, isOpen, onClose, onStatusChange, onEscalate }: IssueDetailDrawerProps) {
+export function IssueDetailDrawer({
+  issue, sessionId, isOpen, onClose, onStatusChange, onEscalate, onCommentAdded,
+}: IssueDetailDrawerProps) {
   const [commentText, setCommentText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [localComments, setLocalComments] = useState(issue?.comments ?? []);
+
+  React.useEffect(() => {
+    setLocalComments(issue?.comments ?? []);
+  }, [issue]);
 
   if (!issue) return null;
 
@@ -40,11 +50,48 @@ export function IssueDetailDrawer({ issue, isOpen, onClose, onStatusChange, onEs
     accepted: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
   };
 
+  const handleSendComment = async () => {
+    if (!commentText.trim() || !sessionId) return;
+    setSending(true);
+    try {
+      const created = await negotiationsService.createComment(sessionId, {
+        issueId: issue.id,
+        clauseId: issue.clauseId,
+        content: commentText.trim(),
+      });
+      setLocalComments(prev => [...prev, {
+        id: (created as any).id || crypto.randomUUID(),
+        author: (created as any).author || "You",
+        authorAvatar: ((created as any).author || "Y")[0],
+        authorRole: "",
+        content: commentText.trim(),
+        timestamp: new Date().toISOString(),
+        status: "active",
+        mentions: [],
+        replies: [],
+      }]);
+      setCommentText("");
+      onCommentAdded?.();
+    } catch {
+      // fallback: store as clause comment if issue comment fails
+      if (issue.clauseId) {
+        try {
+          await negotiationsService.addClauseComment(sessionId, issue.clauseId, {
+            body: commentText.trim(),
+          });
+          setCommentText("");
+          onCommentAdded?.();
+        } catch { /* ignore */ }
+      }
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
     <AnimatePresence>
       {isOpen && (
         <>
-          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -53,7 +100,6 @@ export function IssueDetailDrawer({ issue, isOpen, onClose, onStatusChange, onEs
             onClick={onClose}
           />
 
-          {/* Drawer */}
           <motion.div
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
@@ -61,7 +107,6 @@ export function IssueDetailDrawer({ issue, isOpen, onClose, onStatusChange, onEs
             transition={{ type: "spring", damping: 25, stiffness: 200 }}
             className="fixed right-0 top-0 bottom-0 w-96 bg-white dark:bg-navy-800 border-l border-gray-200 dark:border-navy-700 shadow-2xl z-50 flex flex-col"
           >
-            {/* Header */}
             <div className="px-4 py-3 border-b border-gray-200 dark:border-navy-700 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <AlertTriangle className={`w-4 h-4 ${
@@ -78,9 +123,7 @@ export function IssueDetailDrawer({ issue, isOpen, onClose, onStatusChange, onEs
               </button>
             </div>
 
-            {/* Content */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {/* Title & Status */}
               <div>
                 <h4 className="text-sm font-semibold text-navy-900 dark:text-white mb-2">{issue.title}</h4>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -101,13 +144,11 @@ export function IssueDetailDrawer({ issue, isOpen, onClose, onStatusChange, onEs
                 </div>
               </div>
 
-              {/* Description */}
               <div>
                 <h5 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Description</h5>
                 <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">{issue.description}</p>
               </div>
 
-              {/* Details Grid */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <h5 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Assignee</h5>
@@ -148,7 +189,6 @@ export function IssueDetailDrawer({ issue, isOpen, onClose, onStatusChange, onEs
                 </div>
               </div>
 
-              {/* Tags */}
               {issue.tags.length > 0 && (
                 <div>
                   <h5 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Tags</h5>
@@ -163,7 +203,6 @@ export function IssueDetailDrawer({ issue, isOpen, onClose, onStatusChange, onEs
                 </div>
               )}
 
-              {/* Actions */}
               <div className="space-y-1.5">
                 <h5 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Actions</h5>
                 <div className="flex flex-wrap gap-1.5">
@@ -194,13 +233,12 @@ export function IssueDetailDrawer({ issue, isOpen, onClose, onStatusChange, onEs
                 </div>
               </div>
 
-              {/* Comments */}
               <div>
                 <h5 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                  Comments ({issue.comments.length})
+                  Comments ({localComments.length})
                 </h5>
                 <div className="space-y-2 mb-3">
-                  {issue.comments.map(comment => (
+                  {localComments.map(comment => (
                     <div key={comment.id} className="bg-gray-50 dark:bg-navy-900 rounded-lg p-2">
                       <div className="flex items-center gap-1.5 mb-1">
                         <div className="w-4 h-4 rounded-full bg-navy-500 flex items-center justify-center text-[7px] font-bold text-white">
@@ -215,21 +253,21 @@ export function IssueDetailDrawer({ issue, isOpen, onClose, onStatusChange, onEs
                     </div>
                   ))}
                 </div>
-                {/* Add Comment */}
                 <div className="flex gap-1">
                   <input
                     type="text"
                     value={commentText}
                     onChange={e => setCommentText(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handleSendComment()}
                     placeholder="Add a comment..."
                     className="flex-1 px-2 py-1.5 text-[10px] border border-gray-200 dark:border-navy-600 rounded-md bg-gray-50 dark:bg-navy-900 text-navy-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-gold-400"
                   />
                   <button
-                    onClick={() => { setCommentText(""); }}
-                    disabled={!commentText.trim()}
+                    onClick={handleSendComment}
+                    disabled={!commentText.trim() || sending}
                     className="px-2 py-1.5 bg-gold-500 hover:bg-gold-600 disabled:bg-gray-300 text-white rounded-md transition-colors"
                   >
-                    <Send className="w-3 h-3" />
+                    {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
                   </button>
                 </div>
               </div>

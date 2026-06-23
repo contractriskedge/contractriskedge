@@ -30,6 +30,7 @@ export interface SearchResultItem {
   chunk_id: string;
   entity_type?: string;
   entity_id?: string | null;
+  review_id?: string | null;
   contract_id?: string | null;
   contract_name?: string | null;
   contract_number?: string | null;
@@ -207,7 +208,7 @@ export function usePopularQueries() {
 export function useZeroResultQueries() {
   return useQuery({
     queryKey: searchKeys.zeroResult(),
-    queryFn: () => api.get<{ queries: { query: string; count: number }[] }>("/search/zero-result"),
+    queryFn: () => api.get<{ queries: { query: string; count: number }[] }>("/search/zero-results"),
     staleTime: 60_000,
     gcTime: 5 * 60_000,
   });
@@ -217,7 +218,13 @@ export function useZeroResultQueries() {
 
 export function useTrackSearchClick() {
   return useMutation({
-    mutationFn: (body: { query: string; result_id: string; position: number }) =>
-      api.post("/search/click", body),
+    mutationFn: (body: {
+      query: string;
+      result_position: number;
+      entity_type: string;
+      entity_id: string;
+      chunk_id?: string;
+      score?: number;
+    }) => api.post("/search/click", body),
   });
 }

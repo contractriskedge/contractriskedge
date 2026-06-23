@@ -161,6 +161,10 @@ class NegotiationSession(Base):
         back_populates="session", cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    votes: Mapped[list["NegotiationVote"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         Index("ix_neg_sessions_tenant_stage", "tenant_id", "stage"),
@@ -447,3 +451,49 @@ class NegotiationParticipant(Base):
 
     def __repr__(self) -> str:
         return f"<NegotiationParticipant {self.name} role={self.role}>"
+
+
+# ── Votes ──────────────────────────────────────────────────────────
+
+class NegotiationVote(Base):
+    """A vote on a clause or finding within a negotiation session.
+
+    Supports voting on both clauses and individual findings, with
+    role-based tracking for governance and approval workflows.
+    """
+    __tablename__ = "negotiation_votes"
+
+    vote_id: Mapped[str] = mapped_column(
+        String(36), primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    session_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("negotiation_sessions.session_id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    clause_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    finding_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    voter_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    voter_role: Mapped[str] = mapped_column(String(100), nullable=False)
+    vote: Mapped[str] = mapped_column(String(20), nullable=False)
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationships
+    session: Mapped["NegotiationSession"] = relationship(back_populates="votes")
+
+    __table_args__ = (
+        Index("ix_neg_votes_session_clause", "session_id", "clause_id"),
+        Index("ix_neg_votes_session_voter", "session_id", "voter_name"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<NegotiationVote {self.vote_id[:8]} clause={self.clause_id[:20]} vote={self.vote}>"
