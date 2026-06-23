@@ -1,20 +1,65 @@
 # Sprint 30: E-Signature Integration
 
 **Goal:** Complete the contract lifecycle by adding electronic signature support.
-**Duration:** 2 weeks
-**Status:** ✅ Complete
+**Duration:** 2 weeks (3 phases across future sprints)
 
 ---
 
-## Overview
+## Strategy: One Provider at a Time
 
-Without execution, the contract lifecycle stops. This sprint adds the full
-signature workflow: Negotiation → Approval → Signature → Executed.
+Instead of building three providers simultaneously, this sprint implements:
 
-Support for three major providers:
-- DocuSign
-- Adobe Sign
-- Dropbox Sign
+**Phase 1 (Sprint 30):** Signature framework + **DocuSign only**
+**Phase 2 (Future):** Adobe Sign
+**Phase 3 (Future):** Dropbox Sign
+
+The abstract `SignatureProvider` interface already supports all three.
+No code changes needed to add providers later.
+
+---
+
+## Enterprise Workflow
+
+```
+Negotiation
+
+↓
+
+Approval
+
+↓
+
+Prepare for Signature   ← NEW — review signers, order, email, expiry
+
+↓
+
+Signature
+
+↓
+
+Executed
+```
+
+The "Prepare for Signature" step is critical. Many companies review
+the signer list, signing order, email subject, expiry, and reminders
+before actually sending.
+
+---
+
+## Contract Statuses
+
+Instead of simple Approved → Executed, use enterprise statuses:
+
+```
+approved
+preparing_signature    ← NEW
+sent_for_signature     ← NEW
+partially_signed       ← NEW
+completed              ← was "executed"
+declined               ← NEW
+expired                ← NEW
+voided                 ← NEW
+```
 
 ---
 
@@ -24,7 +69,8 @@ Support for three major providers:
 ┌─────────────────────────────────────────────────────────────┐
 │                    Signature Workflow                        │
 │                                                              │
-│  Contract Review → Negotiation → Approval → SIGN → Executed │
+│  Contract Review → Negotiation → Approval → Prepare →       │
+│  Send → Sign → Completed                                     │
 │                                              │               │
 │                                              ▼               │
 │                                    ┌──────────────────┐      │
@@ -32,12 +78,13 @@ Support for three major providers:
 │                                    │  (Abstract Base)   │      │
 │                                    └────────┬─────────┘      │
 │                                             │                 │
-│                          ┌──────────────────┼──────────────────┐
-│                          ▼                  ▼                  ▼
-│                   ┌──────────┐      ┌──────────┐      ┌──────────┐
-│                   │ DocuSign │      │Adobe Sign│      │Dropbox   │
-│                   │ Provider │      │ Provider  │      │Sign Prov │
-│                   └──────────┘      └──────────┘      └──────────┘
+│                                             ▼                 │
+│                                    ┌──────────────────┐      │
+│                                    │  DocuSignProvider │      │
+│                                    │  (Phase 1 only)   │      │
+│                                    └──────────────────┘      │
+│                                    AdobeSignProvider  (P2)    │
+│                                    DropboxSignProvider (P3)   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -54,10 +101,20 @@ CREATE TABLE signature_requests (
     session_id      VARCHAR(36) REFERENCES negotiation_sessions(session_id),
     title           VARCHAR(500) NOT NULL,
     status          VARCHAR(50) NOT NULL DEFAULT 'draft',
-    -- draft, sent, viewed, signed, completed, declined, expired, voided
-    provider        VARCHAR(50) NOT NULL,  -- docusign, adobe_sign, dropbox_sign
-    provider_envelope_id  VARCHAR(255),
+    -- draft, preparing, sent, viewed, partially_signed, completed,
+    -- declined, expired, voided
+    provider        VARCHAR(50) NOT NULL,  -- docusign (adobe_sign, dropbox_sign later)
+    provider_reference     VARCHAR(255),   -- provider's envelope/agreement ID
+    provider_metadata      JSONB DEFAULT '{}',  -- provider-specific data
+    email_subject          VARCHAR(500),
+    email_message          TEXT,
     expires_at      TIMESTAMPTZ,
+    reminder_days   INTEGER DEFAULT 3,
+    allow_decline   BOOLEAN DEFAULT true,
+    allow_print     BOOLEAN DEFAULT true,
+    require_identity_verification BOOLEAN DEFAULT false,
+    timezone        VARCHAR(50) DEFAULT 'UTC',
+    language        VARCHAR(10) DEFAULT 'en',
     sent_at         TIMESTAMPTZ,
     completed_at    TIMESTAMPTZ,
     created_by      VARCHAR(36) NOT NULL,
@@ -79,11 +136,17 @@ CREATE TABLE signature_signers (
     request_id      UUID NOT NULL REFERENCES signature_requests(id) ON DELETE CASCADE,
     email           VARCHAR(255) NOT NULL,
     name            VARCHAR(255) NOT NULL,
+    title           VARCHAR(255),            -- Job title
+    company         VARCHAR(255),            -- Company name
     role            VARCHAR(50) NOT NULL DEFAULT 'signer',
     -- signer, approver, cc, carbon_copy
     signing_order   INTEGER NOT NULL DEFAULT 1,
+    routing_order   INTEGER NOT NULL DEFAULT 1,  -- For parallel signing groups
     status          VARCHAR(50) NOT NULL DEFAULT 'awaiting',
     -- awaiting, sent, viewed, signed, declined
+    authentication_type VARCHAR(50) DEFAULT 'none',  -- none, email, access_code, phone, kba
+    phone           VARCHAR(50),
+    access_code     VARCHAR(255),
     provider_recipient_id  VARCHAR(255),
     signed_at       TIMESTAMPTZ,
     reminded_at     TIMESTAMPTZ,
@@ -100,11 +163,13 @@ CREATE TABLE signature_audit_events (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     request_id      UUID NOT NULL REFERENCES signature_requests(id) ON DELETE CASCADE,
     event_type      VARCHAR(100) NOT NULL,
-    -- sent, viewed, signed, declined, expired, voided, reminder_sent, error
+    -- sent, viewed, signed, declined, expired, voided, reminder_sent,
+    -- identity_verified, printed, downloaded, error
     actor_email     VARCHAR(255),
     details         JSONB DEFAULT '{}',
     ip_address      VARCHAR(45),
     user_agent      TEXT,
+    raw_payload     JSONB,                   -- Raw webhook payload for debugging
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -122,6 +187,7 @@ GET    /api/v1/signatures/                     List signature requests
 GET    /api/v1/signatures/{id}                 Get signature request detail
 PATCH  /api/v1/signatures/{id}                 Update signature request
 DELETE /api/v1/signatures/{id}                 Delete/cancel signature request
+POST   /api/v1/signatures/{id}/prepare         Move to preparing status
 POST   /api/v1/signatures/{id}/send            Send for signature
 POST   /api/v1/signatures/{id}/void            Void signature request
 POST   /api/v1/signatures/{id}/remind          Send reminder
@@ -140,8 +206,8 @@ DELETE /api/v1/signatures/{id}/signers/{sid}   Remove signer
 ### Provider Webhooks
 ```
 POST   /api/v1/signatures/webhooks/docusign    DocuSign webhook receiver
-POST   /api/v1/signatures/webhooks/adobe       Adobe Sign webhook receiver
-POST   /api/v1/signatures/webhooks/dropbox     Dropbox Sign webhook receiver
+POST   /api/v1/signatures/webhooks/adobe       Adobe Sign webhook receiver (Phase 2)
+POST   /api/v1/signatures/webhooks/dropbox     Dropbox Sign webhook receiver (Phase 3)
 ```
 
 ---
@@ -156,24 +222,24 @@ class SignatureProvider(ABC):
         ...
 
     @abstractmethod
-    async def get_status(self, envelope_id: str) -> ProviderStatus:
+    async def get_status(self, provider_reference: str) -> ProviderStatus:
         ...
 
     @abstractmethod
-    async def void_envelope(self, envelope_id: str, reason: str) -> bool:
+    async def void_envelope(self, provider_reference: str, reason: str) -> bool:
         ...
 
     @abstractmethod
-    async def get_signing_url(self, envelope_id: str,
+    async def get_signing_url(self, provider_reference: str,
                               recipient_id: str) -> str:
         ...
 
     @abstractmethod
-    async def get_certificate(self, envelope_id: str) -> bytes:
+    async def get_certificate(self, provider_reference: str) -> bytes:
         ...
 
     @abstractmethod
-    async def get_audit_trail(self, envelope_id: str) -> list[AuditEvent]:
+    async def get_audit_trail(self, provider_reference: str) -> list[AuditEvent]:
         ...
 
     @abstractmethod
@@ -199,7 +265,6 @@ frontend/components/dashboard/signature/
 ├── SignerAddDialog.tsx             Dialog to add signer
 ├── SignatureAuditTrail.tsx          Audit trail view
 ├── SignatureCertificate.tsx         Certificate download view
-├── SignatureWebhookSetup.tsx        Webhook configuration
 └── hooks/
     ├── useSignatureRequests.ts      Query hook for signature requests
     └── useSignatureSend.ts          Mutation hook for sending
@@ -207,89 +272,115 @@ frontend/components/dashboard/signature/
 
 ---
 
-## Integration Details
-
-### DocuSign
-- Uses DocuSign eSignature REST API v2.1
-- OAuth2 JWT authentication
-- Webhook events via DocuSign Connect
-- Supports embedded signing and email delivery
-
-### Adobe Sign
-- Uses Adobe Sign REST API v6
-- OAuth2 authorization code grant
-- Webhook events via Adobe Sign webhook API
-- Supports embedded signing and email delivery
-
-### Dropbox Sign (HelloSign)
-- Uses Dropbox Sign API v3
-- API Key authentication
-- Webhook events via Dropbox Sign callback API
-- Supports embedded signing and email delivery
-
----
-
-## Signature Workflow
+## Contract Detail Signature Tab
 
 ```
-1. User creates signature request
-   - Selects contract/negotiation
-   - Uploads or selects document
-   - Adds signers with signing order
-   - Selects provider
-
-2. User sends for signature
-   - Provider creates envelope
-   - Envelope ID stored in DB
-   - Signers receive email notifications
-   - Status updated to 'sent'
-
-3. Signers complete signing
-   - Provider webhook received
-   - Status updated to 'signed' or 'completed'
-   - Audit events recorded
-   - Contract status updated to 'executed'
-
-4. Completion
-   - Certificate downloaded and stored
-   - Audit trail available
-   - Executed PDF stored
-   - Notification sent to creator
+┌─────────────────────────────────────────────┐
+│  Review │ Negotiation │ Approval │ SIGNATURE │ Obligations │ History │
+├─────────────────────────────────────────────┤
+│                                             │
+│  Recipients  ─────────────────────────────  │
+│  [Name] [Email] [Role] [Order] [Status]     │
+│                                             │
+│  Status: Sent for Signature                 │
+│  Provider: DocuSign                         │
+│                                             │
+│  ┌─────────────────────────────────────┐   │
+│  │  Audit Trail                        │   │
+│  │  ───────────────────────────────    │   │
+│  │  📨 Sent - John (john@co.com)       │   │
+│  │  👁 Viewed - John (john@co.com)     │   │
+│  │  ✍️ Signed - John (john@co.com)     │   │
+│  │  ✅ Completed                       │   │
+│  └─────────────────────────────────────┘   │
+│                                             │
+│  [Download Certificate] [Download PDF]      │
+│  [Send Reminder]                            │
+└─────────────────────────────────────────────┘
 ```
 
 ---
 
-## Sprint Tasks
+## Webhook Requirements
+
+Every webhook must:
+1. ✅ Validate signature (HMAC / API secret)
+2. ✅ Reject duplicates (idempotency key)
+3. ✅ Log raw payload to `signature_audit_events.raw_payload`
+4. ✅ Retry on failure (queue-based)
+5. ✅ Be idempotent (status transitions only forward)
+
+---
+
+## DocuSign Integration Details
+
+- API: eSignature REST API v2.1
+- Auth: OAuth2 JWT Grant (application-level, no user interaction)
+- Sandbox: https://demo.docusign.net
+- Webhooks: DocuSign Connect (HMAC validation)
+- Support: Embedded signing + email delivery
+
+### Configuration
+```python
+DOCUSIGN_INTEGRATION_KEY=your_key
+DOCUSIGN_USER_ID=your_user_id
+DOCUSIGN_ACCOUNT_ID=your_account_id
+DOCUSIGN_PRIVATE_KEY=...  # RSA private key for JWT
+DOCUSIGN_BASE_URL=https://demo.docusign.net/restapi
+```
+
+---
+
+## Testing (Sandbox Only)
+
+| Test Case                | Expected Result              |
+|--------------------------|------------------------------|
+| One signer               | Envelope sent, signed, done  |
+| Multiple signers         | Sequential signing works     |
+| Parallel signing         | Signers can sign in any order|
+| Decline                  | Status → declined            |
+| Expiration               | Status → expired             |
+| Reminder                 | Email sent to pending signers|
+| Void                     | Status → voided              |
+| Resend                   | New email to pending signers |
+| Webhook replay           | Duplicates rejected          |
+| Certificate download     | PDF returned                 |
+| Audit trail              | All events listed            |
+
+---
+
+## Sprint Tasks (Phase 1 — DocuSign Only)
 
 ### Day 1-2: Foundation
-- [ ] Create database migration for signature tables
-- [ ] Create ORM models
-- [ ] Create abstract SignatureProvider interface
-- [ ] Create base repository
+- [ ] Create Alembic migration for signature tables (with all enterprise fields)
+- [ ] Update ORM models with enterprise fields
+- [ ] Update Pydantic schemas
+- [ ] Update repository
 
 ### Day 3-5: Backend API
-- [ ] Implement signature request CRUD endpoints
-- [ ] Implement signer management endpoints
+- [ ] Implement signature request CRUD (with prepare step)
+- [ ] Implement signer management
 - [ ] Implement send/void/remind actions
-- [ ] Implement certificate and audit trail endpoints
-- [ ] Implement webhook receivers
+- [ ] Implement certificate and audit trail
 
-### Day 6-8: Provider Integrations
-- [ ] Implement DocuSign provider
-- [ ] Implement Adobe Sign provider
-- [ ] Implement Dropbox Sign provider
-- [ ] Add provider configuration (API keys, OAuth)
+### Day 6-8: DocuSign Provider
+- [ ] Implement OAuth2 JWT authentication
+- [ ] Implement send_envelope
+- [ ] Implement get_status, void, signing URL
+- [ ] Implement certificate and audit trail
+- [ ] Implement webhook validation
 
 ### Day 9-11: Frontend
-- [ ] Build SignatureCreateWizard
-- [ ] Build SignatureRequestList
-- [ ] Build SignerList with add/edit/remove
+- [ ] Build SignatureCreateWizard (with enterprise fields)
+- [ ] Build SignatureRequestList with status tabs
+- [ ] Build SignerList with auth type, title, company
 - [ ] Build SignatureAuditTrail
 - [ ] Build SignatureCertificate
+- [ ] Add Signature tab to Contract Detail
 
 ### Day 12-14: Integration & Testing
-- [ ] Wire signature into contract lifecycle
-- [ ] Add signature status to contract detail
+- [ ] Wire signature into contract lifecycle (status transitions)
 - [ ] Add signature request button to negotiation center
-- [ ] E2E testing with provider sandboxes
-- [ ] Error handling and webhook reliability
+- [ ] E2E testing with DocuSign sandbox
+- [ ] Webhook reliability and idempotency
+- [ ] Error handling (network, auth, validation)

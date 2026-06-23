@@ -1,16 +1,25 @@
 // ── E-Signature Types ───────────────────────────────────────────
 
-export type SignatureProvider = "docusign" | "adobe_sign" | "dropbox_sign";
-export type SignatureStatus = "draft" | "sent" | "viewed" | "signed" | "completed" | "declined" | "expired" | "voided";
-export type SignerRole = "signer" | "approver" | "cc";
+export type SignatureProvider = "docusign";  // adobe_sign, dropbox_sign in Phase 2/3
+export type SignatureStatus =
+  | "draft" | "preparing" | "sent" | "viewed"
+  | "partially_signed" | "completed"
+  | "declined" | "expired" | "voided";
+export type SignerRole = "signer" | "approver" | "cc" | "carbon_copy";
 export type SignerStatus = "awaiting" | "sent" | "viewed" | "signed" | "declined";
+export type AuthType = "none" | "email" | "access_code" | "phone" | "kba" | "sms";
 
 export interface Signer {
   id: string;
   email: string;
   name: string;
+  title?: string;
+  company?: string;
   role: SignerRole;
   signingOrder: number;
+  routingOrder: number;
+  authenticationType: AuthType;
+  phone?: string;
   status: SignerStatus;
   signedAt?: string;
   createdAt: string;
@@ -23,8 +32,17 @@ export interface SignatureRequest {
   title: string;
   status: SignatureStatus;
   provider: SignatureProvider;
-  providerEnvelopeId?: string;
+  providerReference?: string;
+  providerMetadata?: Record<string, unknown>;
+  emailSubject?: string;
+  emailMessage?: string;
   expiresAt?: string;
+  reminderDays: number;
+  allowDecline: boolean;
+  allowPrint: boolean;
+  requireIdentityVerification: boolean;
+  timezone: string;
+  language: string;
   sentAt?: string;
   completedAt?: string;
   createdBy: string;
@@ -38,10 +56,27 @@ export interface SignatureRequestCreate {
   sessionId?: string;
   title: string;
   provider: SignatureProvider;
-  signers: { email: string; name: string; role?: SignerRole; signingOrder?: number }[];
-  expiresInDays?: number;
+  signers: {
+    email: string;
+    name: string;
+    title?: string;
+    company?: string;
+    role?: SignerRole;
+    signingOrder?: number;
+    routingOrder?: number;
+    authenticationType?: AuthType;
+    phone?: string;
+    accessCode?: string;
+  }[];
   emailSubject?: string;
-  emailBody?: string;
+  emailMessage?: string;
+  expiresInDays?: number;
+  reminderDays?: number;
+  allowDecline?: boolean;
+  allowPrint?: boolean;
+  requireIdentityVerification?: boolean;
+  timezone?: string;
+  language?: string;
 }
 
 export interface AuditEvent {
@@ -55,15 +90,14 @@ export interface AuditEvent {
 
 export const PROVIDER_LABELS: Record<SignatureProvider, string> = {
   docusign: "DocuSign",
-  adobe_sign: "Adobe Sign",
-  dropbox_sign: "Dropbox Sign",
 };
 
 export const STATUS_LABELS: Record<SignatureStatus, string> = {
   draft: "Draft",
-  sent: "Sent",
+  preparing: "Preparing",
+  sent: "Sent for Signature",
   viewed: "Viewed",
-  signed: "Signed",
+  partially_signed: "Partially Signed",
   completed: "Completed",
   declined: "Declined",
   expired: "Expired",
@@ -72,9 +106,10 @@ export const STATUS_LABELS: Record<SignatureStatus, string> = {
 
 export const STATUS_COLORS: Record<SignatureStatus, string> = {
   draft: "bg-gray-100 text-gray-600",
+  preparing: "bg-amber-100 text-amber-700",
   sent: "bg-blue-100 text-blue-700",
   viewed: "bg-amber-100 text-amber-700",
-  signed: "bg-green-100 text-green-700",
+  partially_signed: "bg-purple-100 text-purple-700",
   completed: "bg-emerald-100 text-emerald-700",
   declined: "bg-red-100 text-red-700",
   expired: "bg-red-100 text-red-700",

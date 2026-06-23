@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { FileSignature, Plus } from "lucide-react";
-import type { SignatureRequest } from "./types";
+import type { SignatureRequest, AuthType } from "./types";
 import { SignatureRequestList } from "./SignatureRequestList";
 import { SignatureCreateWizard } from "./SignatureCreateWizard";
 
@@ -22,10 +22,14 @@ export function SignatureProvider({ contractId, sessionId, contractTitle }: Sign
 
   const handleCreate = async (data: {
     title: string;
-    provider: "docusign" | "adobe_sign" | "dropbox_sign";
-    signers: { email: string; name: string; role: "signer" | "approver" | "cc"; signingOrder: number }[];
+    provider: "docusign";
+    signers: { email: string; name: string; role: "signer" | "approver" | "cc"; signingOrder: number; routingOrder: number; authenticationType: string }[];
     expiresInDays: number;
+    reminderDays: number;
     emailSubject?: string;
+    emailMessage?: string;
+    allowDecline?: boolean;
+    allowPrint?: boolean;
   }) => {
     // TODO: Call POST /api/v1/signatures
     const newRequest: SignatureRequest = {
@@ -35,7 +39,15 @@ export function SignatureProvider({ contractId, sessionId, contractTitle }: Sign
       title: data.title,
       status: "draft",
       provider: data.provider,
+      emailSubject: data.emailSubject,
+      emailMessage: data.emailMessage,
       expiresAt: new Date(Date.now() + data.expiresInDays * 86400000).toISOString(),
+      reminderDays: data.reminderDays,
+      allowDecline: data.allowDecline ?? true,
+      allowPrint: data.allowPrint ?? true,
+      requireIdentityVerification: false,
+      timezone: "UTC",
+      language: "en",
       createdBy: "current-user",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -45,6 +57,8 @@ export function SignatureProvider({ contractId, sessionId, contractTitle }: Sign
         name: s.name,
         role: s.role,
         signingOrder: s.signingOrder,
+        routingOrder: s.routingOrder,
+        authenticationType: s.authenticationType as AuthType,
         status: "awaiting" as const,
         createdAt: new Date().toISOString(),
       })),

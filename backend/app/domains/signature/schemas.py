@@ -1,4 +1,4 @@
-"""E-Signature Pydantic schemas."""
+"""E-Signature Pydantic schemas — enterprise-grade."""
 
 from __future__ import annotations
 
@@ -13,16 +13,40 @@ from pydantic import BaseModel, Field
 class SignerCreate(BaseModel):
     email: str
     name: str
+    title: Optional[str] = None
+    company: Optional[str] = None
     role: str = "signer"
     signing_order: int = 1
+    routing_order: int = 1
+    authentication_type: str = "none"
+    phone: Optional[str] = None
+    access_code: Optional[str] = None
+
+
+class SignerUpdate(BaseModel):
+    email: Optional[str] = None
+    name: Optional[str] = None
+    title: Optional[str] = None
+    company: Optional[str] = None
+    role: Optional[str] = None
+    signing_order: Optional[int] = None
+    routing_order: Optional[int] = None
+    authentication_type: Optional[str] = None
+    phone: Optional[str] = None
+    access_code: Optional[str] = None
 
 
 class SignerResponse(BaseModel):
     id: str
     email: str
     name: str
+    title: Optional[str] = None
+    company: Optional[str] = None
     role: str
     signing_order: int
+    routing_order: int
+    authentication_type: str
+    phone: Optional[str] = None
     status: str
     signed_at: Optional[datetime] = None
     created_at: datetime
@@ -32,16 +56,30 @@ class SignatureRequestCreate(BaseModel):
     contract_id: Optional[str] = None
     session_id: Optional[str] = None
     title: str
-    provider: str = "docusign"  # docusign, adobe_sign, dropbox_sign
+    provider: str = "docusign"  # docusign only in Phase 1
     signers: list[SignerCreate] = Field(..., min_length=1)
-    expires_in_days: int = 30
     email_subject: Optional[str] = None
-    email_body: Optional[str] = None
+    email_message: Optional[str] = None
+    expires_in_days: int = 30
+    reminder_days: int = 3
+    allow_decline: bool = True
+    allow_print: bool = True
+    require_identity_verification: bool = False
+    timezone: str = "UTC"
+    language: str = "en"
 
 
 class SignatureRequestUpdate(BaseModel):
     title: Optional[str] = None
+    email_subject: Optional[str] = None
+    email_message: Optional[str] = None
     expires_in_days: Optional[int] = None
+    reminder_days: Optional[int] = None
+    allow_decline: Optional[bool] = None
+    allow_print: Optional[bool] = None
+    require_identity_verification: Optional[bool] = None
+    timezone: Optional[str] = None
+    language: Optional[str] = None
 
 
 class SignatureRequestResponse(BaseModel):
@@ -51,8 +89,17 @@ class SignatureRequestResponse(BaseModel):
     title: str
     status: str
     provider: str
-    provider_envelope_id: Optional[str] = None
+    provider_reference: Optional[str] = None
+    provider_metadata: Optional[dict] = None
+    email_subject: Optional[str] = None
+    email_message: Optional[str] = None
     expires_at: Optional[datetime] = None
+    reminder_days: int = 3
+    allow_decline: bool = True
+    allow_print: bool = True
+    require_identity_verification: bool = False
+    timezone: str = "UTC"
+    language: str = "en"
     sent_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_by: str
@@ -72,7 +119,7 @@ class SignatureRequestListResponse(BaseModel):
 
 class SendForSignatureRequest(BaseModel):
     email_subject: Optional[str] = None
-    email_body: Optional[str] = None
+    email_message: Optional[str] = None
 
 
 class VoidRequest(BaseModel):
@@ -80,7 +127,7 @@ class VoidRequest(BaseModel):
 
 
 class RemindRequest(BaseModel):
-    email_body: Optional[str] = None
+    email_message: Optional[str] = None
 
 
 # ── Audit ───────────────────────────────────────────────────────
@@ -98,6 +145,6 @@ class AuditEventResponse(BaseModel):
 
 class WebhookEventResponse(BaseModel):
     event_type: str
-    envelope_id: str
+    provider_reference: str
     status: str
     message: str = "Webhook received"

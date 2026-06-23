@@ -21,6 +21,7 @@ from .schemas import (
     SignatureRequestResponse,
     SignatureRequestListResponse,
     SignerCreate,
+    SignerUpdate,
     SignerResponse,
     SendForSignatureRequest,
     VoidRequest,
@@ -117,6 +118,22 @@ async def delete_signature_request(
 # ── Actions ─────────────────────────────────────────────────────
 
 
+@router.post("/{request_id}/prepare", response_model=SignatureRequestResponse)
+async def prepare_signature_request(
+    request_id: str,
+    service: SignatureService = Depends(get_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Move a signature request to 'preparing' status for final review."""
+    try:
+        result = await service.prepare_request(request_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Signature request not found")
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/{request_id}/send", response_model=SignatureRequestResponse)
 async def send_for_signature(
     request_id: str,
@@ -175,6 +192,21 @@ async def add_signer(
     result = await service.add_signer(request_id, body)
     if not result:
         raise HTTPException(status_code=404, detail="Signature request not found")
+    return result
+
+
+@router.patch("/{request_id}/signers/{signer_id}", response_model=SignatureRequestResponse)
+async def update_signer(
+    request_id: str,
+    signer_id: str,
+    body: SignerUpdate,
+    service: SignatureService = Depends(get_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Update a signer's details."""
+    result = await service.update_signer(request_id, signer_id, body)
+    if not result:
+        raise HTTPException(status_code=404, detail="Signature request or signer not found")
     return result
 
 

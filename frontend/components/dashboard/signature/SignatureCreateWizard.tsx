@@ -6,7 +6,7 @@ import {
   X, FileSignature, Users, Send, ArrowRight, ArrowLeft,
   Loader2, Check,
 } from "lucide-react";
-import type { SignatureProvider, SignerRole } from "./types";
+import type { SignatureProvider, SignerRole, AuthType } from "./types";
 import { PROVIDER_LABELS } from "./types";
 import { SignerList } from "./SignerList";
 import { SignerAddDialog } from "./SignerAddDialog";
@@ -17,9 +17,13 @@ interface SignatureCreateWizardProps {
   onCreate: (data: {
     title: string;
     provider: SignatureProvider;
-    signers: { email: string; name: string; role: SignerRole; signingOrder: number }[];
+    signers: { email: string; name: string; role: SignerRole; signingOrder: number; routingOrder: number; authenticationType: string }[];
     expiresInDays: number;
+    reminderDays: number;
     emailSubject?: string;
+    emailMessage?: string;
+    allowDecline?: boolean;
+    allowPrint?: boolean;
   }) => Promise<void>;
   contractTitle?: string;
   sessionId?: string;
@@ -30,16 +34,27 @@ export function SignatureCreateWizard({
 }: SignatureCreateWizardProps) {
   const [step, setStep] = useState(0);
   const [title, setTitle] = useState(contractTitle || "");
-  const [provider, setProvider] = useState<SignatureProvider>("docusign");
-  const [signers, setSigners] = useState<{ email: string; name: string; role: SignerRole; signingOrder: number }[]>([]);
+  const [provider] = useState<SignatureProvider>("docusign");
+  const [signers, setSigners] = useState<{
+    email: string; name: string; title?: string; company?: string;
+    role: SignerRole; signingOrder: number; routingOrder: number;
+    authenticationType: string; phone?: string;
+  }[]>([]);
   const [expiresInDays, setExpiresInDays] = useState(30);
+  const [reminderDays, setReminderDays] = useState(3);
   const [emailSubject, setEmailSubject] = useState("");
+  const [emailMessage, setEmailMessage] = useState("");
+  const [allowDecline, setAllowDecline] = useState(true);
+  const [allowPrint, setAllowPrint] = useState(true);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
 
   const handleAddSigner = (signer: { email: string; name: string; role: string; signingOrder: number }) => {
-    setSigners(prev => [...prev, { ...signer, role: signer.role as SignerRole }]);
+    setSigners(prev => [...prev, {
+      ...signer, role: signer.role as SignerRole,
+      routingOrder: 1, authenticationType: "none",
+    }]);
     setShowAddDialog(false);
   };
 
@@ -55,7 +70,11 @@ export function SignatureCreateWizard({
         provider,
         signers,
         expiresInDays,
+        reminderDays,
         emailSubject: emailSubject || undefined,
+        emailMessage: emailMessage || undefined,
+        allowDecline,
+        allowPrint,
       });
       setSent(true);
       setTimeout(() => { onClose(); setStep(0); setSent(false); }, 1500);
@@ -66,10 +85,13 @@ export function SignatureCreateWizard({
   const reset = () => {
     setStep(0);
     setTitle(contractTitle || "");
-    setProvider("docusign");
     setSigners([]);
     setExpiresInDays(30);
+    setReminderDays(3);
     setEmailSubject("");
+    setEmailMessage("");
+    setAllowDecline(true);
+    setAllowPrint(true);
     setSending(false);
     setSent(false);
   };
@@ -138,19 +160,9 @@ export function SignatureCreateWizard({
                     </div>
                     <div>
                       <label className="text-[10px] font-medium text-gray-500 uppercase">Signature Provider</label>
-                      <div className="grid grid-cols-3 gap-2 mt-1">
-                        {(Object.entries(PROVIDER_LABELS) as [SignatureProvider, string][]).map(([key, label]) => (
-                          <button key={key} onClick={() => setProvider(key)}
-                            className={`p-2 rounded-lg border text-[10px] font-medium text-center transition-all ${
-                              provider === key
-                                ? "border-gold-500 bg-gold-50 text-gold-700"
-                                : "border-gray-200 text-gray-600 hover:border-gray-300"
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
+                      <div className="p-2 rounded-lg border border-gold-500 bg-gold-50 text-gold-700 text-[10px] font-medium text-center">
+                      DocuSign (Phase 1)
+                    </div>
                     </div>
                     <div>
                       <label className="text-[10px] font-medium text-gray-500 uppercase">Expires In</label>
@@ -176,7 +188,7 @@ export function SignatureCreateWizard({
                 {step === 1 && (
                   <div>
                     <SignerList
-                      signers={signers.map((s, i) => ({ ...s, id: String(i), status: "awaiting" as const, createdAt: new Date().toISOString() }))}
+                      signers={signers.map((s, i) => ({ ...s, id: String(i), authenticationType: s.authenticationType as AuthType, status: "awaiting" as const, createdAt: new Date().toISOString() }))}
                       onAddClick={() => setShowAddDialog(true)}
                       onRemoveSigner={(id) => handleRemoveSigner(id)}
                       editable
