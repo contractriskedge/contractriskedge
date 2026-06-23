@@ -13,8 +13,10 @@ from app.kernel.security.auth import UserContext
 from app.kernel.security.rbac import require_permission
 from app.kernel.security.permissions import Permissions
 
+from app.config import settings
 from .repository import SignatureRepository
 from .service import SignatureService
+from .providers.docusign import DocuSignProvider
 from .schemas import (
     SignatureRequestCreate,
     SignatureRequestUpdate,
@@ -253,6 +255,75 @@ async def get_certificate(
 
 
 # ── Webhooks ────────────────────────────────────────────────────
+
+
+# ── DocuSign Consent ────────────────────────────────────────────
+
+
+@router.get("/docusign/consent-url")
+async def get_docusign_consent_url():
+    """Get the DocuSign consent URL for JWT grant authorization.
+
+    An admin must visit this URL once to grant consent for the
+    application to send envelopes on behalf of users.
+
+    After consent is granted, the application can generate tokens
+    via JWT without further user interaction.
+    """
+    provider = DocuSignProvider(
+        integration_key=settings.docusign_integration_key,
+        user_id=settings.docusign_user_id,
+        account_id=settings.docusign_account_id,
+        private_key=settings.docusign_private_key,
+        client_secret=settings.docusign_client_secret,
+        base_url=settings.docusign_base_url,
+        auth_server=settings.docusign_auth_server,
+    )
+    consent_url = provider.get_consent_url()
+    return {
+        "consent_url": consent_url,
+        "message": "Open this URL in a browser and grant consent. "
+                   "After consent is granted, the application can use JWT authentication.",
+        "instructions": (
+            "1. Open the consent_url in a browser\n"
+            "2. Log in with a DocuSign admin account\n"
+            "3. Click 'Accept' to grant consent\n"
+            "4. You will be redirected. The consent is now active.\n"
+            "5. Return here and use the signature endpoints."
+        ),
+    }
+
+
+@router.get("/docusign/status")
+async def check_docusign_connection():
+    """Check if the DocuSign connection is working by attempting to get a token."""
+    try:
+        provider = DocuSignProvider(
+            integration_key=settings.docusign_integration_key,
+            user_id=settings.docusign_user_id,
+            account_id=settings.docusign_account_id,
+            private_key=settings.docusign_private_key,
+            client_secret=settings.docusign_client_secret,
+            base_url=settings.docusign_base_url,
+            auth_server=settings.docusign_auth_server,
+        )
+        token = await provider._ensure_authenticated()
+        return {
+            "status": "connected",
+            "message": "DocuSign JWT authentication successful",
+            "token_prefix": token[:20] + "...",
+        }
+    except PermissionError as e:
+        return {
+            "status": "consent_required",
+            "message": str(e),
+            "consent_url": provider.get_consent_url(),
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"DocuSign connection failed: {e}",
+        }
 
 
 @router.post("/webhooks/{provider_name}")

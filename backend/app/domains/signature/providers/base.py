@@ -54,10 +54,10 @@ class WebhookEvent:
 class AuditEvent:
     """A single audit trail entry."""
     event_type: str
-    actor_email: Optional[str] = None
-    actor_name: Optional[str] = None
     action: str
     timestamp: datetime
+    actor_email: Optional[str] = None
+    actor_name: Optional[str] = None
     ip_address: Optional[str] = None
     details: Optional[dict] = None
 

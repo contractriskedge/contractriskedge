@@ -170,6 +170,17 @@ class Settings(BaseSettings):
     # ── Sentry ─────────────────────────────────────────────────────
     sentry_dsn: str = ""
 
+    # ── DocuSign ───────────────────────────────────────────────────
+    docusign_integration_key: str = ""
+    docusign_user_id: str = ""
+    docusign_account_id: str = ""
+    docusign_private_key: str = ""
+    docusign_client_secret: str = ""
+    """OAuth client secret — also used as HMAC key for webhook validation."""
+    docusign_base_url: str = "https://demo.docusign.net/restapi"
+    docusign_auth_server: str = "account-d.docusign.com"
+    """DocuSign auth server. Use account.docusign.com for production."""
+
     # ── Celery ─────────────────────────────────────────────────────
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
