@@ -210,14 +210,19 @@ export function SearchHub() {
 
   const searchParams = useMemo(() => {
     if (!debouncedQuery) return null;
+    // When a specific entity tab is active, only query that entity type
+    // so the backend returns all matching results for that type.
+    const entityTypes = activeCategory === "all"
+      ? "chunk,finding,obligation,contract,signature"
+      : activeCategory;
     return {
       q: debouncedQuery,
       strategy: (searchMode === "semantic" || searchMode === "ai_assisted" ? "hybrid" : searchMode) as "hybrid" | "vector" | "keyword",
-      entity_types: "chunk,finding,obligation,contract,signature",
+      entity_types: entityTypes,
       page: 1,
       page_size: 50,
     };
-  }, [debouncedQuery, searchMode]);
+  }, [debouncedQuery, searchMode, activeCategory]);
 
   const { data: searchData, isLoading, isError, error, refetch } = useSearch(searchParams);
   const { data: popularData } = usePopularQueries();
