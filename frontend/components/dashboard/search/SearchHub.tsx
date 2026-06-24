@@ -220,7 +220,7 @@ export function SearchHub() {
       strategy: (searchMode === "semantic" || searchMode === "ai_assisted" ? "hybrid" : searchMode) as "hybrid" | "vector" | "keyword",
       entity_types: entityTypes,
       page: 1,
-      page_size: 50,
+      page_size: 100,
     };
   }, [debouncedQuery, searchMode, activeCategory]);
 
