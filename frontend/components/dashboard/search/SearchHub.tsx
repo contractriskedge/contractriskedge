@@ -229,16 +229,18 @@ export function SearchHub() {
   const { data: pulseData } = useSearchPulse();
   const trackClick = useTrackSearchClick();
 
-  // ── Preserve entity_totals from the "all" query ──────────────
+  // ── Preserve entity_totals and total from the "all" query ────
   // When switching to a specific tab, the API only returns totals for
   // that entity type. We keep the full totals from the "all" query so
   // tab counts don't disappear.
   const entityTotalsRef = useRef<Record<string, number> | undefined>(undefined);
+  const allTotalRef = useRef<number>(0);
   useEffect(() => {
     if (activeCategory === "all" && searchData?.entity_totals) {
       entityTotalsRef.current = searchData.entity_totals;
+      allTotalRef.current = searchData.total;
     }
-  }, [activeCategory, searchData?.entity_totals]);
+  }, [activeCategory, searchData?.entity_totals, searchData?.total]);
 
   // ── Read ?q= from URL on mount ───────────────────────────────
 
@@ -268,7 +270,9 @@ export function SearchHub() {
     return searchData.results.map((item, i) => toSearchResult(item, i));
   }, [searchData]);
 
-  const totalResults = searchData?.total ?? 0;
+  const totalResults = activeCategory === "all"
+    ? (searchData?.total ?? 0)
+    : (allTotalRef.current || (searchData?.total ?? 0));
   const processingTime = searchData?.latency_ms ?? 0;
 
   // ── Derive KPIs from real data ────────────────────────────────
