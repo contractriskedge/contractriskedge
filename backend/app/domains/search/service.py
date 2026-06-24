@@ -205,8 +205,11 @@ class SearchService:
 
             o_count_sql = sa_text(f"""
                 SELECT COUNT(*)::int FROM obligations o
+                LEFT JOIN contract_reviews cr ON cr.review_id = o.contract_uuid_id
                 WHERE {o_where}
-                  AND (o.name ILIKE :query OR o.description ILIKE :query OR o.vendor ILIKE :query OR o.contract_name ILIKE :query)
+                  AND (o.name ILIKE :query OR o.description ILIKE :query
+                       OR o.vendor ILIKE :query OR o.contract_name ILIKE :query
+                       OR cr.metadata->>'contract_number' ILIKE :query)
             """)
             o_count = await self.session.execute(o_count_sql, {k: v for k, v in bind.items() if k != "limit" and k != "offset"})
             ob_total = o_count.scalar() or 0
@@ -219,9 +222,13 @@ class SearchService:
                 FROM obligations o
                 LEFT JOIN contract_reviews cr ON cr.review_id = o.contract_uuid_id
                 WHERE {o_where}
-                  AND (o.name ILIKE :query OR o.description ILIKE :query OR o.vendor ILIKE :query OR o.contract_name ILIKE :query)
+                  AND (o.name ILIKE :query OR o.description ILIKE :query
+                       OR o.vendor ILIKE :query OR o.contract_name ILIKE :query
+                       OR cr.metadata->>'contract_number' ILIKE :query)
                 ORDER BY
-                    CASE WHEN o.name ILIKE :query THEN 0 ELSE 1 END,
+                    CASE WHEN o.name ILIKE :query THEN 0
+                         WHEN cr.metadata->>'contract_number' ILIKE :query THEN 1
+                         ELSE 2 END,
                     o.created_at DESC
                 LIMIT :limit OFFSET :offset
             """)
@@ -763,8 +770,11 @@ class SearchService:
         # Count
         count_sql = sa_text(f"""
             SELECT COUNT(*)::int FROM obligations o
+            LEFT JOIN contract_reviews cr ON cr.review_id = o.contract_uuid_id
             WHERE {where}
-              AND (o.name ILIKE :query OR o.description ILIKE :query OR o.vendor ILIKE :query OR o.contract_name ILIKE :query)
+              AND (o.name ILIKE :query OR o.description ILIKE :query
+                   OR o.vendor ILIKE :query OR o.contract_name ILIKE :query
+                   OR cr.metadata->>'contract_number' ILIKE :query)
         """)
         result = await self.session.execute(count_sql, bind)
         total = result.scalar() or 0
@@ -775,12 +785,18 @@ class SearchService:
             SELECT o.id, o.name, o.description, o.obligation_type, o.status,
                    o.contract_id, o.contract_uuid_id, o.contract_name, o.vendor,
                    o.owner, o.due_date, o.risk_level, o.risk_score,
-                   o.created_at
+                   o.created_at,
+                   cr.metadata->>'contract_number' as contract_number
             FROM obligations o
+            LEFT JOIN contract_reviews cr ON cr.review_id = o.contract_uuid_id
             WHERE {where}
-              AND (o.name ILIKE :query OR o.description ILIKE :query OR o.vendor ILIKE :query OR o.contract_name ILIKE :query)
+              AND (o.name ILIKE :query OR o.description ILIKE :query
+                   OR o.vendor ILIKE :query OR o.contract_name ILIKE :query
+                   OR cr.metadata->>'contract_number' ILIKE :query)
             ORDER BY
-                CASE WHEN o.name ILIKE :query THEN 0 ELSE 1 END,
+                CASE WHEN o.name ILIKE :query THEN 0
+                     WHEN cr.metadata->>'contract_number' ILIKE :query THEN 1
+                     ELSE 2 END,
                 o.created_at DESC
             LIMIT :limit OFFSET :offset
         """)
