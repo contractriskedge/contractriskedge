@@ -178,6 +178,8 @@ class SignatureService:
                 email=s.email, name=s.name,
                 title=s.title or "", company=s.company or "",
                 role=s.role, signing_order=s.signing_order,
+                # Use signer id as client_user_id for embedded signing
+                client_user_id=s.id if hasattr(s, 'id') and s.id else None,
             )
             for s in signers
         ]

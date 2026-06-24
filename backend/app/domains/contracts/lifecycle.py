@@ -39,10 +39,14 @@ Branches:
 
 from __future__ import annotations
 
+import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
+
+from sqlalchemy import text as sa_text
 
 logger = logging.getLogger(__name__)
 
@@ -506,11 +510,53 @@ class ContractLifecycleService:
         reason: Optional[str],
         metadata: Optional[dict],
     ) -> None:
-        """Log the transition to the audit trail."""
-        # TODO: Write to governance_audit_events table
-        logger.debug(
-            "Audit: contract %s %s → %s", contract_id, from_status, to_status,
-        )
+        """Log the transition to the governance_audit_events table."""
+        try:
+            from app.kernel.database.session import db_session
+
+            session = db_session.get()
+            if session is None:
+                logger.debug(
+                    "Audit: contract %s %s → %s (no db session)",
+                    contract_id, from_status, to_status,
+                )
+                return
+
+            await session.execute(
+                sa_text("""
+                    INSERT INTO governance_audit_events (
+                        event_id, tenant_id, event_type, entity_type, entity_id,
+                        actor_id, previous_state, new_state,
+                        change_summary, metadata, created_at
+                    ) VALUES (
+                        :event_id, :tenant_id, :event_type, :entity_type, :entity_id,
+                        :actor_id, :previous_state, :new_state,
+                        :change_summary, :metadata, NOW()
+                    )
+                """),
+                {
+                    "event_id": uuid.uuid4(),
+                    "tenant_id": uuid.UUID("00000000-0000-4000-8000-000000000001"),
+                    "event_type": f"contract.status.{to_status}",
+                    "entity_type": "contract",
+                    "entity_id": uuid.UUID(contract_id) if _is_uuid(contract_id) else contract_id,
+                    "actor_id": actor_id or "system",
+                    "previous_state": json.dumps({"status": from_status}),
+                    "new_state": json.dumps({"status": to_status}),
+                    "change_summary": reason or f"Status changed: {from_status} → {to_status}",
+                    "metadata": json.dumps({
+                        "from_status": from_status,
+                        "to_status": to_status,
+                        **(metadata or {}),
+                    }),
+                },
+            )
+            await session.flush()
+        except Exception as exc:
+            logger.warning(
+                "Failed to log audit transition %s → %s for %s: %s",
+                from_status, to_status, contract_id, exc,
+            )
 
     async def _dispatch_notifications(
         self,
@@ -523,20 +569,32 @@ class ContractLifecycleService:
             return
 
         notification_map = {
-            "preparing_signature": "Contract ready for signature",
-            "sent_for_signature": "Contract sent for signature",
-            "partially_signed": "Some signers have completed",
-            "executed": "Contract fully executed",
-            "rejected": "Contract was rejected",
-            "expired": "Contract has expired",
-            "approved": "Contract approved",
+            "preparing_signature": ("contract.signature.preparing", "Contract ready for signature"),
+            "sent_for_signature": ("contract.signature.sent", "Contract sent for signature"),
+            "partially_signed": ("contract.signature.partial", "Some signers have completed"),
+            "executed": ("contract.executed", "Contract fully executed"),
+            "rejected": ("contract.rejected", "Contract was rejected"),
+            "expired": ("contract.expired", "Contract has expired"),
+            "approved": ("contract.approved", "Contract approved"),
         }
 
-        title = notification_map.get(new_status)
-        if title:
+        entry = notification_map.get(new_status)
+        if entry:
+            notif_type, title = entry
             await self._notification_service.send_notification(
-                contract_id=contract_id,
+                user_id="system",
+                notif_type=notif_type,
                 title=title,
-                event_type=f"contract.{new_status}",
-                metadata={"from_status": old_status, "to_status": new_status},
+                body=f"Contract status changed from {old_status} to {new_status}",
+                entity_type="contract",
+                entity_id=contract_id,
             )
+
+
+def _is_uuid(value: str) -> bool:
+    """Check if a string is a valid UUID."""
+    try:
+        uuid.UUID(str(value))
+        return True
+    except (ValueError, AttributeError):
+        return False

@@ -10,6 +10,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urlencode
 
 import httpx
 
@@ -92,7 +93,7 @@ class DocuSignProvider(SignatureProvider):
             "client_id": self.integration_key,
             "redirect_uri": redirect_uri,
         }
-        qs = "&".join(f"{k}={v}" for k, v in params.items())
+        qs = urlencode(params)
         return f"https://{self.auth_server}/oauth/auth?{qs}"
 
     # ── JWT Token Generation ────────────────────────────────────
@@ -117,7 +118,7 @@ class DocuSignProvider(SignatureProvider):
         payload = {
             "iss": self.integration_key,
             "sub": self.user_id,
-            "aud": f"https://{self.auth_server}/oauth/token",
+            "aud": self.auth_server,
             "iat": now,
             "exp": now + 3600,  # 1 hour
             "scope": " ".join(DOCUSIGN_SCOPES),
@@ -241,6 +242,10 @@ class DocuSignProvider(SignatureProvider):
                     "routingOrder": str(s.signing_order) if signing_order_enabled else "1",
                     "deliveryMethod": "email",
                     "roleName": s.role,
+                    # If client_user_id is set, enable embedded/captive signing.
+                    # DocuSign will NOT email the signer — the app must present
+                    # the signing URL via _get_recipient_view_url.
+                    **({"clientUserId": s.client_user_id} if s.client_user_id else {}),
                 }
                 for i, s in enumerate(signers)
             ]
@@ -340,13 +345,30 @@ class DocuSignProvider(SignatureProvider):
     async def _get_recipient_view_url(
         self, envelope_id: str, signer: SignerInfo, token: str
     ) -> str:
-        """Get the embedded signing URL for a recipient."""
+        """Get the embedded signing URL for a recipient.
+
+        Requires that the signer was created with a ``clientUserId`` in the
+        envelope definition.  If the envelope was sent without ``clientUserId``
+        (email delivery), DocuSign returns 400 — callers should fall back to
+        the email invitation link from the envelope status.
+        """
+        # The clientUserId MUST match what was set on the recipient at
+        # envelope creation time.  If it was not set, embedded signing is
+        # not available for this recipient.
+        if not signer.client_user_id:
+            raise ValueError(
+                f"Signer {signer.email} has no client_user_id — "
+                "embedded signing URL unavailable. "
+                "Use email delivery instead."
+            )
+
         view_request = {
             "returnUrl": "https://www.docusign.com",
             "authenticationMethod": "email",
             "email": signer.email,
             "userName": signer.name,
-            "clientUserId": signer.email,  # Maps to embedded signing
+            "clientUserId": signer.client_user_id,
+            "recipientId": signer.recipient_id or "1",
         }
         url = (
             f"{self.base_url}/v2.1/accounts/{self.account_id}"

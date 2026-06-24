@@ -65,7 +65,7 @@ class SignatureRequest(Base):
     created_by: Mapped[str] = mapped_column(String(36), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    metadata: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)
+    request_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, default=dict)
 
     __table_args__ = (
         Index("idx_sig_req_tenant", "tenant_id"),

@@ -16,6 +16,13 @@ class SignerInfo:
     role: str = "signer"  # signer, approver, cc
     signing_order: int = 1
     recipient_id: Optional[str] = None
+    client_user_id: Optional[str] = None
+    """Optional client-controlled ID for embedded/captive signing.
+
+    If set, DocuSign will NOT send an email invitation — the signer
+    must be directed to the embedded signing URL instead.
+    If None (default), DocuSign sends the standard email invitation.
+    """
 
 
 @dataclass

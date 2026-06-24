@@ -1,0 +1,313 @@
+"""Executive Dashboard service — aggregates KPIs across all contract lifecycle domains."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+
+from sqlalchemy import text as sa_text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
+
+
+class DashboardService:
+    """Aggregates KPIs across contracts, reviews, approvals, signatures, obligations."""
+
+    def __init__(self, session: AsyncSession, tenant_id: str):
+        self.session = session
+        self.tenant_id = tenant_id
+
+    # ── Executive Summary ───────────────────────────────────────
+
+    async def get_executive_summary(self) -> dict:
+        """Return top-level counts for the executive dashboard."""
+        total, active, this_month, pending_approval, pending_signature, high_risk, renewals, open_obligations = await asyncio.gather(
+            self._count_total_contracts(),
+            self._count_active_contracts(),
+            self._count_contracts_this_month(),
+            self._count_pending_approvals(),
+            self._count_pending_signatures(),
+            self._count_high_risk_contracts(),
+            self._count_upcoming_renewals(),
+            self._count_open_obligations(),
+        )
+        return {
+            "total_contracts": total,
+            "active_contracts": active,
+            "contracts_this_month": this_month,
+            "pending_approvals": pending_approval,
+            "pending_signatures": pending_signature,
+            "high_risk_contracts": high_risk,
+            "upcoming_renewals": renewals,
+            "open_obligations": open_obligations,
+        }
+
+    async def _count_total_contracts(self) -> int:
+        try:
+            row = await self.session.execute(
+                sa_text("SELECT COUNT(*)::int FROM contract_reviews WHERE tenant_id = :tid"),
+                {"tid": self.tenant_id},
+            )
+            return row.scalar() or 0
+        except Exception as exc:
+            logger.warning("Failed to count total contracts: %s", exc)
+            return 0
+
+    async def _count_active_contracts(self) -> int:
+        try:
+            row = await self.session.execute(
+                sa_text("""
+                    SELECT COUNT(*)::int FROM contract_reviews
+                    WHERE tenant_id = :tid
+                      AND status NOT IN ('rejected', 'closed', 'archived', 'expired')
+                """),
+                {"tid": self.tenant_id},
+            )
+            return row.scalar() or 0
+        except Exception as exc:
+            logger.warning("Failed to count active contracts: %s", exc)
+            return 0
+
+    async def _count_contracts_this_month(self) -> int:
+        try:
+            start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            row = await self.session.execute(
+                sa_text("""
+                    SELECT COUNT(*)::int FROM contract_reviews
+                    WHERE tenant_id = :tid AND created_at >= :start
+                """),
+                {"tid": self.tenant_id, "start": start},
+            )
+            return row.scalar() or 0
+        except Exception as exc:
+            logger.warning("Failed to count contracts this month: %s", exc)
+            return 0
+
+    async def _count_pending_approvals(self) -> int:
+        try:
+            row = await self.session.execute(
+                sa_text("""
+                    SELECT COUNT(*)::int FROM contract_reviews
+                    WHERE tenant_id = :tid AND status IN ('pending_approval', 'legal_approval', 'exec_approval')
+                """),
+                {"tid": self.tenant_id},
+            )
+            return row.scalar() or 0
+        except Exception as exc:
+            logger.warning("Failed to count pending approvals: %s", exc)
+            return 0
+
+    async def _count_pending_signatures(self) -> int:
+        try:
+            row = await self.session.execute(
+                sa_text("""
+                    SELECT COUNT(*)::int FROM signature_requests
+                    WHERE tenant_id = :tid AND status IN ('sent', 'delivered', 'partially_signed')
+                """),
+                {"tid": self.tenant_id},
+            )
+            return row.scalar() or 0
+        except Exception as exc:
+            logger.warning("Failed to count pending signatures: %s", exc)
+            return 0
+
+    async def _count_high_risk_contracts(self) -> int:
+        try:
+            row = await self.session.execute(
+                sa_text("""
+                    SELECT COUNT(*)::int FROM contract_reviews
+                    WHERE tenant_id = :tid
+                      AND (risk_score IS NOT NULL AND risk_score >= 0.7)
+                """),
+                {"tid": self.tenant_id},
+            )
+            return row.scalar() or 0
+        except Exception as exc:
+            logger.warning("Failed to count high risk contracts: %s", exc)
+            return 0
+
+    async def _count_upcoming_renewals(self) -> int:
+        try:
+            thirty_days = datetime.now(timezone.utc) + timedelta(days=30)
+            row = await self.session.execute(
+                sa_text("""
+                    SELECT COUNT(*)::int FROM contract_reviews
+                    WHERE tenant_id = :tid
+                      AND expiry_date IS NOT NULL
+                      AND expiry_date BETWEEN NOW() AND :thirty_days
+                """),
+                {"tid": self.tenant_id, "thirty_days": thirty_days},
+            )
+            return row.scalar() or 0
+        except Exception as exc:
+            logger.warning("Failed to count upcoming renewals: %s", exc)
+            return 0
+
+    async def _count_open_obligations(self) -> int:
+        try:
+            row = await self.session.execute(
+                sa_text("""
+                    SELECT COUNT(*)::int FROM obligations
+                    WHERE tenant_id = :tid AND status = 'open'
+                """),
+                {"tid": self.tenant_id},
+            )
+            return row.scalar() or 0
+        except Exception as exc:
+            logger.warning("Failed to count open obligations: %s", exc)
+            return 0
+
+    # ── Risk Dashboard ──────────────────────────────────────────
+
+    async def get_risk_distribution(self) -> dict:
+        """Return risk distribution counts by severity level."""
+        try:
+            rows = await self.session.execute(
+                sa_text("""
+                    SELECT
+                        COALESCE(risk_level, 'unknown') AS level,
+                        COUNT(*)::int AS count
+                    FROM contract_reviews
+                    WHERE tenant_id = :tid
+                    GROUP BY risk_level
+                    ORDER BY level
+                """),
+                {"tid": self.tenant_id},
+            )
+            distribution = {row.level: row.count for row in rows}
+            return {
+                "critical": distribution.get("critical", 0),
+                "high": distribution.get("high", 0),
+                "medium": distribution.get("medium", 0),
+                "low": distribution.get("low", 0),
+                "unknown": distribution.get("unknown", 0),
+            }
+        except Exception as exc:
+            logger.warning("Failed to get risk distribution: %s", exc)
+            return {"critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0}
+
+    async def get_risk_trend(self, months: int = 12) -> list[dict]:
+        """Return monthly risk score averages for the last N months."""
+        try:
+            start = datetime.now(timezone.utc) - timedelta(days=months * 30)
+            rows = await self.session.execute(
+                sa_text("""
+                    SELECT
+                        DATE_TRUNC('month', created_at) AS month,
+                        AVG(risk_score) AS avg_risk
+                    FROM contract_reviews
+                    WHERE tenant_id = :tid
+                      AND created_at >= :start
+                      AND risk_score IS NOT NULL
+                    GROUP BY month
+                    ORDER BY month
+                """),
+                {"tid": self.tenant_id, "start": start},
+            )
+            return [
+                {
+                    "month": row.month.isoformat() if hasattr(row.month, 'isoformat') else str(row.month),
+                    "avg_risk_score": round(float(row.avg_risk), 4) if row.avg_risk else 0,
+                }
+                for row in rows
+            ]
+        except Exception as exc:
+            logger.warning("Failed to get risk trend: %s", exc)
+            return []
+
+    # ── Workflow Dashboard ──────────────────────────────────────
+
+    async def get_workflow_distribution(self) -> dict:
+        """Return contract counts grouped by lifecycle stage."""
+        try:
+            rows = await self.session.execute(
+                sa_text("""
+                    SELECT
+                        CASE
+                            WHEN status IN ('procurement_review', 'legal_review', 'security_review') THEN 'in_review'
+                            WHEN status IN ('negotiation', 'in_review', 'changes_requested') THEN 'in_negotiation'
+                            WHEN status IN ('pending_approval', 'legal_approval', 'exec_approval') THEN 'pending_approval'
+                            WHEN status IN ('preparing_signature', 'sent_for_signature', 'partially_signed') THEN 'pending_signature'
+                            WHEN status IN ('executed', 'finalized', 'active') THEN 'executed'
+                            ELSE 'other'
+                        END AS stage,
+                        COUNT(*)::int AS count
+                    FROM contract_reviews
+                    WHERE tenant_id = :tid
+                    GROUP BY stage
+                    ORDER BY stage
+                """),
+                {"tid": self.tenant_id},
+            )
+            result = {
+                "in_review": 0,
+                "in_negotiation": 0,
+                "pending_approval": 0,
+                "pending_signature": 0,
+                "executed": 0,
+                "other": 0,
+            }
+            for row in rows:
+                result[row.stage] = row.count
+            return result
+        except Exception as exc:
+            logger.warning("Failed to get workflow distribution: %s", exc)
+            return {}
+
+    # ── Renewal Dashboard ───────────────────────────────────────
+
+    async def get_renewal_buckets(self) -> dict:
+        """Return contract counts by renewal window."""
+        now = datetime.now(timezone.utc)
+        try:
+            rows = await self.session.execute(
+                sa_text("""
+                    SELECT
+                        CASE
+                            WHEN expiry_date BETWEEN NOW() AND NOW() + INTERVAL '30 days' THEN '30_days'
+                            WHEN expiry_date BETWEEN NOW() + INTERVAL '30 days' AND NOW() + INTERVAL '60 days' THEN '60_days'
+                            WHEN expiry_date BETWEEN NOW() + INTERVAL '60 days' AND NOW() + INTERVAL '90 days' THEN '90_days'
+                            WHEN expiry_date < NOW() THEN 'expired'
+                            ELSE 'beyond_90'
+                        END AS bucket,
+                        COUNT(*)::int AS count
+                    FROM contract_reviews
+                    WHERE tenant_id = :tid AND expiry_date IS NOT NULL
+                    GROUP BY bucket
+                    ORDER BY bucket
+                """),
+                {"tid": self.tenant_id},
+            )
+            result = {"30_days": 0, "60_days": 0, "90_days": 0, "expired": 0, "beyond_90": 0}
+            for row in rows:
+                result[row.bucket] = row.count
+            return result
+        except Exception as exc:
+            logger.warning("Failed to get renewal buckets: %s", exc)
+            return {"30_days": 0, "60_days": 0, "90_days": 0, "expired": 0, "beyond_90": 0}
+
+    # ── Signature Dashboard ─────────────────────────────────────
+
+    async def get_signature_status_counts(self) -> dict:
+        """Return signature request counts by status."""
+        try:
+            rows = await self.session.execute(
+                sa_text("""
+                    SELECT status, COUNT(*)::int AS count
+                    FROM signature_requests
+                    WHERE tenant_id = :tid
+                    GROUP BY status
+                    ORDER BY status
+                """),
+                {"tid": self.tenant_id},
+            )
+            result = {"sent": 0, "viewed": 0, "signed": 0, "declined": 0, "expired": 0}
+            for row in rows:
+                result[row.status] = row.count
+            return result
+        except Exception as exc:
+            logger.warning("Failed to get signature status counts: %s", exc)
+            return {"sent": 0, "viewed": 0, "signed": 0, "declined": 0, "expired": 0}

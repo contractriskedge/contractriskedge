@@ -171,6 +171,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning("Failed to register event handlers: %s", exc)
 
+    # Initialize Contract Lifecycle Service (central state machine)
+    try:
+        from app.domains.contracts.lifecycle import ContractLifecycleService
+        app.state.lifecycle_service = ContractLifecycleService()
+        logger.info("ContractLifecycleService initialized")
+    except Exception as exc:
+        logger.warning("Failed to initialize ContractLifecycleService: %s", exc)
+        app.state.lifecycle_service = None
+
     logger.info("Event bus initialized")
 
     try:
@@ -362,6 +371,7 @@ def create_app() -> FastAPI:
     from app.domains.workspace.router import router as workspace_router
     from app.domains.admin.router import router as admin_router
     from app.domains.cases.router import router as cases_router
+    from app.domains.signature.router import router as signature_router
     from app.kernel.events.router import router as events_router
     # ── Redline Template Library ──
     from app.domains.redline_templates.router import router as redline_template_router
@@ -387,6 +397,7 @@ def create_app() -> FastAPI:
     app.include_router(workspace_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(cases_router, prefix="/api/v1")
+    app.include_router(signature_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")
     # ── Redline Template Library ──
     app.include_router(redline_template_router, prefix="/api/v1")
@@ -434,6 +445,9 @@ def create_app() -> FastAPI:
     # ── Negotiation router ──
     from app.domains.negotiation.router import router as negotiation_router
     app.include_router(negotiation_router, prefix="/api/v1")
+    # ── Dashboard router ──
+    from app.domains.dashboard.router import router as dashboard_router
+    app.include_router(dashboard_router, prefix="/api/v1")
     # ── Relationships Graph router ──
     from app.domains.relationships.router import router as relationships_router
     app.include_router(relationships_router, prefix="/api/v1")
