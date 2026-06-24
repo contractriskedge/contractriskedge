@@ -1,7 +1,7 @@
 // ── Enterprise Search & Discovery Hub Types ──────────────────────────────
 
 export type RiskLevel = "critical" | "high" | "medium" | "low" | "info";
-export type SearchResultType = "contract" | "clause" | "obligation" | "vendor" | "workflow" | "negotiation" | "benchmark" | "audit_event" | "playbook" | "redline";
+export type SearchResultType = "contract" | "clause" | "obligation" | "signature" | "vendor" | "workflow" | "negotiation" | "benchmark" | "audit_event" | "playbook" | "redline";
 export type SearchMode = "semantic" | "keyword" | "vector" | "hybrid" | "ai_assisted";
 export type FilterCategory = "contract_type" | "vendor" | "geography" | "risk_level" | "workflow_stage" | "clause_category" | "business_unit" | "date_range" | "compliance_category" | "negotiation_status";
 

@@ -38,6 +38,7 @@ function toSearchResult(item: SearchResultItem, index: number): SearchResult {
     obligation: "obligation",
     redline: "redline",
     contract: "contract",
+    signature: "signature",
     vendor: "vendor",
     audit_event: "audit_event",
     playbook: "playbook",
@@ -60,12 +61,20 @@ function toSearchResult(item: SearchResultItem, index: number): SearchResult {
     title = item.snippet?.split(":")[0] || item.contract_name || "Obligation";
   } else if (entityType === "finding") {
     title = item.snippet?.split(":")[0] || "Finding";
+  } else if (entityType === "contract") {
+    title = item.contract_name || item.contract_number || "Contract";
+  } else if (entityType === "signature") {
+    title = item.snippet?.split(":")[0] || item.contract_name || "Signature Request";
   }
 
   const subtitle = entityType === "obligation"
     ? `${item.contract_name || ""}${item.status ? ` · ${item.status}` : ""}`
     : entityType === "finding"
     ? `${item.contract_name || ""}${item.clause_type ? ` · ${item.clause_type}` : ""}`
+    : entityType === "contract"
+    ? `${item.contract_number || ""}${item.status ? ` · ${item.status}` : ""}`
+    : entityType === "signature"
+    ? `${item.status ? item.status : ""}${item.contract_name ? ` · ${item.contract_name}` : ""}`
     : item.contract_name ?? `Page ${item.page_numbers.join(", ")}`;
 
   return {
@@ -117,6 +126,12 @@ function getSearchResultHref(result: SearchResult): string | null {
     if (entityId) params.set("findingId", entityId);
     return `/reviews/ai-workspace?${params.toString()}`;
   }
+  if (entityType === "contract" && reviewId) {
+    return `/contracts/${reviewId}`;
+  }
+  if (entityType === "signature" && entityId) {
+    return `/signatures/${entityId}`;
+  }
   if (reviewId) {
     return `/contracts/${reviewId}`;
   }
@@ -124,7 +139,7 @@ function getSearchResultHref(result: SearchResult): string | null {
 }
 
 function stripSyntheticId(id: string): string {
-  return id.replace(/^(ilike-|finding-|obligation-)/, "");
+  return id.replace(/^(ilike-|finding-|obligation-|contract-|signature-)/, "");
 }
 
 // ── Default KPI cards (derived from search data) ────────────────
@@ -198,7 +213,7 @@ export function SearchHub() {
     return {
       q: debouncedQuery,
       strategy: (searchMode === "semantic" || searchMode === "ai_assisted" ? "hybrid" : searchMode) as "hybrid" | "vector" | "keyword",
-      entity_types: "chunk,finding,obligation",
+      entity_types: "chunk,finding,obligation,contract,signature",
       page: 1,
       page_size: 50,
     };
