@@ -395,15 +395,23 @@ function ChartCard({
   title,
   icon,
   children,
+  onClick,
   className = "",
 }: {
   title: string;
   icon: React.ReactNode;
   children: React.ReactNode;
+  onClick?: () => void;
   className?: string;
 }) {
   return (
-    <div className={`rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800 ${className}`}>
+    <div
+      className={`rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800 ${onClick ? "cursor-pointer hover:shadow-md transition-shadow" : ""} ${className}`}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === "Enter") onClick(); } : undefined}
+    >
       <div className="flex items-center gap-2 mb-4">
         <span className="text-gray-500 dark:text-gray-400">{icon}</span>
         <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
@@ -561,28 +569,28 @@ export function ExecutiveDashboard() {
 
         {/* Row 2: Risk Distribution + Workflow Distribution + Signature Status */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <ChartCard title="Risk Distribution" icon={<AlertTriangle className="h-4 w-4" />}>
+          <ChartCard title="Risk Distribution" icon={<AlertTriangle className="h-4 w-4" />} onClick={() => router.push("/reviews/ai-workspace")}>
             <RiskDonutChart data={riskQuery.data ?? { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 }} />
             <ColorLegend items={riskLegendItems} />
           </ChartCard>
 
-          <ChartCard title="Workflow Distribution" icon={<BarChart3 className="h-4 w-4" />}>
+          <ChartCard title="Workflow Distribution" icon={<BarChart3 className="h-4 w-4" />} onClick={() => router.push("/contracts")}>
             <WorkflowBarChart data={workflowQuery.data ?? {}} />
             <ColorLegend items={workflowLegendItems} />
           </ChartCard>
 
-          <ChartCard title="Signature Status" icon={<FileSignature className="h-4 w-4" />}>
+          <ChartCard title="Signature Status" icon={<FileSignature className="h-4 w-4" />} onClick={() => router.push("/signatures")}>
             <SignatureBarChart data={signatureQuery.data ?? { sent: 0, viewed: 0, signed: 0, declined: 0, expired: 0 }} />
           </ChartCard>
         </div>
 
         {/* Row 3: Risk Trend + Renewal Pipeline */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <ChartCard title="Risk Trend (12 Months)" icon={<TrendingUp className="h-4 w-4" />}>
+          <ChartCard title="Risk Trend (12 Months)" icon={<TrendingUp className="h-4 w-4" />} onClick={() => router.push("/analytics")}>
             <RiskTrendChart data={riskTrendQuery.data ?? []} />
           </ChartCard>
 
-          <ChartCard title="Renewal Pipeline" icon={<CalendarDays className="h-4 w-4" />}>
+          <ChartCard title="Renewal Pipeline" icon={<CalendarDays className="h-4 w-4" />} onClick={() => router.push("/contracts")}>
             <RenewalBarChart data={renewalQuery.data ?? { "30_days": 0, "60_days": 0, "90_days": 0, expired: 0, beyond_90: 0 }} />
           </ChartCard>
         </div>
