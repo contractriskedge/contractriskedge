@@ -247,6 +247,113 @@ class SearchService:
                 ))
             total += ob_total
 
+        # ── 4. Contract search (by name/number) ───────────────────
+        if "contract" in entity_types:
+            from sqlalchemy import text as sa_text
+            bind = {"tenant_id": self.tenant_id, "query": f"%{request.query}%"}
+            offset = (request.page - 1) * request.page_size
+
+            c_count = await self.session.execute(
+                sa_text("""
+                    SELECT COUNT(*)::int FROM contract_reviews
+                    WHERE tenant_id = :tenant_id
+                      AND (review_number ILIKE :query
+                           OR metadata->>'name' ILIKE :query
+                           OR metadata->>'contract_number' ILIKE :query
+                           OR metadata->>'vendor' ILIKE :query)
+                """),
+                {"tenant_id": self.tenant_id, "query": f"%{request.query}%"},
+            )
+            c_total = c_count.scalar() or 0
+
+            if c_total > 0:
+                c_sql = sa_text(f"""
+                    SELECT review_id, status, review_number,
+                           metadata->>'name' as contract_name,
+                           metadata->>'contract_number' as contract_number,
+                           metadata->>'vendor' as vendor,
+                           created_at
+                    FROM contract_reviews
+                    WHERE tenant_id = :tenant_id
+                      AND (review_number ILIKE :query
+                           OR metadata->>'name' ILIKE :query
+                           OR metadata->>'contract_number' ILIKE :query
+                           OR metadata->>'vendor' ILIKE :query)
+                    ORDER BY
+                        CASE
+                            WHEN review_number ILIKE :query THEN 0
+                            WHEN metadata->>'name' ILIKE :query THEN 1
+                            ELSE 2
+                        END,
+                        created_at DESC
+                    LIMIT :limit OFFSET :offset
+                """)
+                c_result = await self.session.execute(c_sql, {
+                    "tenant_id": self.tenant_id,
+                    "query": f"%{request.query}%",
+                    "limit": request.page_size,
+                    "offset": offset,
+                })
+                for row in c_result.fetchall():
+                    all_results.append(SearchResultItem(
+                        chunk_id=f"contract-{row.review_id}",
+                        entity_type="contract",
+                        entity_id=str(row.review_id),
+                        review_id=str(row.review_id),
+                        contract_id=str(row.review_id),
+                        contract_name=row.contract_name,
+                        contract_number=row.contract_number,
+                        snippet=f"{row.contract_name or row.review_number} ({row.status})",
+                        score=9.0,
+                        strategy="keyword",
+                        status=row.status,
+                    ))
+                total += c_total
+
+        # ── 5. Signature request search ───────────────────────────
+        if "signature" in entity_types:
+            from sqlalchemy import text as sa_text
+            s_count = await self.session.execute(
+                sa_text("""
+                    SELECT COUNT(*)::int FROM signature_requests
+                    WHERE tenant_id = :tenant_id
+                      AND (title ILIKE :query OR provider_reference ILIKE :query)
+                """),
+                {"tenant_id": self.tenant_id, "query": f"%{request.query}%"},
+            )
+            s_total = s_count.scalar() or 0
+
+            if s_total > 0:
+                offset = (request.page - 1) * request.page_size
+                s_sql = sa_text(f"""
+                    SELECT id, title, status, provider, provider_reference,
+                           contract_id, created_at
+                    FROM signature_requests
+                    WHERE tenant_id = :tenant_id
+                      AND (title ILIKE :query OR provider_reference ILIKE :query)
+                    ORDER BY created_at DESC
+                    LIMIT :limit OFFSET :offset
+                """)
+                s_result = await self.session.execute(s_sql, {
+                    "tenant_id": self.tenant_id,
+                    "query": f"%{request.query}%",
+                    "limit": request.page_size,
+                    "offset": offset,
+                })
+                for row in s_result.fetchall():
+                    all_results.append(SearchResultItem(
+                        chunk_id=f"signature-{row.id}",
+                        entity_type="signature",
+                        entity_id=str(row.id),
+                        contract_id=str(row.contract_id) if row.contract_id else None,
+                        contract_name=row.title,
+                        snippet=f"Signature: {row.title} ({row.status})",
+                        score=8.0,
+                        strategy="keyword",
+                        status=row.status,
+                    ))
+                total += s_total
+
         # Sort combined results by score descending
         all_results.sort(key=lambda r: r.score, reverse=True)
 
