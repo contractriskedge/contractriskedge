@@ -61,6 +61,7 @@ class SearchService:
 
         all_results: list[SearchResultItem] = []
         total = 0
+        entity_totals: dict[str, int] = {}
 
         # ── 1. Chunk search (full-text + vector) ──────────────────
         if "chunk" in entity_types:
@@ -129,6 +130,7 @@ class SearchService:
 
             all_results.extend(results)
             total += chunk_total
+            entity_totals["chunk"] = chunk_total
 
         # ── 2. Finding search ─────────────────────────────────────
         if "finding" in entity_types:
@@ -185,6 +187,7 @@ class SearchService:
                     status=row.resolution,
                 ))
             total += finding_total
+            entity_totals["finding"] = finding_total
 
         # ── 3. Obligation search ──────────────────────────────────
         if "obligation" in entity_types:
@@ -253,6 +256,7 @@ class SearchService:
                     due_date=str(row.due_date) if row.due_date else None,
                 ))
             total += ob_total
+            entity_totals["obligation"] = ob_total
 
         # ── 4. Contract search (by name/number) ───────────────────
         if "contract" in entity_types:
@@ -321,6 +325,7 @@ class SearchService:
                         status=row.status,
                     ))
                 total += c_total
+                entity_totals["contract"] = c_total
 
         # ── 5. Signature request search ───────────────────────────
         if "signature" in entity_types:
@@ -365,6 +370,7 @@ class SearchService:
                         status=row.status,
                     ))
                 total += s_total
+                entity_totals["signature"] = s_total
 
         # Sort combined results by score descending with entity type boosting.
         # Entity results (contract, finding, obligation, signature) are boosted
@@ -395,6 +401,7 @@ class SearchService:
             query=request.query,
             strategy=request.strategy,
             latency_ms=latency_ms,
+            entity_totals=entity_totals,
         )
 
     async def log_click_from_request(self, request: SearchClickRequest) -> None:

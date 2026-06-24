@@ -61,6 +61,8 @@ class SearchResponse(BaseModel):
     query: str
     strategy: str
     latency_ms: int
+    entity_totals: dict[str, int] = Field(default_factory=dict)
+    """Per-entity type total counts, e.g. {'chunk': 50, 'finding': 27, 'contract': 3}"""
 
 
 class AutocompleteRequest(BaseModel):

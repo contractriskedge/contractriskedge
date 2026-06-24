@@ -55,6 +55,7 @@ export interface SearchResponse {
   query: string;
   strategy: string;
   latency_ms: number;
+  entity_totals?: Record<string, number>;
 }
 
 export interface SearchParams {

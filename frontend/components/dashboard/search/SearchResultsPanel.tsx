@@ -237,6 +237,7 @@ interface SearchResultsPanelProps {
   selectedResultId: string | null;
   activeEntityTab?: string;
   onEntityTabChange?: (tab: string) => void;
+  entityTotals?: Record<string, number>;
 }
 
 // ── Entity Tab Configuration ───────────────────────────────────
@@ -283,6 +284,7 @@ export function SearchResultsPanel({
   onResultSelect, onPreview, selectedResultId,
   activeEntityTab = "all",
   onEntityTabChange,
+  entityTotals,
 }: SearchResultsPanelProps) {
   const [sortBy, setSortBy] = useState<"relevance" | "date" | "risk" | "name">("relevance");
   const [showSortMenu, setShowSortMenu] = useState(false);
@@ -332,18 +334,21 @@ export function SearchResultsPanel({
     }
   }, [filteredResults, sortBy]);
 
-  // Compute counts per tab
+  // Compute counts per tab — use backend entity_totals when available
   const tabCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const tab of ENTITY_TABS) {
       if (tab.id === "all") {
-        counts[tab.id] = results.length;
+        counts[tab.id] = totalResults;
+      } else if (entityTotals) {
+        const tabTotal = tab.entityTypes.reduce((sum, et) => sum + (entityTotals[et] ?? 0), 0);
+        counts[tab.id] = tabTotal;
       } else {
         counts[tab.id] = results.filter(r => tab.entityTypes.includes(getEntityType(r))).length;
       }
     }
     return counts;
-  }, [results]);
+  }, [results, totalResults, entityTotals]);
 
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-gray-50 dark:bg-navy-900">
