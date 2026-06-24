@@ -255,12 +255,14 @@ class SearchService:
 
             c_count = await self.session.execute(
                 sa_text("""
-                    SELECT COUNT(*)::int FROM contract_reviews
-                    WHERE tenant_id = :tenant_id
-                      AND (review_number ILIKE :query
-                           OR metadata->>'name' ILIKE :query
-                           OR metadata->>'contract_number' ILIKE :query
-                           OR metadata->>'vendor' ILIKE :query)
+                    SELECT COUNT(*)::int FROM contract_reviews cr
+                    LEFT JOIN upload_sessions us ON us.upload_id = cr.upload_id
+                    WHERE cr.tenant_id = :tenant_id
+                      AND (cr.review_number ILIKE :query
+                           OR cr.metadata->>'name' ILIKE :query
+                           OR cr.metadata->>'contract_number' ILIKE :query
+                           OR cr.metadata->>'vendor' ILIKE :query
+                           OR us.filename ILIKE :query)
                 """),
                 {"tenant_id": self.tenant_id, "query": f"%{request.query}%"},
             )
@@ -268,24 +270,27 @@ class SearchService:
 
             if c_total > 0:
                 c_sql = sa_text(f"""
-                    SELECT review_id, status, review_number,
-                           metadata->>'name' as contract_name,
-                           metadata->>'contract_number' as contract_number,
-                           metadata->>'vendor' as vendor,
-                           created_at
-                    FROM contract_reviews
-                    WHERE tenant_id = :tenant_id
-                      AND (review_number ILIKE :query
-                           OR metadata->>'name' ILIKE :query
-                           OR metadata->>'contract_number' ILIKE :query
-                           OR metadata->>'vendor' ILIKE :query)
+                    SELECT cr.review_id, cr.status, cr.review_number,
+                           COALESCE(cr.metadata->>'name', us.filename) as contract_name,
+                           cr.metadata->>'contract_number' as contract_number,
+                           cr.metadata->>'vendor' as vendor,
+                           cr.created_at
+                    FROM contract_reviews cr
+                    LEFT JOIN upload_sessions us ON us.upload_id = cr.upload_id
+                    WHERE cr.tenant_id = :tenant_id
+                      AND (cr.review_number ILIKE :query
+                           OR cr.metadata->>'name' ILIKE :query
+                           OR cr.metadata->>'contract_number' ILIKE :query
+                           OR cr.metadata->>'vendor' ILIKE :query
+                           OR us.filename ILIKE :query)
                     ORDER BY
                         CASE
-                            WHEN review_number ILIKE :query THEN 0
-                            WHEN metadata->>'name' ILIKE :query THEN 1
-                            ELSE 2
+                            WHEN cr.review_number ILIKE :query THEN 0
+                            WHEN us.filename ILIKE :query THEN 1
+                            WHEN cr.metadata->>'name' ILIKE :query THEN 2
+                            ELSE 3
                         END,
-                        created_at DESC
+                        cr.created_at DESC
                     LIMIT :limit OFFSET :offset
                 """)
                 c_result = await self.session.execute(c_sql, {

@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText, FileSearch, ClipboardCheck, Building2, Workflow,
   GitMerge, BarChart3, ScrollText, AlertTriangle, ChevronDown,
-  ChevronRight, Sparkles, Brain, ArrowUpDown, Clock, Eye,
+  ChevronRight, Sparkles, Brain, ArrowUpDown, Clock, Eye, FileSignature,
   Target, Loader2, CheckCircle, XCircle, Info, Search,
 } from "lucide-react";
 import type { SearchResult, SearchResultType, SearchHighlight } from "./types";
@@ -23,6 +23,7 @@ const resultTypeIcons: Record<SearchResultType, React.ReactNode> = {
   audit_event: <ScrollText className="w-3.5 h-3.5" />,
   playbook: <GitMerge className="w-3.5 h-3.5" />,
   redline: <GitMerge className="w-3.5 h-3.5" />,
+  signature: <FileSignature className="w-3.5 h-3.5" />,
 };
 
 const resultTypeColors: Record<SearchResultType, string> = {
@@ -36,6 +37,7 @@ const resultTypeColors: Record<SearchResultType, string> = {
   audit_event: "text-slate-600 bg-slate-50 dark:bg-slate-900/20 dark:text-slate-400",
   playbook: "text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 dark:text-indigo-400",
   redline: "text-orange-600 bg-orange-50 dark:bg-orange-900/20 dark:text-orange-400",
+  signature: "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 dark:text-emerald-400",
 };
 
 // ── Confidence Badge ─────────────────────────────────────────────────────
@@ -272,6 +274,10 @@ const GROUP_COLORS: Record<string, string> = {
   chunk: "bg-gray-500",
 };
 
+function getEntityType(result: SearchResult): string {
+  return String(result.metadata?.entity_type || result.type);
+}
+
 export function SearchResultsPanel({
   results, totalResults, processingTime, query, isLoading,
   onResultSelect, onPreview, selectedResultId,
@@ -285,13 +291,13 @@ export function SearchResultsPanel({
   const tabConfig = ENTITY_TABS.find(t => t.id === activeEntityTab) || ENTITY_TABS[0];
   const filteredResults = tabConfig.id === "all"
     ? results
-    : results.filter(r => tabConfig.entityTypes.includes(r.type));
+    : results.filter(r => tabConfig.entityTypes.includes(getEntityType(r)));
 
   // Group filtered results by entity type
   const groupedResults = useMemo(() => {
     const groups: Record<string, SearchResult[]> = {};
     for (const r of filteredResults) {
-      const type = r.type;
+      const type = getEntityType(r);
       if (!groups[type]) groups[type] = [];
       groups[type].push(r);
     }
@@ -333,7 +339,7 @@ export function SearchResultsPanel({
       if (tab.id === "all") {
         counts[tab.id] = results.length;
       } else {
-        counts[tab.id] = results.filter(r => tab.entityTypes.includes(r.type)).length;
+        counts[tab.id] = results.filter(r => tab.entityTypes.includes(getEntityType(r))).length;
       }
     }
     return counts;
