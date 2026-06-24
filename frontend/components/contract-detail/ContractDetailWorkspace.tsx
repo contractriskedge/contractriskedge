@@ -40,7 +40,7 @@ import {
   Edit3, GitCompare, MessageSquare, Activity, Calendar,
   Building2, Globe, Loader2, ChevronDown, ChevronRight, ChevronUp,
   BarChart3, BookOpen, XCircle, DollarSign, GitBranch, Lock, Archive,
-  Tag, ListChecks,
+  Tag, ListChecks, FileSignature,
 } from "lucide-react";
 import {
   useContractDetail,
@@ -359,6 +359,17 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
             >
               {finalizeMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Lock className="w-3.5 h-3.5" />}
               Finalize
+            </button>
+          )}
+          {/* Send for Signature — for finalized or approved contracts */}
+          {(contract.status === "finalized" || contract.status === "approved") && (
+            <button
+              onClick={() => router.push(`/signatures?contractId=${contractId}&action=create`)}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 transition-colors shadow-sm"
+              title="Send for signature via DocuSign"
+            >
+              <FileSignature className="w-3.5 h-3.5" />
+              Send for Signature
             </button>
           )}
           {/* Close — for finalized or executed contracts */}
