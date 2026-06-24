@@ -50,7 +50,9 @@ export default function AuthenticatedLayout({
   // Derive active view from pathname for route-aware navigation
   React.useEffect(() => {
     const path = window.location.pathname;
-    if (path.startsWith("/dashboard")) setActiveView("executive-dashboard");
+    if (path.startsWith("/executive-dashboard")) setActiveView("executive-dashboard");
+    else if (path.startsWith("/dashboard")) setActiveView("executive-dashboard");
+    else if (path.startsWith("/executive")) setActiveView("executive-command-center");
     else if (path.startsWith("/reviews")) setActiveView("review");
     else if (path.startsWith("/contracts")) setActiveView("contracts");
     else if (path.startsWith("/procurement")) setActiveView("procurement");
