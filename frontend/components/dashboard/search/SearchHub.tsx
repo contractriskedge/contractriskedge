@@ -860,7 +860,7 @@ export function SearchHub() {
             selectedResultId={selectedResultId}
             activeEntityTab={activeCategory}
             onEntityTabChange={handleCategoryChange}
-            entityTotals={savedEntityTotals}
+            entityTotals={savedEntityTotals || searchData?.entity_totals}
           />
         )}
 
