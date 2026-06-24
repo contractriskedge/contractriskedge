@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useMemo, useEffect } from "react";
+import React, { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -228,6 +228,17 @@ export function SearchHub() {
   const { data: popularData } = usePopularQueries();
   const { data: pulseData } = useSearchPulse();
   const trackClick = useTrackSearchClick();
+
+  // ── Preserve entity_totals from the "all" query ──────────────
+  // When switching to a specific tab, the API only returns totals for
+  // that entity type. We keep the full totals from the "all" query so
+  // tab counts don't disappear.
+  const entityTotalsRef = useRef<Record<string, number> | undefined>(undefined);
+  useEffect(() => {
+    if (activeCategory === "all" && searchData?.entity_totals) {
+      entityTotalsRef.current = searchData.entity_totals;
+    }
+  }, [activeCategory, searchData?.entity_totals]);
 
   // ── Read ?q= from URL on mount ───────────────────────────────
 
@@ -845,7 +856,7 @@ export function SearchHub() {
             selectedResultId={selectedResultId}
             activeEntityTab={activeCategory}
             onEntityTabChange={handleCategoryChange}
-            entityTotals={searchData?.entity_totals}
+            entityTotals={entityTotalsRef.current}
           />
         )}
 
