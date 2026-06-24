@@ -467,7 +467,9 @@ export function SearchResultsPanel({
                   <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-300">
                     {group.label}
                   </h3>
-                  <span className="text-[10px] text-gray-400">({group.results.length})</span>
+                  <span className="text-[10px] text-gray-400">
+                    {entityTotals?.[group.type] ?? group.results.length}
+                  </span>
                   <div className="flex-1 border-t border-gray-100 dark:border-navy-700" />
                 </div>
 
