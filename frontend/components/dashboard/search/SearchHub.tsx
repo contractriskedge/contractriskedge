@@ -830,7 +830,7 @@ export function SearchHub() {
           </div>
         ) : (
           <SearchResultsPanel
-            results={filteredResults}
+            results={results}
             totalResults={totalResults}
             processingTime={processingTime}
             query={debouncedQuery ?? ""}
