@@ -19,7 +19,7 @@ import { useReviews } from "@/services/hooks/useReviews";
 import { CfoView } from "./CfoView";
 import { LegalView } from "./LegalView";
 import { ProcurementView } from "./ProcurementView";
-import { ExecutiveDashboard } from "./ExecutiveDashboard";
+import { ExecutiveDashboard as ExecutiveDashboardV2 } from "./ExecutiveDashboardV2";
 import { ContractsPage } from "./contracts/ContractsPage";
 import { BenchmarkPage } from "./BenchmarkPage";
 import { SettingsPage } from "./SettingsPage";
@@ -208,7 +208,7 @@ export function DashboardLayout() {
 
       // ── Enterprise Workspaces ──
       case "executive-dashboard":
-        return <ExecutiveDashboard />;
+        return <ExecutiveDashboardV2 />;
       case "cfo":
         return <CfoView />;
       case "legal":
