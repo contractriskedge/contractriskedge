@@ -114,9 +114,20 @@ class DashboardService:
             return 0
 
     async def _count_pending_signatures(self) -> int:
-        """Count pending signatures."""
-        # signature_requests table not yet migrated
-        return 0
+        """Count pending signatures from signature_requests table."""
+        try:
+            row = await self.session.execute(
+                sa_text("""
+                    SELECT COUNT(*)::int FROM signature_requests
+                    WHERE tenant_id = :tid AND status IN ('sent', 'delivered', 'viewed', 'partially_signed')
+                """),
+                {"tid": self.tenant_id},
+            )
+            return row.scalar() or 0
+        except Exception as exc:
+            await self.session.rollback()
+            logger.warning("Failed to count pending signatures: %s", exc)
+            return 0
 
     async def _count_high_risk_contracts(self) -> int:
         """Count contracts with critical/high severity findings.
@@ -308,6 +319,25 @@ class DashboardService:
 
     async def get_signature_status_counts(self) -> dict:
         """Return signature request counts by status."""
-        # signature_requests table not yet migrated
-        return {"sent": 0, "viewed": 0, "signed": 0, "declined": 0, "expired": 0}
+        try:
+            rows = await self.session.execute(
+                sa_text("""
+                    SELECT status, COUNT(*)::int AS count
+                    FROM signature_requests
+                    WHERE tenant_id = :tid
+                    GROUP BY status
+                    ORDER BY status
+                """),
+                {"tid": self.tenant_id},
+            )
+            result = {"draft": 0, "preparing": 0, "sent": 0, "viewed": 0,
+                      "partially_signed": 0, "completed": 0, "declined": 0,
+                      "expired": 0, "voided": 0}
+            for row in rows:
+                result[row.status] = row.count
+            return result
+        except Exception as exc:
+            await self.session.rollback()
+            logger.warning("Failed to get signature status counts: %s", exc)
+            return {"sent": 0, "viewed": 0, "signed": 0, "declined": 0, "expired": 0}
 

@@ -78,11 +78,16 @@ interface RenewalBuckets {
 }
 
 interface SignatureStatus {
-  sent: number;
-  viewed: number;
-  signed: number;
-  declined: number;
-  expired: number;
+  draft?: number;
+  preparing?: number;
+  sent?: number;
+  viewed?: number;
+  partially_signed?: number;
+  completed?: number;
+  declined?: number;
+  expired?: number;
+  voided?: number;
+  [key: string]: number | undefined;
 }
 
 // ── Query Hooks ────────────────────────────────────────────────
@@ -255,10 +260,10 @@ function WorkflowBarChart({ data }: { data: WorkflowDistribution }) {
 
 function SignatureBarChart({ data }: { data: SignatureStatus }) {
   const chartData = Object.entries(data)
-    .filter(([_, v]) => v > 0)
+    .filter(([_, v]) => typeof v === 'number' && v > 0)
     .map(([key, value]) => ({
-      name: key.charAt(0).toUpperCase() + key.slice(1),
-      value,
+      name: key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' '),
+      value: value as number,
       fill: SIGNATURE_COLORS[key] || "#9CA3AF",
     }));
 
@@ -580,7 +585,7 @@ export function ExecutiveDashboard() {
           </ChartCard>
 
           <ChartCard title="Signature Status" icon={<FileSignature className="h-4 w-4" />} onClick={() => router.push("/signatures")}>
-            <SignatureBarChart data={signatureQuery.data ?? { sent: 0, viewed: 0, signed: 0, declined: 0, expired: 0 }} />
+            <SignatureBarChart data={signatureQuery.data ?? {}} />
           </ChartCard>
         </div>
 
