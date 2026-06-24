@@ -62,7 +62,7 @@ class DashboardService:
                 sa_text("""
                     SELECT COUNT(*)::int FROM contract_reviews
                     WHERE tenant_id = :tid
-                      AND status NOT IN ('rejected', 'closed', 'archived', 'expired')
+                      AND status NOT IN ('rejected', 'closed', 'archived')
                 """),
                 {"tid": self.tenant_id},
             )
@@ -163,16 +163,30 @@ class DashboardService:
     # ── Risk Dashboard ──────────────────────────────────────────
 
     async def get_risk_distribution(self) -> dict:
-        """Return risk distribution counts by severity level."""
+        """Return risk distribution counts by severity level.
+
+        Uses risk_score from contract_reviews:
+          critical: >= 0.8
+          high:     >= 0.6
+          medium:   >= 0.4
+          low:      >= 0.2
+          unknown:  NULL or < 0.2
+        """
         try:
             rows = await self.session.execute(
                 sa_text("""
                     SELECT
-                        COALESCE(risk_level, 'unknown') AS level,
+                        CASE
+                            WHEN risk_score >= 0.8 THEN 'critical'
+                            WHEN risk_score >= 0.6 THEN 'high'
+                            WHEN risk_score >= 0.4 THEN 'medium'
+                            WHEN risk_score >= 0.2 THEN 'low'
+                            ELSE 'unknown'
+                        END AS level,
                         COUNT(*)::int AS count
                     FROM contract_reviews
                     WHERE tenant_id = :tid
-                    GROUP BY risk_level
+                    GROUP BY level
                     ORDER BY level
                 """),
                 {"tid": self.tenant_id},
@@ -227,11 +241,11 @@ class DashboardService:
                 sa_text("""
                     SELECT
                         CASE
-                            WHEN status IN ('procurement_review', 'legal_review', 'security_review') THEN 'in_review'
-                            WHEN status IN ('negotiation', 'in_review', 'changes_requested') THEN 'in_negotiation'
-                            WHEN status IN ('pending_approval', 'legal_approval', 'exec_approval') THEN 'pending_approval'
-                            WHEN status IN ('preparing_signature', 'sent_for_signature', 'partially_signed') THEN 'pending_signature'
-                            WHEN status IN ('executed', 'finalized', 'active') THEN 'executed'
+                            WHEN status::text IN ('procurement_review', 'legal_review', 'security_review', 'in_review') THEN 'in_review'
+                            WHEN status::text IN ('negotiation', 'changes_requested') THEN 'in_negotiation'
+                            WHEN status::text IN ('pending_approval', 'legal_approval', 'exec_approval') THEN 'pending_approval'
+                            WHEN status::text IN ('approved', 'finalized') THEN 'approved'
+                            WHEN status::text IN ('executed') THEN 'executed'
                             ELSE 'other'
                         END AS stage,
                         COUNT(*)::int AS count
@@ -242,14 +256,7 @@ class DashboardService:
                 """),
                 {"tid": self.tenant_id},
             )
-            result = {
-                "in_review": 0,
-                "in_negotiation": 0,
-                "pending_approval": 0,
-                "pending_signature": 0,
-                "executed": 0,
-                "other": 0,
-            }
+            result: dict[str, int] = {}
             for row in rows:
                 result[row.stage] = row.count
             return result

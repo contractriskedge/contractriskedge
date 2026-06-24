@@ -60,12 +60,13 @@ interface RiskTrendPoint {
 }
 
 interface WorkflowDistribution {
-  in_review: number;
-  in_negotiation: number;
-  pending_approval: number;
-  pending_signature: number;
-  executed: number;
-  other: number;
+  in_review?: number;
+  in_negotiation?: number;
+  pending_approval?: number;
+  approved?: number;
+  executed?: number;
+  other?: number;
+  [key: string]: number | undefined;
 }
 
 interface RenewalBuckets {
@@ -155,7 +156,7 @@ const WORKFLOW_COLORS: Record<string, string> = {
   in_review: "#8B5CF6",
   in_negotiation: "#F59E0B",
   pending_approval: "#3B82F6",
-  pending_signature: "#10B981",
+  approved: "#10B981",
   executed: "#059669",
   other: "#9CA3AF",
 };
@@ -219,10 +220,10 @@ function RiskDonutChart({ data }: { data: RiskDistribution }) {
 
 function WorkflowBarChart({ data }: { data: WorkflowDistribution }) {
   const chartData = Object.entries(data)
-    .filter(([_, v]) => v > 0)
+    .filter(([_, v]) => typeof v === 'number' && v > 0)
     .map(([key, value]) => ({
       name: key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-      value,
+      value: value as number,
       fill: WORKFLOW_COLORS[key] || "#9CA3AF",
     }));
 
@@ -450,7 +451,7 @@ export function ExecutiveDashboard() {
     in_review: "In Review",
     in_negotiation: "Negotiation",
     pending_approval: "Pending Approval",
-    pending_signature: "Pending Signature",
+    approved: "Approved",
     executed: "Executed",
     other: "Other",
   };
@@ -566,7 +567,7 @@ export function ExecutiveDashboard() {
           </ChartCard>
 
           <ChartCard title="Workflow Distribution" icon={<BarChart3 className="h-4 w-4" />}>
-            <WorkflowBarChart data={workflowQuery.data ?? { in_review: 0, in_negotiation: 0, pending_approval: 0, pending_signature: 0, executed: 0, other: 0 }} />
+            <WorkflowBarChart data={workflowQuery.data ?? {}} />
             <ColorLegend items={workflowLegendItems} />
           </ChartCard>
 
