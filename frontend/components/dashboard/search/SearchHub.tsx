@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -232,13 +232,13 @@ export function SearchHub() {
   // ── Preserve entity_totals and total from the "all" query ────
   // When switching to a specific tab, the API only returns totals for
   // that entity type. We keep the full totals from the "all" query so
-  // tab counts don't disappear.
-  const entityTotalsRef = useRef<Record<string, number> | undefined>(undefined);
-  const allTotalRef = useRef<number>(0);
+  // tab counts don't disappear. Using state so changes trigger re-render.
+  const [savedEntityTotals, setSavedEntityTotals] = useState<Record<string, number> | undefined>(undefined);
+  const [savedAllTotal, setSavedAllTotal] = useState<number>(0);
   useEffect(() => {
     if (activeCategory === "all" && searchData?.entity_totals) {
-      entityTotalsRef.current = searchData.entity_totals;
-      allTotalRef.current = searchData.total;
+      setSavedEntityTotals(searchData.entity_totals);
+      setSavedAllTotal(searchData.total);
     }
   }, [activeCategory, searchData?.entity_totals, searchData?.total]);
 
@@ -272,7 +272,7 @@ export function SearchHub() {
 
   const totalResults = activeCategory === "all"
     ? (searchData?.total ?? 0)
-    : (allTotalRef.current || (searchData?.total ?? 0));
+    : (savedAllTotal || (searchData?.total ?? 0));
   const processingTime = searchData?.latency_ms ?? 0;
 
   // ── Derive KPIs from real data ────────────────────────────────
@@ -860,7 +860,7 @@ export function SearchHub() {
             selectedResultId={selectedResultId}
             activeEntityTab={activeCategory}
             onEntityTabChange={handleCategoryChange}
-            entityTotals={entityTotalsRef.current}
+            entityTotals={savedEntityTotals}
           />
         )}
 
