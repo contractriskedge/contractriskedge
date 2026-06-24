@@ -27,7 +27,7 @@ import { useRealtimeCoordinator } from "@/src/lib/realtime/realtimeCoordinator";
 import { useInvalidationOrchestrator } from "@/src/lib/realtime/invalidationOrchestrator";
 import { Sun, Moon, ZoomIn, ZoomOut } from "lucide-react";
 
-type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "executive-dashboard" | "policy" | "clause-intelligence" | "redline-knowledge-center" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center";
+type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "signatures" | "ingestion" | "compliance" | "review" | "executive-dashboard" | "policy" | "clause-intelligence" | "redline-knowledge-center" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center";
 
 export default function AuthenticatedLayout({
   children,
@@ -65,6 +65,7 @@ export default function AuthenticatedLayout({
     else if (path.startsWith("/command-center")) setActiveView("command-center");
     else if (path.startsWith("/executive-dashboard")) setActiveView("executive-dashboard");
     else if (path.startsWith("/executive")) setActiveView("executive-command-center");
+    else if (path.startsWith("/signatures")) setActiveView("signatures");
     else if (path.startsWith("/search")) setActiveView("search");
     else if (path.startsWith("/clause-library")) setActiveView("clause-library");
     else if (path.startsWith("/obligations")) setActiveView("obligations");
@@ -131,6 +132,7 @@ export default function AuthenticatedLayout({
               "tenant-settings": "/tenant-settings",
               "review-dashboard": "/reviews",
               "activity-center": "/activity",
+              signatures: "/signatures",
             };
             const target = routeMap[view] || "/reviews";
             router.push(target);

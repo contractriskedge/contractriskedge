@@ -72,7 +72,7 @@ function DashboardSkeleton() {
 // Full enterprise view types — all workspaces available in the sidebar.
 // Views without full backend integration show a placeholder indicating
 // the module is available but pending backend completion.
-        type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "review-dashboard" | "executive-dashboard" | "policy" | "clause-intelligence" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center" | "activity-center";
+        type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "signatures" | "ingestion" | "compliance" | "review" | "review-dashboard" | "executive-dashboard" | "policy" | "clause-intelligence" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center" | "activity-center";
 
 export function DashboardLayout() {
   const { user, logout } = useAuth();

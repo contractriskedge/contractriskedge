@@ -166,8 +166,18 @@ class DashboardService:
             return 0
 
     async def _count_open_obligations(self) -> int:
-        # obligations table may not exist
-        return 0
+        try:
+            row = await self.session.execute(
+                sa_text("""
+                    SELECT COUNT(*)::int FROM obligations
+                    WHERE tenant_id = :tid AND status IN ('open', 'pending')
+                """),
+                {"tid": self.tenant_id},
+            )
+            return row.scalar() or 0
+        except Exception as exc:
+            logger.warning("Failed to count open obligations: %s", exc)
+            return 0
 
     # ── Risk Dashboard ──────────────────────────────────────────
 

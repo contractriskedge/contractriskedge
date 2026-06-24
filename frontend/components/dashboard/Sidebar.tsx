@@ -40,7 +40,7 @@ import {
   Activity,
 } from "lucide-react";
 
-type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "ingestion" | "compliance" | "review" | "review-dashboard" | "executive-dashboard" | "policy" | "clause-intelligence" | "redline-knowledge-center" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center";
+type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "signatures" | "ingestion" | "compliance" | "review" | "review-dashboard" | "executive-dashboard" | "policy" | "clause-intelligence" | "redline-knowledge-center" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center";
 
 interface SidebarProps {
   activeView: ViewType;
