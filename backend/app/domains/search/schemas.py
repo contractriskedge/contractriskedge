@@ -50,6 +50,10 @@ class SearchResultItem(BaseModel):
     status: Optional[str] = None
     owner: Optional[str] = None
     due_date: Optional[str] = None
+    created_at: Optional[str] = None
+    risk_level: Optional[str] = None
+    severity: Optional[str] = None
+    vendor: Optional[str] = None
 
 
 class SearchResponse(BaseModel):

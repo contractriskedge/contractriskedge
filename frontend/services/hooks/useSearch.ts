@@ -45,6 +45,10 @@ export interface SearchResultItem {
   status?: string | null;
   owner?: string | null;
   due_date?: string | null;
+  created_at?: string | null;
+  risk_level?: string | null;
+  severity?: string | null;
+  vendor?: string | null;
 }
 
 export interface SearchResponse {

@@ -27,6 +27,46 @@ import {
   type WidgetDefinition,
 } from "@/components/shared/WidgetManager";
 
+import { formatDate, isMissingDate } from "@/lib/date-utils";
+
+// ── Score / risk helpers ─────────────────────────────────────────
+
+/** Normalize backend scores (0–1 fusion, 0–10 keyword/ILIKE) to 0–100 relevance %. */
+export function toRelevancePercent(score: number): number {
+  if (!score || score <= 0) return 0;
+  if (score > 1) return Math.min(100, Math.round(score * 10));
+  return Math.min(100, Math.round(score * 100));
+}
+
+const VALID_RISK: Set<RiskLevel> = new Set(["critical", "high", "medium", "low", "info"]);
+
+function normalizeRiskLevel(value?: string | null): RiskLevel | null {
+  const v = (value || "").trim().toLowerCase();
+  if (VALID_RISK.has(v as RiskLevel)) return v as RiskLevel;
+  return null;
+}
+
+function deriveRiskLevel(item: SearchResultItem): RiskLevel | null {
+  const fromBackend = normalizeRiskLevel(item.risk_level) || normalizeRiskLevel(item.severity);
+  if (fromBackend) return fromBackend;
+  if (item.entity_type === "finding" || item.entity_type === "obligation") return "medium";
+  return null;
+}
+
+function buildDisplayMetadata(item: SearchResultItem): Record<string, string> {
+  const meta: Record<string, string> = {};
+  if (item.contract_number) meta.contract_number = item.contract_number;
+  if (item.page_numbers?.length) meta.page_numbers = item.page_numbers.join(", ");
+  if (item.section_heading) meta.section = item.section_heading;
+  if (item.clause_type) meta.clause_type = item.clause_type;
+  if (item.status) meta.status = item.status;
+  if (item.owner) meta.owner = item.owner;
+  if (item.vendor) meta.vendor = item.vendor;
+  if (item.due_date) meta.due_date = item.due_date;
+  meta.match = item.strategy;
+  return meta;
+}
+
 // ── Backend → Frontend result converter ──────────────────────────
 
 function toSearchResult(item: SearchResultItem, index: number): SearchResult {
@@ -44,13 +84,8 @@ function toSearchResult(item: SearchResultItem, index: number): SearchResult {
     playbook: "playbook",
   };
   const resultType: SearchResultType = typeMap[entityType] || "clause";
-
-  // Derive a risk level from score (heuristic)
-  const riskLevel: RiskLevel =
-    item.score >= 8.5 ? "critical" :
-    item.score >= 7.0 ? "high" :
-    item.score >= 5.0 ? "medium" :
-    item.score >= 3.0 ? "low" : "info";
+  const relevance = toRelevancePercent(item.score);
+  const riskLevel = deriveRiskLevel(item);
 
   let title = item.contract_name
     ? `${item.contract_name}${item.section_heading ? ` – ${item.section_heading}` : ""}`
@@ -84,30 +119,22 @@ function toSearchResult(item: SearchResultItem, index: number): SearchResult {
     subtitle,
     snippet: item.snippet,
     semanticSummary: item.snippet.slice(0, 200),
-    matchExplanation: `Matched via ${item.strategy} strategy with relevance ${(item.score * 10).toFixed(0)}%`,
-    confidence: item.score / 10,
-    riskLevel,
+    matchExplanation: `Matched via ${item.strategy} search · ${relevance}% relevance`,
+    confidence: relevance,
+    riskLevel: riskLevel ?? "info",
     highlights: [],
     entities: [],
     metadata: {
-      chunk_id: item.chunk_id,
-      entity_id: item.entity_id ?? "",
       entity_type: entityType,
+      entity_id: item.entity_id ?? "",
       review_id: item.review_id ?? item.contract_id ?? "",
       contract_id: item.review_id ?? item.contract_id ?? "",
-      upload_id: item.upload_id ?? "",
-      contract_number: item.contract_number ?? "",
-      strategy: item.strategy,
-      page_numbers: item.page_numbers.join(", "),
-      token_count: String(item.token_count),
-      status: item.status ?? "",
-      owner: item.owner ?? "",
-      due_date: item.due_date ?? "",
+      ...buildDisplayMetadata(item),
     },
-    lastUpdated: item.due_date ?? "",
+    lastUpdated: item.created_at ?? item.due_date ?? "",
     status: item.status ?? "active",
     vectorScore: item.strategy === "vector" || item.strategy === "hybrid" ? item.score : undefined,
-    keywordScore: item.strategy === "keyword" || item.strategy === "hybrid" ? item.score : undefined,
+    keywordScore: item.strategy === "keyword" || item.strategy === "hybrid" || item.strategy === "bm25" ? item.score : undefined,
     hybridScore: item.strategy === "hybrid" ? item.score : undefined,
   };
 }
@@ -144,11 +171,11 @@ function stripSyntheticId(id: string): string {
 
 // ── Default KPI cards (derived from search data) ────────────────
 
-function buildKpis(totalResults: number, avgScore: number, queryCount: number): SearchKpi[] {
+function buildKpis(totalResults: number, avgRelevance: number, queryCount: number, hasSearch: boolean): SearchKpi[] {
   return [
     {
       id: "total-results",
-      label: "Total Results",
+      label: hasSearch ? "Results Found" : "Indexed Chunks",
       value: String(totalResults),
       trend: 0,
       trendDirection: "neutral",
@@ -156,19 +183,21 @@ function buildKpis(totalResults: number, avgScore: number, queryCount: number): 
       color: "blue",
       severity: "info",
       sparklineData: [],
-      tooltip: "Total matching chunks found",
+      tooltip: hasSearch ? "Matching results for your query" : "Total searchable content chunks in the index",
     },
     {
       id: "avg-relevance",
-      label: "Search Ranking Strength",
-      value: (avgScore * 1000).toFixed(1),
+      label: hasSearch ? "Avg Relevance" : "Portfolio Risk",
+      value: hasSearch ? `${avgRelevance}%` : `${Math.round(avgRelevance)}%`,
       trend: 0,
       trendDirection: "neutral",
       icon: "Target",
       color: "emerald",
-      severity: avgScore >= 0.7 ? "success" : avgScore >= 0.4 ? "warning" : "critical",
+      severity: avgRelevance >= 70 ? "success" : avgRelevance >= 40 ? "warning" : "info",
       sparklineData: [],
-      tooltip: "Measures how consistently results rank highly across semantic and keyword search. Higher values indicate stronger agreement between ranking methods. Scale: 0-20+.",
+      tooltip: hasSearch
+        ? "Average relevance score across visible results (0–100%)"
+        : "Average contract risk score across the portfolio",
     },
     {
       id: "queries-today",
@@ -180,7 +209,7 @@ function buildKpis(totalResults: number, avgScore: number, queryCount: number): 
       color: "purple",
       severity: "info",
       sparklineData: [],
-      tooltip: "Popular queries count",
+      tooltip: "Search queries run in the last 24 hours",
     },
   ];
 }
@@ -277,20 +306,23 @@ export function SearchHub() {
 
   // ── Derive KPIs from real data ────────────────────────────────
 
-  const avgScore = useMemo(() => {
+  const avgRelevance = useMemo(() => {
     if (!searchData?.results?.length) return 0;
-    return searchData.results.reduce((s, r) => s + r.score, 0) / searchData.results.length;
+    const sum = searchData.results.reduce((s, r) => s + toRelevancePercent(r.score), 0);
+    return Math.round(sum / searchData.results.length);
   }, [searchData]);
 
   // Queries today: use the actual count from the pulse endpoint (search_queries table, last 24h)
   const queriesToday = pulseData?.queries_today ?? 0;
-  // When no search active, show portfolio totals from pulse
-  const displayTotalResults = searchData ? totalResults : (pulseData?.total_chunks ?? 0);
-  const displayAvgScore = searchData ? avgScore : (pulseData?.avg_risk_score ?? 0);
+  const hasActiveSearch = !!searchData && !!debouncedQuery;
+  const displayTotalResults = hasActiveSearch ? totalResults : (pulseData?.total_chunks ?? 0);
+  const displayAvgMetric = hasActiveSearch
+    ? avgRelevance
+    : Math.round((pulseData?.avg_risk_score ?? 0) * 100);
 
   const kpis = useMemo(
-    () => buildKpis(displayTotalResults, displayAvgScore, queriesToday),
-    [displayTotalResults, displayAvgScore, queriesToday],
+    () => buildKpis(displayTotalResults, displayAvgMetric, queriesToday, hasActiveSearch),
+    [displayTotalResults, displayAvgMetric, queriesToday, hasActiveSearch],
   );
 
   // ── Categories from search data ───────────────────────────────

@@ -4,7 +4,7 @@ import React from "react";
 import { motion } from "framer-motion";
 import {
   FileText, Target, Brain, FileSearch, Share2, Lightbulb,
-  Bell, AlertTriangle, TrendingUp, TrendingDown, Minus,
+  Bell, TrendingUp, TrendingDown, Minus, Search,
 } from "lucide-react";
 import type { SearchKpi } from "./types";
 
@@ -16,7 +16,7 @@ const iconMap: Record<string, React.ReactNode> = {
   Share2: <Share2 className="w-4 h-4" />,
   Lightbulb: <Lightbulb className="w-4 h-4" />,
   Bell: <Bell className="w-4 h-4" />,
-  AlertTriangle: <AlertTriangle className="w-4 h-4" />,
+  Search: <Search className="w-4 h-4" />,
 };
 
 function MiniSparkline({ data, color }: { data: number[]; color: string }) {
@@ -63,8 +63,12 @@ export function SearchKpiCards({ metrics, onKpiClick }: { metrics: SearchKpi[]; 
             <p className="text-lg font-bold text-navy-900 tabular-nums tracking-tight">{m.value}</p>
             <p className="text-[10px] text-gray-500 mt-0.5 truncate">{m.label}</p>
             <div className="flex items-center gap-1 mt-1 pt-1 border-t border-gray-50">
-              <TrendIcon className={`w-3 h-3 ${tc}`} />
-              <span className={`text-[10px] font-semibold tabular-nums ${tc}`}>{m.trend > 0 ? "+" : ""}{m.trend}%</span>
+              {m.trend !== 0 && (
+                <>
+                  <TrendIcon className={`w-3 h-3 ${tc}`} />
+                  <span className={`text-[10px] font-semibold tabular-nums ${tc}`}>{m.trend > 0 ? "+" : ""}{m.trend}%</span>
+                </>
+              )}
             </div>
           </motion.button>
         );

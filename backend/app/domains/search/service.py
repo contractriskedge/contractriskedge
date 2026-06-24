@@ -185,6 +185,9 @@ class SearchService:
                     score=round((row.confidence or 0) * 10, 4),
                     strategy="keyword",
                     status=row.resolution,
+                    severity=row.severity,
+                    risk_level=row.severity,
+                    created_at=row.created_at.isoformat() if row.created_at else None,
                 ))
             total += finding_total
             entity_totals["finding"] = finding_total
@@ -254,6 +257,7 @@ class SearchService:
                     status=row.status,
                     owner=row.owner,
                     due_date=str(row.due_date) if row.due_date else None,
+                    risk_level=row.risk_level,
                 ))
             total += ob_total
             entity_totals["obligation"] = ob_total
@@ -319,10 +323,12 @@ class SearchService:
                         contract_id=str(row.review_id),
                         contract_name=row.contract_name,
                         contract_number=row.contract_number,
-                        snippet=f"{row.contract_name or row.review_number} ({row.status})",
-                        score=9.0,
+                        snippet=f"{row.contract_name or row.review_number} · {row.status or 'active'}" + (f" · {row.vendor}" if row.vendor else ""),
+                        score=9.5,
                         strategy="keyword",
                         status=row.status,
+                        vendor=row.vendor,
+                        created_at=row.created_at.isoformat() if row.created_at else None,
                     ))
                 total += c_total
                 entity_totals["contract"] = c_total
@@ -368,6 +374,7 @@ class SearchService:
                         score=8.0,
                         strategy="keyword",
                         status=row.status,
+                        created_at=row.created_at.isoformat() if row.created_at else None,
                     ))
                 total += s_total
                 entity_totals["signature"] = s_total

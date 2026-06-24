@@ -9,6 +9,19 @@ import {
   Target, Loader2, CheckCircle, XCircle, Info, Search,
 } from "lucide-react";
 import type { SearchResult, SearchResultType, SearchHighlight } from "./types";
+import { formatDate, isMissingDate } from "@/lib/date-utils";
+
+const META_LABELS: Record<string, string> = {
+  contract_number: "Contract #",
+  page_numbers: "Pages",
+  section: "Section",
+  clause_type: "Clause",
+  status: "Status",
+  owner: "Owner",
+  vendor: "Vendor",
+  due_date: "Due",
+  match: "Match",
+};
 
 // ── Result Type Icon ─────────────────────────────────────────────────────
 
@@ -43,13 +56,14 @@ const resultTypeColors: Record<SearchResultType, string> = {
 // ── Confidence Badge ─────────────────────────────────────────────────────
 
 function ConfidenceBadge({ score }: { score: number }) {
-  const color = score >= 95 ? "text-green-600 bg-green-50 dark:bg-green-900/20 dark:text-green-400" :
-    score >= 85 ? "text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400" :
-    score >= 75 ? "text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400" :
-    "text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400";
+  const pct = Math.round(score);
+  const color = pct >= 85 ? "text-green-600 bg-green-50 dark:bg-green-900/20 dark:text-green-400" :
+    pct >= 65 ? "text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400" :
+    pct >= 40 ? "text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400" :
+    "text-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-gray-400";
   return (
     <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${color}`}>
-      {score}%
+      {pct}%
     </span>
   );
 }
@@ -105,6 +119,12 @@ interface SearchResultCardProps {
 
 function SearchResultCard({ result, isSelected, onSelect, onPreview }: SearchResultCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const entityType = String(result.metadata?.entity_type || result.type);
+  const showRisk = entityType === "finding" || entityType === "obligation" ||
+    (result.riskLevel && result.riskLevel !== "info");
+  const displayMeta = Object.entries(result.metadata)
+    .filter(([k, v]) => v && k !== "entity_type" && k !== "review_id" && k !== "contract_id")
+    .slice(0, 3);
 
   return (
     <motion.div
@@ -132,7 +152,7 @@ function SearchResultCard({ result, isSelected, onSelect, onPreview }: SearchRes
                 {result.type.replace("_", " ")}
               </span>
               <ConfidenceBadge score={result.confidence} />
-              <RiskBadge level={result.riskLevel} />
+              {showRisk && <RiskBadge level={result.riskLevel} />}
             </div>
 
             {/* Subtitle */}
@@ -205,13 +225,17 @@ function SearchResultCard({ result, isSelected, onSelect, onPreview }: SearchRes
         </div>
 
         {/* Meta Row */}
-        <div className="flex items-center gap-2 mt-1.5 text-[9px] text-gray-400">
-          <Clock className="w-2.5 h-2.5" />
-          <span>{new Date(result.lastUpdated).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
-          {Object.entries(result.metadata).slice(0, 3).map(([k, v]) => (
+        <div className="flex items-center gap-2 mt-1.5 text-[9px] text-gray-400 flex-wrap">
+          {!isMissingDate(result.lastUpdated) && (
+            <>
+              <Clock className="w-2.5 h-2.5" />
+              <span>{formatDate(result.lastUpdated)}</span>
+            </>
+          )}
+          {displayMeta.map(([k, v]) => (
             <React.Fragment key={k}>
               <span className="text-gray-300 dark:text-navy-500">·</span>
-              <span className="capitalize">{k}: {v}</span>
+              <span>{META_LABELS[k] || k}: {v}</span>
             </React.Fragment>
           ))}
           <span className="ml-auto flex items-center gap-0.5 text-[8px]">
