@@ -73,6 +73,20 @@ class SignatureRepository:
         await self.session.flush()
         return True
 
+    async def find_by_provider_reference(
+        self, provider_reference: str
+    ) -> Optional[SignatureRequest]:
+        """Find a signature request by its provider reference (e.g., DocuSign envelope ID)."""
+        result = await self.session.execute(
+            select(SignatureRequest).where(
+                and_(
+                    SignatureRequest.provider_reference == provider_reference,
+                    SignatureRequest.tenant_id == self.tenant_id,
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def delete_request(self, request_id: str) -> bool:
         request = await self.get_request(request_id)
         if not request:

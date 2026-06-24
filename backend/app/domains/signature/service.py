@@ -7,6 +7,8 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+from sqlalchemy import select, and_
+
 from .models import SignatureRequest, SignatureSigner, SignatureAuditEvent
 from .repository import SignatureRepository
 from .schemas import (
@@ -23,6 +25,35 @@ from .providers import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ── Status Transition Map ──────────────────────────────────────
+# Only allow forward transitions (idempotent webhook processing)
+_ALLOWED_TRANSITIONS: dict[str, set[str]] = {
+    "draft": {"preparing", "sent"},
+    "preparing": {"sent"},
+    "sent": {"viewed", "partially_signed", "completed", "declined"},
+    "viewed": {"partially_signed", "completed", "declined"},
+    "partially_signed": {"completed", "declined"},
+    "completed": set(),  # terminal
+    "declined": set(),    # terminal
+    "expired": set(),     # terminal
+    "voided": set(),      # terminal
+}
+
+# Map DocuSign webhook event types to internal statuses
+_WEBHOOK_STATUS_MAP: dict[str, str] = {
+    "envelope_sent": "sent",
+    "envelope_delivered": "viewed",
+    "envelope_completed": "completed",
+    "envelope_declined": "declined",
+    "envelope_voided": "voided",
+    "envelope_expired": "expired",
+    "recipient_sent": "sent",
+    "recipient_delivered": "viewed",
+    "recipient_signed": "partially_signed",
+    "recipient_completed": "completed",
+    "recipient_declined": "declined",
+}
 
 
 class SignatureService:
@@ -338,9 +369,11 @@ class SignatureService:
 
         Every webhook must:
         1. Validate signature (HMAC / API secret)
-        2. Reject duplicates (idempotency key)
-        3. Log raw payload
-        4. Be idempotent (status transitions only forward)
+        2. Look up the signature request by provider reference
+        3. Transition status forward only (idempotent)
+        4. Update signer status if recipient event
+        5. Log raw payload to audit trail
+        6. Trigger lifecycle transitions on completion/decline
         """
         provider = self._get_provider(provider_name)
         event = provider.validate_webhook(headers, body)
@@ -356,17 +389,151 @@ class SignatureService:
             },
         )
 
-        # Find request by provider reference
-        # TODO: Look up SignatureRequest by provider_reference
-        # Update status based on event type
-        # Only transition forward (e.g., sent → viewed → signed → completed)
+        # Map webhook event type to internal status
+        new_status = _WEBHOOK_STATUS_MAP.get(event.event_type)
+        if not new_status:
+            logger.warning("Unknown webhook event type: %s", event.event_type)
+            return {
+                "event_type": event.event_type,
+                "status": "ignored",
+                "message": f"Unknown event type: {event.event_type}",
+            }
+
+        # Find the signature request by provider reference (envelope ID)
+        request = await self.repo.find_by_provider_reference(event.envelope_id)
+        if not request:
+            logger.warning(
+                "No signature request found for provider reference: %s",
+                event.envelope_id,
+            )
+            return {
+                "event_type": event.event_type,
+                "provider_reference": event.envelope_id,
+                "status": "not_found",
+                "message": "No matching signature request found",
+            }
+
+        # Idempotent status transition — only move forward
+        current = request.status
+        allowed = _ALLOWED_TRANSITIONS.get(current, set())
+        if new_status not in allowed:
+            logger.info(
+                "Ignoring webhook %s → %s for request %s (current: %s, allowed: %s)",
+                current, new_status, request.id, current, allowed,
+            )
+            return {
+                "event_type": event.event_type,
+                "provider_reference": event.envelope_id,
+                "status": current,
+                "message": f"Ignored — cannot transition from {current} to {new_status}",
+            }
+
+        # Update request status
+        extra = {"updated_at": datetime.now(timezone.utc)}
+        if new_status == "completed":
+            extra["completed_at"] = datetime.now(timezone.utc)
+        elif new_status == "sent":
+            extra["sent_at"] = datetime.now(timezone.utc)
+
+        await self.repo.update_request_status(request.id, new_status, **extra)
+
+        # Update signer status if recipient email is known
+        if event.recipient_email:
+            signers = await self.repo.get_signers(request.id)
+            for signer in signers:
+                if signer.email == event.recipient_email:
+                    signer_status = "signed" if new_status in ("completed", "partially_signed") else new_status
+                    await self.repo.update_signer_status(
+                        signer.id, signer_status,
+                        signed_at=datetime.now(timezone.utc) if new_status in ("completed", "partially_signed") else None,
+                    )
+                    break
+
+        # Trigger lifecycle transitions
+        await self._trigger_lifecycle(request, new_status, current)
+
+        # Send notifications
+        await self._send_signature_notification(request, new_status, event.recipient_email)
+
+        logger.info(
+            "Webhook processed: %s → %s for request %s",
+            current, new_status, request.id,
+        )
 
         return {
             "event_type": event.event_type,
             "provider_reference": event.envelope_id,
-            "status": event.status,
+            "request_id": request.id,
+            "from_status": current,
+            "to_status": new_status,
             "message": "Webhook processed",
         }
+
+    async def _trigger_lifecycle(
+        self, request: SignatureRequest, new_status: str, old_status: str
+    ) -> None:
+        """Trigger contract lifecycle transitions based on signature status."""
+        if not request.contract_id:
+            return
+
+        try:
+            from app.domains.contracts.lifecycle import ContractLifecycleService
+
+            lifecycle = ContractLifecycleService()
+            if new_status == "completed":
+                await lifecycle.on_signature_complete(request.contract_id)
+            elif new_status == "declined":
+                await lifecycle.on_signature_declined(request.contract_id)
+            elif new_status == "sent":
+                await lifecycle.on_signature_sent(request.contract_id)
+            elif new_status == "partially_signed":
+                await lifecycle.on_signature_partial(request.contract_id)
+        except Exception as exc:
+            logger.warning(
+                "Lifecycle transition failed for contract %s: %s",
+                request.contract_id, exc,
+            )
+
+    async def _send_signature_notification(
+        self, request: SignatureRequest, new_status: str, recipient_email: Optional[str] = None
+    ) -> None:
+        """Send notifications for signature status changes."""
+        try:
+            from app.domains.notify.service import NotificationService
+            from app.kernel.database.session import db_session
+
+            session = db_session.get()
+            if not session:
+                return
+
+            notify = NotificationService(
+                repo=None,  # Will be initialized properly
+                event_bus=None,
+                tenant_id=request.tenant_id,
+            )
+
+            notification_map = {
+                "sent": ("contract.signature.sent", "Contract sent for signature"),
+                "viewed": ("contract.signature.viewed", "Signature invitation viewed"),
+                "partially_signed": ("contract.signature.partial", "Some signers have completed"),
+                "completed": ("contract.signature.completed", "Contract fully executed"),
+                "declined": ("contract.signature.declined", "Signature was declined"),
+                "expired": ("contract.signature.expired", "Signature request expired"),
+            }
+
+            entry = notification_map.get(new_status)
+            if entry:
+                notif_type, title = entry
+                await notify.send_notification(
+                    user_id=request.created_by,
+                    notif_type=notif_type,
+                    title=title,
+                    body=f"Signature request '{request.title}' is now {new_status}",
+                    entity_type="signature",
+                    entity_id=request.id,
+                )
+        except Exception as exc:
+            logger.warning("Signature notification failed: %s", exc)
 
     # ── Internal ────────────────────────────────────────────────
 
