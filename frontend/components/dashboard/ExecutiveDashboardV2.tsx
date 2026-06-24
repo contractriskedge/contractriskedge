@@ -90,7 +90,7 @@ interface SignatureStatus {
 function useExecutiveSummary() {
   return useQuery<ExecutiveSummary>({
     queryKey: ["dashboard", "executive-summary"],
-    queryFn: () => api.get("/api/v1/dashboard/executive-summary"),
+    queryFn: () => api.get("/dashboard/executive-summary"),
     staleTime: 60_000,
     gcTime: 5 * 60_000,
     refetchOnWindowFocus: true,
@@ -100,7 +100,7 @@ function useExecutiveSummary() {
 function useRiskDistribution() {
   return useQuery<RiskDistribution>({
     queryKey: ["dashboard", "risk-distribution"],
-    queryFn: () => api.get("/api/v1/dashboard/risk-distribution"),
+    queryFn: () => api.get("/dashboard/risk-distribution"),
     staleTime: 60_000,
     gcTime: 5 * 60_000,
   });
@@ -109,7 +109,7 @@ function useRiskDistribution() {
 function useRiskTrend(months = 12) {
   return useQuery<RiskTrendPoint[]>({
     queryKey: ["dashboard", "risk-trend", months],
-    queryFn: () => api.get(`/api/v1/dashboard/risk-trend?months=${months}`),
+    queryFn: () => api.get(`/dashboard/risk-trend?months=${months}`),
     staleTime: 5 * 60_000,
     gcTime: 10 * 60_000,
   });
@@ -118,7 +118,7 @@ function useRiskTrend(months = 12) {
 function useWorkflowDistribution() {
   return useQuery<WorkflowDistribution>({
     queryKey: ["dashboard", "workflow-distribution"],
-    queryFn: () => api.get("/api/v1/dashboard/workflow-distribution"),
+    queryFn: () => api.get("/dashboard/workflow-distribution"),
     staleTime: 60_000,
     gcTime: 5 * 60_000,
   });
@@ -127,7 +127,7 @@ function useWorkflowDistribution() {
 function useRenewalBuckets() {
   return useQuery<RenewalBuckets>({
     queryKey: ["dashboard", "renewal-buckets"],
-    queryFn: () => api.get("/api/v1/dashboard/renewal-buckets"),
+    queryFn: () => api.get("/dashboard/renewal-buckets"),
     staleTime: 5 * 60_000,
     gcTime: 10 * 60_000,
   });
@@ -136,7 +136,7 @@ function useRenewalBuckets() {
 function useSignatureStatus() {
   return useQuery<SignatureStatus>({
     queryKey: ["dashboard", "signature-status"],
-    queryFn: () => api.get("/api/v1/dashboard/signature-status"),
+    queryFn: () => api.get("/dashboard/signature-status"),
     staleTime: 60_000,
     gcTime: 5 * 60_000,
   });
