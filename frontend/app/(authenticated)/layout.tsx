@@ -61,6 +61,7 @@ export default function AuthenticatedLayout({
     else if (path.startsWith("/admin")) setActiveView("admin");
     else if (path.startsWith("/settings")) setActiveView("settings");
     else if (path.startsWith("/command-center")) setActiveView("command-center");
+    else if (path.startsWith("/executive-dashboard")) setActiveView("executive-dashboard");
     else if (path.startsWith("/executive")) setActiveView("executive-command-center");
     else if (path.startsWith("/search")) setActiveView("search");
     else if (path.startsWith("/clause-library")) setActiveView("clause-library");
@@ -111,7 +112,7 @@ export default function AuthenticatedLayout({
               settings: "/settings",
               "command-center": "/command-center",
               "executive-command-center": "/executive",
-              "executive-dashboard": "/executive",
+              "executive-dashboard": "/executive-dashboard",
               search: "/search",
               ingestion: "/ingestion",
               "clause-library": "/clause-library",
