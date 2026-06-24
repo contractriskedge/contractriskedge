@@ -366,8 +366,19 @@ class SearchService:
                     ))
                 total += s_total
 
-        # Sort combined results by score descending
-        all_results.sort(key=lambda r: r.score, reverse=True)
+        # Sort combined results by score descending with entity type boosting.
+        # Entity results (contract, finding, obligation, signature) are boosted
+        # above chunk text matches so users see the most relevant entities first.
+        _ENTITY_BOOST = {
+            "contract": 20.0,
+            "finding": 15.0,
+            "obligation": 15.0,
+            "signature": 15.0,
+        }
+        all_results.sort(
+            key=lambda r: r.score + _ENTITY_BOOST.get(r.entity_type, 0.0),
+            reverse=True,
+        )
 
         # Paginate combined results
         page = request.page
