@@ -835,6 +835,8 @@ export function SearchHub() {
             onResultSelect={handleResultSelect}
             onPreview={handlePreview}
             selectedResultId={selectedResultId}
+            activeEntityTab={activeCategory}
+            onEntityTabChange={handleCategoryChange}
           />
         )}
 
