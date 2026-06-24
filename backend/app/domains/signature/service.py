@@ -19,7 +19,6 @@ from .schemas import (
 )
 from .providers import (
     SignatureProvider,
-    DocuSignProvider,
     SignerInfo,
 )
 

@@ -17,6 +17,7 @@ from app.config import settings
 from .repository import SignatureRepository
 from .service import SignatureService
 from .providers.docusign import DocuSignProvider
+from .providers.factory import create_provider
 from .schemas import (
     SignatureRequestCreate,
     SignatureRequestUpdate,
@@ -270,15 +271,7 @@ async def get_docusign_consent_url():
     After consent is granted, the application can generate tokens
     via JWT without further user interaction.
     """
-    provider = DocuSignProvider(
-        integration_key=settings.docusign_integration_key,
-        user_id=settings.docusign_user_id,
-        account_id=settings.docusign_account_id,
-        private_key=settings.docusign_private_key,
-        client_secret=settings.docusign_client_secret,
-        base_url=settings.docusign_base_url,
-        auth_server=settings.docusign_auth_server,
-    )
+    provider = create_provider("docusign")
     consent_url = provider.get_consent_url()
     return {
         "consent_url": consent_url,
@@ -298,15 +291,7 @@ async def get_docusign_consent_url():
 async def check_docusign_connection():
     """Check if the DocuSign connection is working by attempting to get a token."""
     try:
-        provider = DocuSignProvider(
-            integration_key=settings.docusign_integration_key,
-            user_id=settings.docusign_user_id,
-            account_id=settings.docusign_account_id,
-            private_key=settings.docusign_private_key,
-            client_secret=settings.docusign_client_secret,
-            base_url=settings.docusign_base_url,
-            auth_server=settings.docusign_auth_server,
-        )
+        provider = create_provider("docusign")
         token = await provider._ensure_authenticated()
         return {
             "status": "connected",
