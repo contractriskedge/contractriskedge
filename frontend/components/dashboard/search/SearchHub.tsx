@@ -313,7 +313,10 @@ export function SearchHub() {
 
   const filteredResults = useMemo(() => {
     if (activeCategory === "all") return results;
-    return results.filter((r) => r.type === activeCategory);
+    return results.filter((r) => {
+      const entityType = String(r.metadata?.entity_type || r.type);
+      return entityType === activeCategory;
+    });
   }, [results, activeCategory]);
 
   // ── Handlers ──────────────────────────────────────────────────
