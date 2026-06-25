@@ -362,7 +362,7 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
             </button>
           )}
           {/* Send for Signature — for finalized or approved contracts */}
-          {(contract.status === "finalized" || contract.status === "approved") && (
+          {(contract.status === "finalized" || contract.status === "approved" || contract.status === "active") && (
             <button
               onClick={() => router.push(`/signatures?contractId=${contractId}&action=create`)}
               className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 transition-colors shadow-sm"

@@ -92,7 +92,7 @@ function normalizeContractDetail(raw: Record<string, unknown>): ContractDetail {
     risk_level: (raw.risk_level ?? raw.riskLevel ?? "medium") as ContractDetail["risk_level"],
     financial_value: Number(raw.financial_value ?? raw.financialValue ?? 0),
     currency: String(raw.currency ?? "USD"),
-    status: String(raw.status ?? "draft"),
+    status: String(raw.reviewStatus ?? raw.status ?? "draft"),
     workflow_stage: String(raw.workflow_stage ?? raw.workflowStage ?? ""),
     effective_date: String(raw.effective_date ?? raw.effectiveDate ?? raw.createdAt ?? ""),
     expiration_date: String(raw.expiration_date ?? raw.expirationDate ?? raw.renewalDate ?? ""),
