@@ -370,7 +370,8 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
               onClick={async () => {
                 setActionLoading("sign");
                 try {
-                  const result = await api.post("/signatures", {
+                  // Step 1: Create signature request in draft status
+                  const created: any = await api.post("/signatures", {
                     contract_id: contractId,
                     title: `Sign: ${contract.name || contract.filename || contractId}`,
                     provider: "docusign",
@@ -385,12 +386,23 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                     email_subject: `Please sign: ${contract.name || contract.filename || "Contract"}`,
                     email_message: "This document is ready for your electronic signature via DocuSign.",
                   });
-                  console.log("Signature request created:", result);
-                  alert("Signature request created successfully! Check the Signatures page for details.");
+                  const requestId = created.id;
+                  console.log("Signature request created:", requestId);
+
+                  // Step 2: Prepare it (moves to 'preparing' status)
+                  await api.post(`/signatures/${requestId}/prepare`);
+
+                  // Step 3: Send it to DocuSign (creates envelope, sends email)
+                  const sent: any = await api.post(`/signatures/${requestId}/send`, {
+                    email_subject: `Please sign: ${contract.name || contract.filename || "Contract"}`,
+                    email_message: "This document is ready for your electronic signature via DocuSign.",
+                  });
+                  console.log("Sent to DocuSign:", sent);
+                  alert(`Envelope sent to DocuSign! Envelope ID: ${sent.provider_reference || "N/A"}. The signer will receive an email.`);
                   refetch();
                 } catch (err: any) {
                   console.error("Failed to send for signature:", err);
-                  alert(`Failed to create signature request: ${err?.message || "Unknown error"}. Check console for details.`);
+                  alert(`Failed: ${err?.message || "Unknown error"}. Check console for details.`);
                 } finally {
                   setActionLoading(null);
                 }
