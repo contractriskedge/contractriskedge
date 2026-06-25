@@ -34,8 +34,8 @@ class SignatureRequest(Base):
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    contract_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("contract_reviews.review_id"), nullable=True)
-    session_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("negotiation_sessions.session_id"), nullable=True)
+    contract_id: Mapped[Optional[str]] = mapped_column(UUID(as_uuid=False), ForeignKey("contract_reviews.review_id"), nullable=True)
+    session_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="draft", index=True)
 

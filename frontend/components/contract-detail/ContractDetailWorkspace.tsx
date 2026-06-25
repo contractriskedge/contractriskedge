@@ -54,6 +54,7 @@ import {
 } from "./hooks";
 import { useRiskBreakdown } from "@/services/hooks";
 import { reviewService } from "@/services/api/reviews";
+import { api } from "@/services";
 import { useCloseReview } from "@/services/hooks/useReviews";
 import type { GovernanceTraceability } from "@/services/api/client";
 import { RelatedReviewsPanel } from "./RelatedReviewsPanel";
@@ -117,7 +118,7 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
 
   // ── Data Fetching (repository-only) ──────────────────────────────────
 
-  const { data: contract, isLoading: contractLoading, error: contractError } = useContractDetail(contractId);
+  const { data: contract, isLoading: contractLoading, error: contractError, refetch } = useContractDetail(contractId);
   const { data: activityData } = useContractActivity(contractId);
   const { data: obligationsData } = useContractObligations(contractId);
   const { data: obligationActivityData } = useContractObligationActivity(contractId);
@@ -364,11 +365,37 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
           {/* Send for Signature — for finalized or approved contracts */}
           {(contract.status === "finalized" || contract.status === "approved" || contract.status === "active") && (
             <button
-              onClick={() => router.push(`/signatures?contractId=${contractId}&action=create`)}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 transition-colors shadow-sm"
+              onClick={async () => {
+                setActionLoading("sign");
+                try {
+                  await api.post("/signatures", {
+                    contract_id: contractId,
+                    title: `Sign: ${contract.name || contract.filename || contractId}`,
+                    provider: "docusign",
+                    signers: [
+                      {
+                        email: "contractriskedge+signer1@gmail.com",
+                        name: "Test Signer",
+                        role: "signer",
+                        signing_order: 1,
+                      },
+                    ],
+                    email_subject: `Please sign: ${contract.name || contract.filename || "Contract"}`,
+                    email_message: "This document is ready for your electronic signature via DocuSign.",
+                  });
+                  // Refresh contract data to show new status
+                  refetch();
+                } catch (err) {
+                  console.error("Failed to send for signature:", err);
+                } finally {
+                  setActionLoading(null);
+                }
+              }}
+              disabled={actionLoading === "sign"}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 transition-colors shadow-sm"
               title="Send for signature via DocuSign"
             >
-              <FileSignature className="w-3.5 h-3.5" />
+              {actionLoading === "sign" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileSignature className="w-3.5 h-3.5" />}
               Send for Signature
             </button>
           )}
