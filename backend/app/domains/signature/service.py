@@ -241,15 +241,18 @@ class SignatureService:
         provider = self._get_provider(request.provider)
         signers = await self.repo.get_signers(request_id)
 
-        # Build signer info for provider
-        # Do NOT set client_user_id — we want DocuSign to send email invitations
-        signer_infos = [
-            SignerInfo(
-                email=s.email, name=s.name,
-                role=s.role, signing_order=s.signing_order,
+        # Resolve signer emails through tenant email redirect
+        resolved_signers = []
+        for s in signers:
+            email = await self._resolve_recipient_email(s.email)
+            resolved_signers.append(
+                SignerInfo(
+                    email=email,
+                    name=s.name,
+                    role=s.role,
+                    signing_order=s.signing_order,
+                )
             )
-            for s in signers
-        ]
 
         # Get document bytes from storage
         document_bytes = b""
@@ -302,7 +305,7 @@ class SignatureService:
         response = await provider.send_envelope(
             document_bytes=document_bytes,
             document_name=document_name,
-            signers=signer_infos,
+            signers=resolved_signers,
             email_subject=body.email_subject or request.email_subject or f"Please sign: {request.title}",
             email_body=body.email_message or request.email_message or "",
             expires_at=request.expires_at,
@@ -717,3 +720,31 @@ class SignatureService:
             created_at=datetime.now(timezone.utc),
         )
         await self.repo.add_audit_event(event)
+
+    async def _resolve_recipient_email(self, original_email: str) -> str:
+        """Resolve the actual delivery email for a signer.
+
+        If the tenant has email redirect enabled, the DocuSign envelope
+        email goes to the redirect address instead of the signer's email.
+        This allows testing without sending to real signer addresses.
+        """
+        try:
+            from sqlalchemy import text as sa_text
+            row = await self.repo.session.execute(
+                sa_text("""
+                    SELECT email_redirect_enabled, email_redirect_to
+                    FROM tenant_settings
+                    WHERE tenant_id = :tenant_id
+                """),
+                {"tenant_id": self.repo.tenant_id},
+            )
+            settings = row.fetchone()
+            if settings and settings.email_redirect_enabled and settings.email_redirect_to:
+                logger.info(
+                    "Email redirected for signature: %s -> %s",
+                    original_email, settings.email_redirect_to,
+                )
+                return settings.email_redirect_to
+        except Exception as exc:
+            logger.warning("Failed to check email redirect: %s", exc)
+        return original_email
