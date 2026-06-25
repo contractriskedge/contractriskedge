@@ -377,8 +377,8 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                     provider: "docusign",
                     signers: [
                       {
-                        email: "contractriskedge+signer1@gmail.com",
-                        name: "Test Signer",
+                        email: "contractriskedge@gmail.com",
+                        name: "Contract Risk Edge Admin",
                         role: "signer",
                         signing_order: 1,
                       },
@@ -928,7 +928,7 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                             contract_id: contractId,
                             title: `Sign: ${contract.name || contract.filename || contractId}`,
                             provider: "docusign",
-                            signers: [{ email: "contractriskedge+signer1@gmail.com", name: "Test Signer", role: "signer", signing_order: 1 }],
+                            signers: [{ email: "contractriskedge@gmail.com", name: "Contract Risk Edge Admin", role: "signer", signing_order: 1 }],
                             email_subject: `Please sign: ${contract.name || contract.filename || "Contract"}`,
                             email_message: "This document is ready for your electronic signature via DocuSign.",
                           });
