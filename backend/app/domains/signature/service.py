@@ -242,11 +242,11 @@ class SignatureService:
         signers = await self.repo.get_signers(request_id)
 
         # Build signer info for provider
+        # Do NOT set client_user_id — we want DocuSign to send email invitations
         signer_infos = [
             SignerInfo(
                 email=s.email, name=s.name,
                 role=s.role, signing_order=s.signing_order,
-                client_user_id=s.id if hasattr(s, 'id') and s.id else None,
             )
             for s in signers
         ]
