@@ -231,7 +231,7 @@ interface ContractsTableProps {
   onAction?: (contractId: string, action: ActionType) => void;
 }
 
-type SortKey = "riskScore" | "financialValue" | "name" | "vendor" | "renewalDate" | "aiConfidence" | "lastModified" | "effectiveDate" | "expirationDate";
+type SortKey = "riskScore" | "financialValue" | "name" | "vendor" | "renewalDate" | "aiConfidence" | "lastModified" | "effectiveDate" | "expirationDate" | "status" | "contractType" | "owner" | "workflowStage" | "lifecycle" | "lastActivity" | "renewalRisk";
 
 export function ContractsTable({ contracts, onSelectContract, onAction }: ContractsTableProps) {
   const { user } = useAuth();
@@ -270,13 +270,13 @@ export function ContractsTable({ contracts, onSelectContract, onAction }: Contra
       if (sortKey === "riskScore") return (a.riskScore - b.riskScore) * d;
       if (sortKey === "financialValue") return (a.financialValue - b.financialValue) * d;
       if (sortKey === "aiConfidence") return (a.aiConfidence - b.aiConfidence) * d;
-      if (sortKey === "renewalDate" || sortKey === "effectiveDate" || sortKey === "expirationDate") {
+      if (sortKey === "renewalDate" || sortKey === "effectiveDate" || sortKey === "expirationDate" || sortKey === "lastActivity") {
         const aVal = a[sortKey] || "";
         const bVal = b[sortKey] || "";
         return aVal.localeCompare(bVal) * d;
       }
       if (sortKey === "lastModified") return (new Date(a.lastModified).getTime() - new Date(b.lastModified).getTime()) * d;
-      return a[sortKey].localeCompare(b[sortKey]) * d;
+      return String(a[sortKey] ?? "").localeCompare(String(b[sortKey] ?? "")) * d;
     });
     return list;
   }, [contracts, sortKey, sortDir, favoritesOnly, favorites]);
@@ -427,10 +427,7 @@ export function ContractsTable({ contracts, onSelectContract, onAction }: Contra
                 </div>
               </th>
               {ALL_COLUMNS.filter(c => visibleColumns.has(c.key)).map(col => {
-                if (["name", "vendor", "riskScore", "financialValue", "renewalDate", "aiConfidence", "lastModified", "effectiveDate", "expirationDate"].includes(col.key)) {
-                  return <SortHeader key={col.key} label={col.label} k={col.key as SortKey} />;
-                }
-                return <th key={col.key} className={`text-left py-2 px-2 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider ${colClass(col.key)}`}>{col.label}</th>;
+                return <SortHeader key={col.key} label={col.label} k={col.key as SortKey} />;
               })}
               <th className="py-2 px-2 w-8">
                 <div className="relative">

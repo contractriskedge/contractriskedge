@@ -102,6 +102,9 @@ export function FilterBar({ filters, onChange, onReset, allContracts }: FilterBa
         className="text-[11px] border border-gray-200 dark:border-navy-600 rounded-md px-2 py-1 text-gray-600 dark:text-gray-300 bg-white dark:bg-navy-800 hover:border-gray-300 dark:hover:border-navy-500 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors cursor-pointer" aria-label="Status">
         <option value="">Status</option>
         <option value="active">Active</option>
+        <option value="approved">Approved</option>
+        <option value="completed">Completed</option>
+        <option value="executed">Executed</option>
         <option value="expiring_soon">Expiring Soon</option>
         <option value="under_review">Under Review</option>
         <option value="expired">Expired</option>
