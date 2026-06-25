@@ -245,7 +245,6 @@ class SignatureService:
         signer_infos = [
             SignerInfo(
                 email=s.email, name=s.name,
-                title=s.title or "", company=s.company or "",
                 role=s.role, signing_order=s.signing_order,
                 client_user_id=s.id if hasattr(s, 'id') and s.id else None,
             )

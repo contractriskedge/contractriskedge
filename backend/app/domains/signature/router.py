@@ -18,6 +18,7 @@ from .repository import SignatureRepository
 from .service import SignatureService
 from .providers.docusign import DocuSignProvider
 from .providers.factory import create_provider
+from app.config import settings
 from .schemas import (
     SignatureRequestCreate,
     SignatureRequestUpdate,
@@ -48,7 +49,14 @@ async def get_service(
     repo: SignatureRepository = Depends(get_repo),
     user: UserContext = Depends(get_current_user),
 ) -> SignatureService:
-    return SignatureService(repo, actor_id=user.id)
+    service = SignatureService(repo, actor_id=user.id)
+    # Register the DocuSign provider so send_for_signature works
+    try:
+        provider = create_provider("docusign")
+        service.register_provider("docusign", provider)
+    except Exception as exc:
+        logger.warning("Failed to register DocuSign provider: %s", exc)
+    return service
 
 
 # ── Signature Requests ──────────────────────────────────────────
