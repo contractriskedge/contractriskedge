@@ -143,32 +143,21 @@ class SignatureService:
         # Also log to governance_audit_events for the contract timeline
         if body.contract_id:
             try:
-                from sqlalchemy import text as sa_text
-                await self.repo.session.execute(
-                    sa_text("""
-                        INSERT INTO governance_audit_events (
-                            event_id, tenant_id, event_type, entity_type, entity_id,
-                            actor_id, previous_state, new_state, change_summary, metadata, created_at
-                        ) VALUES (
-                            gen_random_uuid(), :tenant_id, 'signature.request_created',
-                            'contract', :contract_id, :actor_id,
-                            '{}', '{"status": "draft"}',
-                            :summary, :metadata, NOW()
-                        )
-                    """),
-                    {
-                        "tenant_id": self.repo.tenant_id,
-                        "contract_id": body.contract_id,
-                        "actor_id": self.actor_id,
-                        "summary": f"Signature request created: {body.title}",
-                        "metadata": json.dumps({
-                            "provider": body.provider,
-                            "signer_count": len(body.signers),
-                            "request_id": request.id,
-                        }),
+                from app.domains.audit.recorder import AuditRecorder
+                recorder = AuditRecorder(self.repo.session, self.repo.tenant_id)
+                await recorder.record(
+                    event_type="signature.request_created",
+                    actor_id=self.actor_id,
+                    description=f"Signature request created: {body.title}",
+                    entity_type="contract",
+                    entity_id=body.contract_id,
+                    after_state={"status": "draft"},
+                    metadata={
+                        "provider": body.provider,
+                        "signer_count": len(body.signers),
+                        "request_id": request.id,
                     },
                 )
-                await self.repo.session.flush()
             except Exception as exc:
                 logger.warning("Failed to log governance audit event: %s", exc)
 
@@ -349,32 +338,22 @@ class SignatureService:
         # Log to governance_audit_events for contract timeline
         if request.contract_id:
             try:
-                from sqlalchemy import text as sa_text
-                await self.repo.session.execute(
-                    sa_text("""
-                        INSERT INTO governance_audit_events (
-                            event_id, tenant_id, event_type, entity_type, entity_id,
-                            actor_id, previous_state, new_state, change_summary, metadata, created_at
-                        ) VALUES (
-                            gen_random_uuid(), :tenant_id, 'signature.sent',
-                            'contract', :contract_id, :actor_id,
-                            '{"status": "draft"}', '{"status": "sent"}',
-                            :summary, :metadata, NOW()
-                        )
-                    """),
-                    {
-                        "tenant_id": self.repo.tenant_id,
-                        "contract_id": request.contract_id,
-                        "actor_id": self.actor_id,
-                        "summary": f"Sent for signature via {request.provider}: {request.title}",
-                        "metadata": json.dumps({
-                            "envelope_id": response.envelope_id,
-                            "provider": request.provider,
-                            "signer_count": len(signers),
-                        }),
+                from app.domains.audit.recorder import AuditRecorder
+                recorder = AuditRecorder(self.repo.session, self.repo.tenant_id)
+                await recorder.record(
+                    event_type="signature.sent",
+                    actor_id=self.actor_id,
+                    description=f"Sent for signature via {request.provider}: {request.title}",
+                    entity_type="contract",
+                    entity_id=request.contract_id,
+                    before_state={"status": "draft"},
+                    after_state={"status": "sent"},
+                    metadata={
+                        "envelope_id": response.envelope_id,
+                        "provider": request.provider,
+                        "signer_count": len(signers),
                     },
                 )
-                await self.repo.session.flush()
             except Exception as exc:
                 logger.warning("Failed to log governance audit event: %s", exc)
 
