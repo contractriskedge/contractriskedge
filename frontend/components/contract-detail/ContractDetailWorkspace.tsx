@@ -51,6 +51,7 @@ import {
   useContractClauses,
   useContractWorkflowHistory,
   useContractObligationActivity,
+  useContractSignatures,
 } from "./hooks";
 import { useRiskBreakdown } from "@/services/hooks";
 import { reviewService } from "@/services/api/reviews";
@@ -77,7 +78,7 @@ interface ContractDetailWorkspaceProps {
 export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<"overview" | "insights" | "clauses" | "activity" | "versions" | "reviews" | "lifecycle" | "workflow">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "insights" | "clauses" | "activity" | "versions" | "reviews" | "lifecycle" | "workflow" | "signatures">("overview");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [approvalModalOpen, setApprovalModalOpen] = useState(false);
   const [closeModalOpen, setCloseModalOpen] = useState(false);
@@ -126,6 +127,7 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
   const { data: findingsData } = useContractFindings(contractId);
   const { data: clausesData } = useContractClauses(contractId);
   const { data: workflowHistoryData } = useContractWorkflowHistory(contractId);
+  const { data: signaturesData } = useContractSignatures(contractId);
 
   const activityEvents = useMemo(() => {
     const contractEvents = activityData?.events ?? [];
@@ -547,6 +549,7 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
               { id: "lifecycle" as const, label: "Lifecycle", icon: Clock },
               { id: "activity" as const, label: "Activity", icon: Activity, badge: activityEvents.length },
               { id: "versions" as const, label: "Versions", icon: Clock, badge: versions.length },
+              { id: "signatures" as const, label: "Signatures", icon: FileSignature, badge: signaturesData?.length },
             ].map(tab => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -897,6 +900,80 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                   <span className="text-[9px] font-semibold text-gray-500 uppercase">Lifecycle History</span>
                 </div>
                 <LifecycleHistoryPanel events={activityEvents} />
+              </div>
+            )}
+
+            {activeTab === "signatures" && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-semibold text-gray-500 uppercase">Signature Requests</span>
+                  {(contract.status === "finalized" || contract.status === "approved" || contract.status === "active") && (
+                    <button
+                      onClick={async () => {
+                        setActionLoading("sign");
+                        try {
+                          await api.post("/signatures", {
+                            contract_id: contractId,
+                            title: `Sign: ${contract.name || contract.filename || contractId}`,
+                            provider: "docusign",
+                            signers: [{ email: "contractriskedge+signer1@gmail.com", name: "Test Signer", role: "signer", signing_order: 1 }],
+                            email_subject: `Please sign: ${contract.name || contract.filename || "Contract"}`,
+                            email_message: "This document is ready for your electronic signature via DocuSign.",
+                          });
+                          alert("Signature request created!");
+                          refetch();
+                        } catch (err: any) {
+                          alert(`Failed: ${err?.message || "Unknown error"}`);
+                        } finally {
+                          setActionLoading(null);
+                        }
+                      }}
+                      disabled={actionLoading === "sign"}
+                      className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 transition-colors shadow-sm"
+                    >
+                      {actionLoading === "sign" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileSignature className="w-3.5 h-3.5" />}
+                      Send for Signature
+                    </button>
+                  )}
+                </div>
+                {(!signaturesData || signaturesData.length === 0) ? (
+                  <div className="text-center py-12 text-gray-400">
+                    <FileSignature className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                    <p className="text-xs">No signature requests for this contract</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {signaturesData.map((sig: any) => (
+                      <div key={sig.id} className="border border-gray-200 dark:border-navy-700 rounded-lg p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{sig.title}</h4>
+                          <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
+                            sig.status === "completed" ? "bg-green-100 text-green-700" :
+                            sig.status === "sent" ? "bg-purple-100 text-purple-700" :
+                            sig.status === "declined" ? "bg-red-100 text-red-700" :
+                            "bg-gray-100 text-gray-600"
+                          }`}>{sig.status}</span>
+                        </div>
+                        <div className="text-xs text-gray-500 space-y-1">
+                          <p>Provider: {sig.provider}</p>
+                          {sig.provider_reference && <p>Envelope: {sig.provider_reference}</p>}
+                          <p>Created: {new Date(sig.created_at).toLocaleDateString()}</p>
+                        </div>
+                        {sig.signers?.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {sig.signers.map((s: any) => (
+                              <span key={s.id} className={`text-[10px] px-2 py-0.5 rounded-md ${
+                                s.status === "signed" ? "bg-green-50 text-green-700" :
+                                s.status === "declined" ? "bg-red-50 text-red-700" :
+                                "bg-gray-50 text-gray-500"
+                              }`}>{s.name} ({s.email}) - {s.status}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

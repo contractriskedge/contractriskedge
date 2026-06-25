@@ -590,3 +590,21 @@ export function useContractWorkflowHistory(contractId: string) {
     staleTime: 30_000,
   });
 }
+
+export function useContractSignatures(contractId: string) {
+  return useQuery({
+    queryKey: [...contractDetailKeys.all, "signatures", contractId],
+    queryFn: async () => {
+      try {
+        const res = await api.get<{ data: Array<Record<string, unknown>>; total: number }>(
+          `/signatures?contract_id=${contractId}&page_size=20`
+        );
+        return res.data ?? [];
+      } catch {
+        return [];
+      }
+    },
+    enabled: !!contractId,
+    staleTime: 30_000,
+  });
+}

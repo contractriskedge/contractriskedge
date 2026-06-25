@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -125,6 +126,51 @@ class SignatureService:
                 created_at=now,
             )
             await self.repo.add_signer(signer)
+
+        # Log audit event
+        await self._log_audit(
+            request.id,
+            "signature_request_created",
+            actor_email=self.actor_id,
+            details={
+                "provider": body.provider,
+                "contract_id": body.contract_id,
+                "signer_count": len(body.signers),
+                "signers": [{"email": s.email, "name": s.name} for s in body.signers],
+            },
+        )
+
+        # Also log to governance_audit_events for the contract timeline
+        if body.contract_id:
+            try:
+                from sqlalchemy import text as sa_text
+                await self.repo.session.execute(
+                    sa_text("""
+                        INSERT INTO governance_audit_events (
+                            event_id, tenant_id, event_type, entity_type, entity_id,
+                            actor_id, previous_state, new_state, change_summary, metadata, created_at
+                        ) VALUES (
+                            gen_random_uuid(), :tenant_id, 'signature.request_created',
+                            'contract', :contract_id, :actor_id,
+                            '{}', '{"status": "draft"}',
+                            :summary, :metadata, NOW()
+                        )
+                    """),
+                    {
+                        "tenant_id": self.repo.tenant_id,
+                        "contract_id": body.contract_id,
+                        "actor_id": self.actor_id,
+                        "summary": f"Signature request created: {body.title}",
+                        "metadata": json.dumps({
+                            "provider": body.provider,
+                            "signer_count": len(body.signers),
+                            "request_id": request.id,
+                        }),
+                    },
+                )
+                await self.repo.session.flush()
+            except Exception as exc:
+                logger.warning("Failed to log governance audit event: %s", exc)
 
         return await self._build_response(request.id)
 
