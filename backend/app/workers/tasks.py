@@ -84,3 +84,68 @@ def check_obligations_overdue(self):
 
     logger.info("check_obligations_overdue complete: %d obligations marked overdue", updated)
     return {"marked_overdue": updated, "checked_at": now.isoformat()}
+
+
+@shared_task(name="sync_signature_envelopes", bind=True, max_retries=3, default_retry_delay=60)
+def sync_signature_envelopes(self):
+    """Periodic task: poll DocuSign for completed envelopes and update local status.
+
+    Runs every 5 minutes via Celery Beat.
+    Finds all signature requests in 'sent' status and checks their envelope status.
+    """
+    import asyncio
+    from app.kernel.database.session import TenantAwareSessionFactory
+    from app.config import settings
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    try:
+        factory = TenantAwareSessionFactory(database_url=settings.database_url)
+        session = loop.run_until_complete(
+            factory.create_session(tenant_id="system", user_id="system", user_role="admin")
+        )
+
+        # Find all sent signature requests
+        rows = loop.run_until_complete(
+            session.execute(
+                sa_text("""
+                    SELECT id, tenant_id, provider_reference
+                    FROM signature_requests
+                    WHERE status = 'sent' AND provider_reference IS NOT NULL
+                """)
+            )
+        )
+        requests = rows.fetchall()
+        logger.info("sync_signature_envelopes: found %d sent envelopes to check", len(requests))
+
+        synced = 0
+        for row in requests:
+            try:
+                from app.domains.signature.service import SignatureService
+                from app.domains.signature.repository import SignatureRepository
+
+                repo = SignatureRepository(session, str(row.tenant_id))
+                service = SignatureService(repo, actor_id="system")
+
+                # Register provider
+                from app.domains.signature.providers.factory import create_provider
+                provider = create_provider("docusign")
+                service.register_provider("docusign", provider)
+
+                result = loop.run_until_complete(
+                    service.sync_envelope_status(str(row.id))
+                )
+                if result:
+                    synced += 1
+                    logger.info(
+                        "Synced envelope %s: %s", str(row.id)[:20], result.get("status"),
+                    )
+            except Exception as exc:
+                logger.warning("Failed to sync envelope %s: %s", str(row.id)[:20], exc)
+
+        logger.info("sync_signature_envelopes complete: %d/%d synced", synced, len(requests))
+        return {"synced": synced, "total": len(requests), "checked_at": datetime.now(timezone.utc).isoformat()}
+    finally:
+        loop.run_until_complete(factory.close())
+        loop.close()

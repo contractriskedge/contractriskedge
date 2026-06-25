@@ -748,3 +748,66 @@ class SignatureService:
         except Exception as exc:
             logger.warning("Failed to check email redirect: %s", exc)
         return original_email
+
+    async def sync_envelope_status(self, request_id: str) -> Optional[dict]:
+        """Poll DocuSign for the current envelope status and update the local record.
+
+        This is used as a fallback when webhooks are not available (e.g., local dev).
+        Only transitions forward (idempotent).
+        """
+        request = await self.repo.get_request(request_id)
+        if not request or not request.provider_reference:
+            return None
+
+        provider = self._get_provider(request.provider)
+        try:
+            envelope_status = await provider.get_envelope_status(request.provider_reference)
+        except Exception as exc:
+            logger.warning("Failed to poll envelope %s: %s", request.provider_reference, exc)
+            return None
+
+        # Map DocuSign status to internal status
+        from .providers.docusign import DOCUSIGN_STATUS_MAP
+        new_status = DOCUSIGN_STATUS_MAP.get(envelope_status.status)
+        if not new_status:
+            logger.warning("Unknown DocuSign status: %s", envelope_status.status)
+            return None
+
+        # Only transition forward
+        current = request.status
+        allowed = _ALLOWED_TRANSITIONS.get(current, set())
+        if new_status not in allowed:
+            logger.info(
+                "Ignoring poll result %s -> %s for request %s (current: %s)",
+                current, new_status, request_id, current,
+            )
+            return await self._build_response(request_id)
+
+        # Update status
+        extra = {"updated_at": datetime.now(timezone.utc)}
+        if new_status == "completed":
+            extra["completed_at"] = datetime.now(timezone.utc)
+        elif new_status == "sent":
+            extra["sent_at"] = datetime.now(timezone.utc)
+
+        await self.repo.update_request_status(request_id, new_status, **extra)
+
+        # Log audit event
+        await self._log_audit(
+            request_id, f"envelope_{new_status}",
+            details={
+                "provider": request.provider,
+                "provider_reference": request.provider_reference,
+                "envelope_status": envelope_status.status,
+            },
+        )
+
+        # Trigger lifecycle transitions
+        await self._trigger_lifecycle(request, new_status, current)
+
+        logger.info(
+            "Envelope synced: %s -> %s for request %s",
+            current, new_status, request_id,
+        )
+
+        return await self._build_response(request_id)
