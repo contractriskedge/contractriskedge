@@ -368,7 +368,7 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
               onClick={async () => {
                 setActionLoading("sign");
                 try {
-                  await api.post("/signatures", {
+                  const result = await api.post("/signatures", {
                     contract_id: contractId,
                     title: `Sign: ${contract.name || contract.filename || contractId}`,
                     provider: "docusign",
@@ -383,10 +383,12 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                     email_subject: `Please sign: ${contract.name || contract.filename || "Contract"}`,
                     email_message: "This document is ready for your electronic signature via DocuSign.",
                   });
-                  // Refresh contract data to show new status
+                  console.log("Signature request created:", result);
+                  alert("Signature request created successfully! Check the Signatures page for details.");
                   refetch();
-                } catch (err) {
+                } catch (err: any) {
                   console.error("Failed to send for signature:", err);
+                  alert(`Failed to create signature request: ${err?.message || "Unknown error"}. Check console for details.`);
                 } finally {
                   setActionLoading(null);
                 }
