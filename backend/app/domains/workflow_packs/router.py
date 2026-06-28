@@ -18,7 +18,7 @@ from app.domains.workflow_packs.schemas import (
 )
 from app.domains.workflow_packs.service import WorkflowPackService
 
-router = APIRouter(prefix="/workflow-packs", tags=["Enterprise Workflow Packs"])
+router = APIRouter(prefix="/workflow-packs", tags=["Enterprise Workflow Packs"], redirect_slashes=False)
 
 
 # ── Dependencies ────────────────────────────────────────────────────
@@ -34,6 +34,7 @@ async def get_pack_service(
 # ── Pack Management ─────────────────────────────────────────────────
 
 
+@router.get("")
 @router.get("/", response_model=list[WorkflowPackSummary])
 async def list_workflow_packs(
     category: Optional[WorkflowPackCategory] = Query(None),
@@ -58,6 +59,7 @@ async def get_workflow_pack(
     return pack
 
 
+@router.post("")
 @router.post("/", response_model=WorkflowPackResponse, status_code=201)
 async def create_workflow_pack(
     pack: WorkflowPackCreate,
