@@ -376,3 +376,94 @@ Six months ago, ContractRiskEdge was a solid contract review tool.
 Today, it is an **enterprise CLM platform**.
 
 The roadmap is frozen. Begin execution.
+
+---
+
+## Execution Rules (Frozen)
+
+These rules govern all implementation from this point forward. They are not optional.
+
+### 1. Architecture is frozen (v2.0)
+Do not introduce new architectural concepts, new platform modules, or redesign existing foundations unless a production blocker is discovered.
+
+### 2. Follow the roadmap
+Implement according to the frozen sprint sequence. Do not reorder, skip, or add sprints without explicit approval.
+
+### 3. Satisfy the Definition of Done
+Every sprint must satisfy the Product-Level Definition of Done before being considered complete. No exceptions.
+
+### 4. Allocate 15-20% to UX polish
+Every sprint must allocate approximately 15-20% of effort to UX and product polish: loading states, empty states, accessibility, keyboard shortcuts, validation, terminology consistency, responsive behavior, onboarding, notifications, and performance improvements.
+
+### 5. Prefer completion over addition
+Completing existing capabilities takes priority over adding new ones. A feature is not complete until it is tested, documented, and polished.
+
+### 6. No architectural scope creep
+Any requested enhancement that changes the architecture must be documented as a future roadmap item rather than implemented immediately. The roadmap is not reopened until after Sprint 38.
+
+### 7. Preserve backward compatibility
+Do not break existing modules. All changes must be backward compatible. Deprecate before removing.
+
+### 8. Use existing patterns consistently
+Continue using provider abstractions, tenant isolation, audit logging, RBAC, versioning, and reusable services consistently across all modules.
+
+### 9. One sprint at a time
+Deliver one complete, production-quality sprint at a time with verification, tests, and documentation before moving to the next sprint.
+
+### 10. Reuse before building
+Before implementing any new sprint, first audit the existing codebase to identify reusable components. Reuse and extend existing services wherever possible. Do not duplicate business logic, models, routing, validation, or UI patterns.
+
+---
+
+## Sprint Completion Report Template
+
+After every sprint, produce a standard completion report:
+
+```markdown
+# Sprint XX Completion Report
+
+## 1. Features Delivered
+- List of features completed this sprint
+
+## 2. Existing Components Reused
+- Which existing services, models, or UI components were extended rather than built from scratch
+
+## 3. New Components Created
+- Any genuinely new services, models, or UI components introduced
+
+## 4. Database Changes
+- New tables, columns, migrations, or indexes
+
+## 5. API Changes
+- New or modified endpoints, request/response schema changes
+
+## 6. UI Changes
+- New pages, components, or significant UI modifications
+
+## 7. Tests Added
+- Unit tests: count and coverage change
+- Integration tests: count and scenarios covered
+- Performance tests: results if applicable
+
+## 8. Product DoD Checklist
+- [ ] Tenant isolation verified
+- [ ] RBAC enforced on all new endpoints
+- [ ] Audit trail recorded for all business actions
+- [ ] Tests meet coverage thresholds
+- [ ] API documentation updated (OpenAPI)
+- [ ] Performance targets met (P95 < 500ms read, < 2s write)
+
+## 9. Technical Debt Remaining
+- Known issues, shortcuts, or deferred work
+
+## 10. Recommended Next Sprint
+- Confirmation that the next sprint in the roadmap is ready to begin
+```
+
+---
+
+## Final Word
+
+The architecture will not be revisited until after Sprint 38. At that point, review the product based on pilot customer feedback, performance metrics, real-world usage, and feature adoption. Let actual users—not speculation—drive the next architectural evolution.
+
+**Begin execution.**
