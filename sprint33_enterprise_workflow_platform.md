@@ -1,9 +1,11 @@
-# Sprint 33 — Enterprise Workflow Platform
+# Sprint 33 — Enterprise Workflow Platform (Architecture Locked)
 
+**Status:** Architecture frozen. No further structural changes.
+**Version:** 2.0 (final)
 **Theme:** Configuration-first business process engine with enterprise governance.
 **Duration:** 3 sprints (33.1 Foundation + 33.2 Admin UI + 33.3 Operations)
 **Depends on:** Sprint 32.5 (Clause Intelligence)
-**After this:** Sprint 34 (Rich Authoring) → Sprint 35 (Production Readiness)
+**After this:** Sprint 34 (Rich Authoring) → Sprint 35 (Production Readiness) → Sprint 36 (Enterprise Integrations) → Sprint 37 (AI Copilot)
 
 ---
 
@@ -27,7 +29,99 @@ Renewal
 Archive
 ```
 
-Every action is a configurable step. Every step can call internal services or external APIs. The engine is provider-abstracted, just like the e-signature layer.
+Every action is a configurable step. Every step can call internal services or external APIs. The engine is provider-abstracted, just like the e-signature layer. Every action emits a standard event to the **Event Bus** for downstream consumers (SAP, Salesforce, ServiceNow, Slack, Teams, analytics).
+
+---
+
+## Core Architecture
+
+### Event Bus (Cross-Cutting)
+
+Every workflow action emits a standard event:
+
+```
+WorkflowStarted
+StageEntered
+StageCompleted
+ApprovalGranted
+ApprovalRejected
+SignatureSent
+SignatureCompleted
+ObligationCreated
+WorkflowCompleted
+WorkflowCancelled
+WorkflowEscalated
+WorkflowBreached
+RuleMatched
+RuleSkipped
+```
+
+Consumers connect without modifying the engine:
+
+- SAP connector
+- Salesforce connector
+- ServiceNow connector
+- Teams / Slack notifications
+- Analytics pipeline
+- Audit log
+
+### Dynamic Metadata Provider
+
+The rule engine doesn't hardcode field access. Instead, it queries providers:
+
+```
+ContractProvider    → contract.risk_score, contract.value, ...
+SupplierProvider    → supplier.region, supplier.tier, ...
+RiskProvider        → risk.score, risk.category, ...
+AIProvider          → ai.findings_count, ai.top_risk, ...
+ERPProvider         → erp.po_number, erp.budget_code, ...
+IdentityProvider    → user.role, user.department, ...
+TemplateProvider    → template.clauses_present, ...
+ObligationProvider  → obligation.count, obligation.status, ...
+```
+
+Adding a new integration means adding a new provider — no rule engine changes needed.
+
+### Business Calendar Engine
+
+SLA calculations use **business hours**, not wall clock:
+
+```
+BusinessCalendar
+  ├── calendar_id
+  ├── name ("US Calendar", "UK Calendar", "Germany Calendar", "24x7")
+  ├── timezone ("America/New_York", "Europe/London", ...)
+  ├── working_days: [1,2,3,4,5]  # Monday-Friday
+  ├── working_hours: { "start": "09:00", "end": "18:00" }
+  ├── holidays: [ "2026-01-01", "2026-12-25", ... ]
+  └── half_days: [ "2026-12-24": { "end": "13:00" } ]
+```
+
+Every stage SLA references a `calendar_id`. Without one, defaults to 24x7.
+
+### Action Catalog
+
+Stage actions are not hardcoded. Each is a provider:
+
+```
+ActionProvider
+  ├── ApproveAction
+  ├── RejectAction
+  ├── NotifyAction
+  ├── GeneratePDFAction
+  ├── CreateObligationAction
+  ├── SendSignatureAction
+  ├── WebhookAction
+  ├── RestAPIAction
+  ├── SAPAction
+  ├── SalesforceAction
+  ├── SlackAction
+  ├── TeamsAction
+  ├── EmailAction
+  └── DelayAction
+```
+
+New actions are added by implementing the `ActionProvider` interface — no engine changes.
 
 ---
 
@@ -47,8 +141,8 @@ Every action is a configurable step. Every step can call internal services or ex
 WorkflowPack
   ├── pack_id: PK
   ├── name, description, category, industry, region
-  ├── is_built_in: bool (for system templates)
-  ├── parent_pack_id: FK → WorkflowPack (NULL for root)  ← HIERARCHY
+  ├── is_built_in: bool (for system templates / marketplace packs)
+  ├── parent_pack_id: FK → WorkflowPack (NULL for root)
   └── versions: WorkflowVersion[]
 
 WorkflowVersion
@@ -58,37 +152,37 @@ WorkflowVersion
   ├── status: enum("draft", "published", "archived")
   ├── stages_definition: JSONB
   ├── rules_definition: JSONB (JSON Logic format)
+  ├── variables: JSONB (workflow-level overridable variables)
   ├── change_summary: text
   ├── published_by: user_id
   ├── published_at: timestamp
-  ├── effective_date: timestamp  ← SCHEDULED PUBLISHING
-  ├── expiration_date: timestamp  ← AUTO-ARCHIVE
+  ├── effective_date: timestamp
+  ├── expiration_date: timestamp
   └── created_at: timestamp
 
 WorkflowInstance
   ├── workflow_id: PK
   ├── pack_id: FK → WorkflowPack
-  ├── version_id: FK → WorkflowVersion  ← PINNED AT CREATION
+  ├── version_id: FK → WorkflowVersion (PINNED AT CREATION)
+  ├── execution_context: JSONB (snapshot of data at evaluation time)
   └── ...
 ```
 
 **Workflow Pack Hierarchy:**
 
 ```
-Global Procurement  (parent_pack_id = NULL)
-  ├── US Procurement  (parent_pack_id = Global Procurement)
+Global Procurement (parent_pack_id = NULL)
+  ├── US Procurement (parent_pack_id = Global Procurement)
   │   └── Acme Corp Procurement (parent_pack_id = US Procurement)
-  ├── EU Procurement   (parent_pack_id = Global Procurement)
+  ├── EU Procurement (parent_pack_id = Global Procurement)
   └── India Procurement (parent_pack_id = Global Procurement)
 ```
 
-Child packs inherit stages and rules from their parent. Only overrides are stored. This makes enterprise maintenance feasible — update the parent, and all children optionally receive the change.
+Child packs inherit stages, rules, and variables from their parent. Only overrides are stored.
 
 ---
 
 ### 1.2 Workflow Validation Engine
-
-**What it validates:**
 
 | Code | Severity | Check |
 |---|---|---|
@@ -97,7 +191,7 @@ Child packs inherit stages and rules from their parent. Only overrides are store
 | `duplicate_stage_name` | Error | Two stages with the same name |
 | `circular_reference` | Error | A → B → C → A |
 | `unreachable_stage` | Warning | Stage has no incoming transitions |
-| `dead_end_stage` | Warning | Stage has no outgoing transitions (not terminal) |
+| `dead_end_stage` | Warning | Stage has no outgoing transitions |
 | `missing_assignee` | Error | Approval stage with no assignee |
 | `missing_role` | Error | Stage references a role that doesn't exist |
 | `missing_sla` | Warning | Stage has no SLA configured |
@@ -105,8 +199,10 @@ Child packs inherit stages and rules from their parent. Only overrides are store
 | `deprecated_role` | Warning | Stage uses a role marked deprecated |
 | `cyclic_hierarchy` | Error | Pack hierarchy contains a cycle |
 | `unused_rule` | Warning | Rule condition can never be true |
+| `missing_calendar` | Warning | SLA references a calendar that doesn't exist |
+| `rule_conflict` | Warning | Two rules have identical conditions but different outcomes |
 
-**Workflow Health Score:**
+**Workflow Health Score (0-100):**
 
 ```
 Workflow Health: 96/100
@@ -119,43 +215,29 @@ Workflow Health: 96/100
   ✅ All rules reference valid fields
 ```
 
-**Interface:**
-
-```python
-@dataclass
-class ValidationResult:
-    score: int  # 0-100 health score
-    is_valid: bool  # True if zero errors
-    errors: list[ValidationIssue]
-    warnings: list[ValidationIssue]
-
-class WorkflowValidator:
-    def validate(self, version: WorkflowVersion) -> ValidationResult: ...
-    def validate_hierarchy(self, pack: WorkflowPack) -> ValidationResult: ...
-```
-
 ---
 
-### 1.3 JSON Logic Engine
+### 1.3 JSON Logic Engine + Business Rule Catalog
 
 Rules are stored and evaluated as [JSON Logic](https://jsonlogic.com/).
 
-**Example rule:**
+**Reusable Business Rules** (not embedded in workflows):
 
-```json
-{
-  "and": [
-    {">": [{"var": "contract.risk_score"}, 80]},
-    {"==": [{"var": "contract.jurisdiction"}, "Germany"]},
-    {"or": [
-      {">": [{"var": "contract.value"}, 1000000]},
-      {"==": [{"var": "contract.has_redlines"}, true]}
-    ]}
-  ]
-}
+```
+BusinessRuleCatalog
+  ├── rule_id: PK
+  ├── name: "High Risk Detection"
+  ├── tenant_id: FK
+  ├── logic: JSON Logic expression
+  ├── category: "risk", "compliance", "regulatory"
+  ├── tags: ["GDPR", "SOX", "HIPAA", "Export Control"]
+  ├── version: int
+  └── status: "active", "deprecated"
 ```
 
-**Context variables available in rules:**
+Multiple workflow versions reference the same business rule. Changing a rule creates a new version; workflows pin to a specific rule version.
+
+**Context providers (extensible):**
 
 ```
 contract.risk_score
@@ -168,10 +250,17 @@ contract.industry
 contract.has_redlines
 contract.has_ai_findings
 contract.clause_present.<clause_name>
+supplier.region
+supplier.tier
+risk.score
+risk.category
+ai.findings_count
+ai.top_risk
 user.role
 user.department
-user.region
 user.tenant_id
+template.clauses_present
+obligation.count
 system.current_date
 system.current_time
 ```
@@ -185,10 +274,10 @@ class RuleExplainer:
 
 @dataclass
 class ExplanationNode:
-    operator: str  # "and", "or", ">", "==", etc.
+    operator: str
     result: bool
     children: list[ExplanationNode]
-    summary: str  # Human-readable: "Risk Score 85 > 80 ✓"
+    summary: str  # "Risk Score 85 > 80 ✓"
 ```
 
 ---
@@ -202,6 +291,7 @@ Pure function: `(version, contract_data) → SimulationResult`
 class SimulationInput:
     workflow_version: WorkflowVersion
     contract_data: dict
+    sandbox_mode: bool = False  # No notifications, no signatures, no obligations
 
 @dataclass
 class SimulationResult:
@@ -209,6 +299,7 @@ class SimulationResult:
     total_sla_hours: float
     matched_rules: list[RuleMatch]
     skipped_rules: list[RuleSkip]
+    execution_context: dict  # Snapshot of all evaluated data
     warnings: list[str]
 
 @dataclass
@@ -216,10 +307,13 @@ class SimulatedStage:
     name: str
     stage_type: str
     sla_hours: float
+    calendar_id: Optional[str]
     assigned_to: str
     approval_mode: str
     resolution_strategy: str
-    resolved_user: Optional[str]  ← ASSIGNMENT PREVIEW
+    resolved_user: Optional[str]
+    candidates: list[str]  # All eligible users considered
+    selection_reason: str  # "Least loaded — Lisa has 3 open tasks"
     matched_conditions: list[str]
     escalation_chain: list[str]
 
@@ -227,11 +321,27 @@ class SimulatedStage:
 class RuleMatch:
     rule_id: str
     rule_summary: str
-    reason: str  # Human-readable explanation
-    score_contribution: float
+    reason: str
+    execution_time_ms: float
 
 class WorkflowSimulator:
     async def simulate(self, input: SimulationInput) -> SimulationResult: ...
+```
+
+**Sandbox mode:** When enabled, no notifications, emails, signatures, or obligations are actually executed. Safe for experimentation.
+
+**Simulation History:** Every simulation is saved:
+
+```
+SimulationLog
+  ├── simulation_id: PK
+  ├── version_id: FK
+  ├── user_id: who ran it
+  ├── input: JSONB
+  ├── output: JSONB
+  ├── matched_rules: JSONB
+  ├── created_at: timestamp
+  └── led_to_publish: bool (was this version published after this simulation?)
 ```
 
 **Dry run mode:** Run simulator against last N real contracts:
@@ -244,7 +354,7 @@ Dry Run: Last 100 contracts
 
 ---
 
-### 1.5 Workflow Impact Analysis
+### 1.6 Workflow Impact Analysis
 
 Before publishing, show what would be affected:
 
@@ -259,18 +369,15 @@ Publishing Contract Review v3.2 will affect:
      ├── 15 will continue using current version (pinned)
      └── 3 are on 'latest' and will use new version
 
-  🏢 Departments (3)
-     ├── Legal
+  🏢 Departments (3)          🌐 Regions (5)
+     ├── Legal                    ├── US, UK, DE, FR, IN
      ├── Procurement
      └── Compliance
-
-  🌐 Regions (5)
-     ├── US, UK, DE, FR, IN
 ```
 
 ---
 
-### 1.6 Feature Flags
+### 1.7 Feature Flags
 
 Per-tenant feature flags for workflow capabilities:
 
@@ -283,127 +390,120 @@ Per-tenant feature flags for workflow capabilities:
   "weighted_voting": false,
   "hierarchy_resolution": true,
   "webhook_actions": false,
-  "sla_notifications": true
+  "sla_notifications": true,
+  "business_calendar": true,
+  "sandbox_mode": true,
+  "ai_recommendation": false
 }
 ```
 
-Stored in `tenant_settings.workflow_features` JSONB.
+---
+
+### 1.8 Built-in Workflow Packs (Marketplace)
+
+Organized by category:
+
+| Category | Packs |
+|---|---|
+| **Legal** | Legal Review, NDA, DPA, IP Agreement |
+| **Sales** | MSA, Sales Agreement, Software License, Reseller |
+| **Procurement** | Standard Procurement, Supplier Onboarding, Vendor Review |
+| **HR** | Employment Contract, Contractor Agreement, Offer Letter |
+| **Privacy** | GDPR Review, CCPA Review, Data Processing Agreement |
+| **Government** | Federal Procurement, State Contract, Grant Agreement |
+| **Healthcare** | HIPAA Review, BAA, Clinical Trial Agreement |
+| **Manufacturing** | Supply Agreement, Quality Agreement, Distributor |
+| **Financial Services** | Compliance Review, SOX Review, Investment Agreement |
+
+Each pack is a template. Tenants clone and customize.
 
 ---
 
-### 1.7 Built-in Workflow Packs
-
-Shipped out-of-the-box:
-
-| Pack | Stages | Use Case |
-|---|---|---|
-| **Standard Review** | Intake → AI → Review → Approval → Finalize | General purpose |
-| **AI Review** | Intake → AI → Auto-approve → Finalize | Low-risk, high-volume |
-| **Legal Review** | Intake → AI → Legal Review → Approval → Finalize | Legal-required |
-| **Sales Contract** | Intake → AI → Review → Negotiation → Approval → Signature | Outbound sales |
-| **Procurement** | Intake → AI → Procurement Review → Approval → Signature | Vendor contracts |
-| **Supplier** | Intake → AI → Security → Compliance → Approval | Supplier onboarding |
-| **HR** | Intake → AI → Legal → Approval → Signature | Employment contracts |
-| **Renewal** | Auto-check → AI → Approval → Signature | Contract renewals |
-| **High Risk** | Intake → AI → Legal → Security → Exec Approval → Finalize | Risk > 70 |
-| **Low Risk** | Intake → AI → Auto-approve → Finalize | Risk < 30 |
-| **Privacy / DPA** | Intake → AI → Legal → Privacy → Approval → Signature | Data privacy |
-| **Software License** | Intake → AI → Legal → Tech Review → Approval → Signature | Software deals |
-| **NDA** | Intake → AI → Legal → Signature | Non-disclosure |
-| **MSA** | Intake → AI → Legal → Negotiation → Approval → Signature | Master services |
-
----
-
-### 1.8 Environment Promotion
+### 1.9 Environment Promotion + Sandbox
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Environment: Development  [Promote ▾]                      │
 ├─────────────────────────────────────────────────────────────┤
-│  Current branch: Contract Review v3.2 (draft)               │
+│  Current: Contract Review v3.2 (draft)                      │
 │                                                             │
 │  Promote to:                                                │
-│    ○ Test        — Validate against sample contracts        │
-│    ○ UAT         — Business user acceptance testing         │
-│    ○ Production  — Live for all contracts                   │
+│    ○ Sandbox   — Safe experimentation, no side effects      │
+│    ○ Test      — Validate against sample contracts          │
+│    ○ UAT       — Business user acceptance testing           │
+│    ○ Production— Live for all contracts                     │
 │                                                             │
 │  [Export JSON]  [Export YAML]  [Import]  [Clone]            │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Export format (JSON):**
-
-```json
-{
-  "pack": {
-    "name": "Contract Review",
-    "description": "...",
-    "category": "procurement"
-  },
-  "version": {
-    "version_number": 3,
-    "status": "draft",
-    "stages_definition": {...},
-    "rules_definition": {...}
-  }
-}
-```
-
-**Import:** Validates before importing. Rejects if validation errors exist.
+**Sandbox:** Full simulator access. No notifications, emails, signatures, or obligations executed. Safe for any admin to experiment.
 
 ---
 
-### 1.9 Visual Diff Between Versions
+### 1.10 Contract-Type Mapping
+
+Admin-configurable mapping:
 
 ```
-Comparing v3.1 → v3.2
-
-  Stages:
-    + Security Review          (added)
-    ~ Legal Review             (SLA changed: 48h → 24h)
-    ~ Exec Approval            (approval mode: any_one → all_required)
-    - Negotiation              (removed)
-
-  Rules:
-    + Rule 17: Value > $5M → VP Legal
-    ~ Rule 12: Risk threshold changed from 80 to 75
-    - Rule 9:  Deprecated (jurisdiction = "UK" → use Rule 17)
+| Contract Type    | Workflow Pack        | Version |
+|------------------|----------------------|---------|
+| NDA              | NDA Review           | v2.1    |
+| MSA              | Legal Review         | v3.2    |
+| Procurement      | Standard Procurement | v1.4    |
+| Software License | Software Review      | v1.0    |
+| Employment       | HR Workflow          | v2.0    |
+| Amendment        | Legal Review         | v3.2    |
 ```
+
+When a contract is created or uploaded, the system auto-selects the workflow. Users can override.
 
 ---
 
-### 1.10 Action Model (Future Connectors)
+### 1.11 AI Workflow Recommendation
 
-Workflow stages shouldn't be limited to approval. The action model supports:
+Before a workflow starts, AI can recommend:
 
-| Action | Type | Future |
-|---|---|---|
-| Assign | Built-in | ✅ Now |
-| Notify | Built-in | ✅ Now |
-| Approve | Built-in | ✅ Now |
-| Reject | Built-in | ✅ Now |
-| Generate PDF | Built-in | Sprint 34 |
-| Create Obligation | Built-in | Sprint 34 |
-| Send Signature | Provider | ✅ (DocuSign exists) |
-| Call REST API | Connector | Future |
-| Webhook | Connector | Future |
-| SAP Integration | Connector | Future |
-| Salesforce Sync | Connector | Future |
-| Slack Notification | Connector | Future |
-| Teams Notification | Connector | Future |
-| Email | Built-in | ✅ Now |
-| Delay / Wait | Built-in | Future |
-
-**Provider abstraction** (mirrors e-signature pattern):
-
-```python
-class WorkflowActionProvider(ABC):
-    @abstractmethod
-    async def execute(self, context: ActionContext) -> ActionResult: ...
-
-class WebhookActionProvider(WorkflowActionProvider): ...
-class SalesforceActionProvider(WorkflowActionProvider): ...
 ```
+Recommended Workflow: Legal Review
+Confidence: 92%
+
+Reasons:
+  ✓ Risk Score 84 > 70 (high risk threshold)
+  ✓ Contains GDPR clauses detected
+  ✓ Contains AI-specific clauses
+  ✓ Vendor is new supplier (tier 3)
+  ✓ Contract type matches 'MSA' pattern
+
+[Accept] [Choose Different] [Configure Automatically]
+```
+
+Uses the existing AI infrastructure — no new model needed.
+
+---
+
+### 1.12 Event Bus (Cross-Cutting)
+
+Standard events emitted by every workflow action:
+
+```
+WorkflowStarted        { workflow_id, pack_id, version_id, tenant_id, contract_id, initiated_by }
+StageEntered           { workflow_id, stage_name, stage_type, assigned_to }
+StageCompleted         { workflow_id, stage_name, result, duration_ms }
+ApprovalGranted        { workflow_id, stage_name, approver_id, approval_mode }
+ApprovalRejected       { workflow_id, stage_name, approver_id, reason }
+SignatureSent          { workflow_id, envelope_id, provider }
+SignatureCompleted     { workflow_id, envelope_id, signed_at }
+ObligationCreated      { workflow_id, obligation_id, clause, due_date }
+WorkflowCompleted      { workflow_id, total_duration_ms, sla_met }
+WorkflowCancelled      { workflow_id, reason, cancelled_by }
+WorkflowEscalated      { workflow_id, stage_name, level, escalated_to }
+WorkflowBreached       { workflow_id, stage_name, sla_seconds, calendar_id }
+RuleMatched            { workflow_id, rule_id, rule_name, execution_time_ms }
+RuleSkipped            { workflow_id, rule_id, rule_name, reason }
+```
+
+Consumers subscribe without modifying the engine.
 
 ---
 
@@ -415,125 +515,107 @@ class SalesforceActionProvider(WorkflowActionProvider): ...
 
 ### 2.1 Workflow Pack Library
 
-Browse, search, filter, clone, and manage packs.
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Workflow Packs                                   [+ New]  │
-├─────────────────────────────────────────────────────────────┤
-│  [All Types ▾]  [All Status ▾]  🔍 Search...               │
-│                                                             │
-│  ┌───────────────────────────────────┐  ┌─────────────────┐ │
-│  │ Contract Review        🔵 v3.2.0 │  │ Published        │ │
-│  │ Standard procurement pipeline     │  │ Health: 96%      │ │
-│  │ [Edit] [Versions] [Clone] [Stats]│  │ Used 1,234x      │ │
-│  └───────────────────────────────────┘  └─────────────────┘ │
-│                                                             │
-│  ┌───────────────────────────────────┐  ┌─────────────────┐ │
-│  │ NDA Review             🟡 v2.1.0 │  │ Draft           │ │
-│  │ Simple NDA flow                  │  │ Health: 72%      │ │
-│  │ [Edit] [Versions] [Clone] [Stats]│  │ ⚠ 2 warnings     │ │
-│  └───────────────────────────────────┘  └─────────────────┘ │
-│                                                             │
-│  ┌───────────────────────────────────┐  ┌─────────────────┐ │
-│  │ Standard Procurement  📋 Built-in│  │ Template         │ │
-│  │ Recommended for most orgs        │  │ Health: 100%     │ │
-│  │ [Clone] [Preview]                │  │                  │ │
-│  └───────────────────────────────────┘  └─────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Hierarchy view (toggle):**
-
-```
-▶ Global Procurement (parent)
-  ├── ▶ US Procurement
-  │     └── ▶ Acme Corp (customer override)
-  ├── ▶ EU Procurement
-  └── ▶ India Procurement
-```
+Browse, search, filter, clone, manage packs. Hierarchical view toggle.
 
 ---
 
 ### 2.2 Workflow Definition Editor
 
-Visual canvas with drag-and-drop stages, connections, and side-panel configuration.
-
-- React Flow / similar canvas library
-- Stage nodes with status indicators (health, warnings)
-- Directed edges between stages
-- Mini-map for large workflows
-- Side panel opens on stage click
-- Validation status indicator (green check / red X)
-- "Simulate" button runs the simulator engine
+Visual canvas with drag-and-drop stages, connections, side-panel configuration.
 
 ---
 
 ### 2.3 Stage Editor
 
-Configuration panel for each stage.
-
-| Section | Fields |
-|---|---|
-| **General** | Name, Type (automatic, review, approval, condition, notification, escalation, webhook, delay) |
-| **SLA** | Duration, Breach notification, Escalation on breach |
-| **Assignment** | Strategy (12 options), Role picker, User picker |
-| **Approval Mode** | Any One, All Required, Majority, Minimum Count, Weighted Voting, Sequential, Parallel |
-| **Resolution** | Least Loaded, Random, Hierarchy, Custom |
-| **Escalation Chain** | Level 1-3 (duration + role/user) |
-| **Routing Rules** | JSON Logic builder |
-| **Notifications** | On assignment, completion, escalation, breach |
-| **Actions** | What this stage does (approve, notify, webhook, generate PDF, etc.) |
+Full stage configuration: type, SLA (with calendar picker), assignment (12 strategies), approval mode (7 modes), escalation chain, routing rules, notifications, actions.
 
 ---
 
 ### 2.4 Rule Builder (JSON Logic)
 
-Visual condition builder.
-
-```
-IF
-  ┌──────────┐  ┌──────┐  ┌──────────┐
-  │ Risk     │  │ >    │  │ 80       │
-  │ Score    │  │      │  │          │
-  └──────────┘  └──────┘  └──────────┘
-  AND
-  ┌──────────┐  ┌──────┐  ┌──────────┐
-  │Jurisdict-│  │ =    │  │ Germany  │
-  │ion       │  │      │  │          │
-  └──────────┘  └──────┘  └──────────┘
-
-[+ Add Condition]  [+ Add Group]
-
-Assignment Preview:
-  Value = $2M  →  VP Legal  →  John Smith (least loaded)
-```
+Visual condition builder with field/operator/value rows that serialize to JSON Logic. Business Rule Catalog integration (reuse existing rules). Assignment preview with candidate list and selection reason.
 
 ---
 
 ### 2.5 Simulator UI
 
-**Input:** Contract metadata form + saved test cases.
-**Output:** Approval path with matched/skipped rules and explanations.
-**Dry run:** Run against last N contracts, show routing differences.
+Input form + saved test cases + sandbox toggle. Output shows approval path, matched/skipped rules with explanations, execution context snapshot, execution time per rule. Dry run mode.
 
 ---
 
-### 2.6 Visual Diff
+### 2.6 Workflow Context Viewer
 
-Side-by-side version comparison with additions, changes, and removals highlighted.
+During simulation or active execution, admins can inspect the full evaluation context:
+
+```
+Execution Context at Stage "Legal Review"
+
+  contract.risk_score: 84
+  contract.jurisdiction: "Germany"
+  contract.value: 2300000
+  contract.contract_type: "MSA"
+  contract.department: "Procurement"
+  contract.region: "EMEA"
+  contract.has_redlines: true
+  contract.clause_present.gdpr: true
+  supplier.region: "Germany"
+  supplier.tier: 2
+  ai.findings_count: 8
+  ai.top_risk: "GDPR compliance"
+  user.role: "legal_reviewer"
+  user.department: "Legal"
+  template.clauses_present: ["gdpr", "indemnification", "limitation"]
+```
 
 ---
 
-### 2.7 Impact Analysis UI
+### 2.7 Debug Mode
 
-Before publishing, show affected templates, active contracts, departments, and regions.
+Per-instance debug view:
+
+```
+Workflow COR-2026-0421 — Debug View
+
+Stage: Executive Approval
+  Entered: 2026-06-27 14:30 UTC
+  SLA: 24h (calendar: US Business)
+  SLA remaining: 18h (business hours)
+
+  Matched Rule #14 (priority 1)
+    Condition: Value > $5M? No ($2.3M) → SKIPPED
+
+  Matched Rule #17 (priority 2)
+    Condition: Value $500K-$5M? Yes ($2.3M) → SELECTED
+    Assigned Role: VP Legal
+    Resolution Strategy: Least Loaded
+    Candidates: John (5 tasks), Lisa (3 tasks), Mike (7 tasks)
+    Selected: Lisa (least loaded — 3 tasks)
+    Approval Mode: All Required
+
+  Skipped Rules:
+    Rule #12: Value < $500K? No → skipped
+    Rule #3:  Low Risk? No (risk 84) → skipped
+
+  Execution time: 142ms
+```
 
 ---
 
-### 2.8 Environment Manager
+### 2.8 Visual Diff
 
-Development → Test → UAT → Production promotion with export/import.
+Side-by-side version comparison with additions, changes, removals highlighted.
+
+---
+
+### 2.9 Impact Analysis UI
+
+Before publishing, show affected templates, active contracts, departments, regions.
+
+---
+
+### 2.10 Environment Manager + Sandbox
+
+Dev → Sandbox → Test → UAT → Production with export/import.
 
 ---
 
@@ -545,13 +627,13 @@ Development → Test → UAT → Production promotion with export/import.
 
 ### 3.1 Workflow Instance Monitor
 
-Real-time dashboard of active instances with filtering and search.
+Real-time dashboard of active instances with filtering, search, and debug mode entry.
 
 ---
 
 ### 3.2 Workflow Timeline Viewer
 
-Gantt-style view of a single instance's progress with SLA tracking.
+Gantt-style view with SLA tracking and calendar-aware remaining time.
 
 ---
 
@@ -560,34 +642,41 @@ Gantt-style view of a single instance's progress with SLA tracking.
 **KPIs:**
 
 ```
-Average Completion Time    52.3h
-Average Approval Time      18.2h
-Longest Stage              Legal Review (28.4h)
-Most Rejected Stage        Exec Approval (12.3%)
-SLA Breach Rate            4.2%
-Escalation Rate            1.8/workflow
-Auto-Approval Rate         23.4%
-Pending Approvals          12
-Cancelled Workflows        3
-Withdrawn Workflows        1
-Reassigned Stages          8
+Average Completion Time      52.3h
+Average Approval Time        18.2h
+Longest Stage                Legal Review (28.4h)
+Most Rejected Stage          Exec Approval (12.3%)
+SLA Breach Rate              4.2%
+Escalation Rate              1.8/workflow
+Auto-Approval Rate           23.4%
+Manual Override Rate         3.2%
+Pending Approvals            12
+Cancelled Workflows          3
+Withdrawn Workflows          1
+Reassigned Stages            8
+Workflow Restart Count       2
+Average Queue Time           4.2h
+Average User Response Time   6.1h
+Rule Execution Time (P95)    45ms
+Most Frequently Matched Rule "High Risk Detection" (342x)
+Most Frequently Skipped Rule "Low Value Auto-Approve" (1,234x)
+Rule Conflict Count          0
 ```
 
-**Stage breakdown table** with avg/P95/breach/rejection per stage.
-
-**Trend charts** (7-day rolling avg for completion time, breach rate, volume).
+**Stage breakdown:** avg/P95/breach/rejection per stage.
+**Trend charts:** 7-day rolling avg for completion time, breach rate, volume.
 
 ---
 
 ### 3.4 Workflow Health Dashboard
 
-Per-pack health scores with drill-down into warnings.
+Per-pack health scores (0-100) with drill-down into individual warnings.
 
 ---
 
 ### 3.5 AI Explain for Workflow
 
-Reuse the existing Explain infrastructure from the Review Workspace:
+Reuses existing Explain infrastructure:
 
 ```
 Why did this workflow choose VP Legal?
@@ -604,13 +693,13 @@ Because:
 
 ### 3.6 Audit Viewer
 
-Searchable, filterable, exportable workflow event log.
+Searchable, filterable, exportable workflow event log. Includes simulation history.
 
 ---
 
 ### 3.7 Dashboard Integration
 
-Widgets on the main Executive Dashboard: active workflows, pending approvals, avg approval time, SLA breaches, top bottlenecks.
+Widgets on main Executive Dashboard: active workflows, pending approvals, avg approval time, SLA breaches, top bottlenecks.
 
 ---
 
@@ -619,9 +708,7 @@ Widgets on the main Executive Dashboard: active workflows, pending approvals, av
 **Before:**
 
 ```json
-{
-  "default_workflow": "standard"
-}
+{ "default_workflow": "standard" }
 ```
 
 **After:**
@@ -633,46 +720,65 @@ Widgets on the main Executive Dashboard: active workflows, pending approvals, av
 }
 ```
 
-Structured references enable impact analysis, version pinning, and cross-environment migration.
+Plus contract-type mapping at the administration level.
 
 ---
 
-## Summary: What was added in this revision
+## Summary: Complete Architecture (Frozen)
 
-| Addition | Type | Sprint |
-|---|---|---|
-| Workflow Pack Hierarchy (parent/child) | Architecture | 33.1 |
-| Environment Promotion (Dev → Test → UAT → Prod) | Architecture | 33.1 |
-| Effective Dates (scheduled publishing) | Feature | 33.1 |
-| Feature Flags (per-tenant capability toggles) | Feature | 33.1 |
-| Workflow Import / Export (JSON/YAML) | Feature | 33.1 |
-| Visual Diff Between Versions | UI | 33.2 |
-| Workflow Impact Analysis | Feature | 33.1 |
-| Dry Run (simulate against last N contracts) | Feature | 33.1 |
-| Assignment Preview (shows actual resolved user) | UI | 33.2 |
-| Workflow Health Score (0-100) | Feature | 33.1 |
-| AI Explain for Workflow (reuse existing) | UI | 33.3 |
-| Future Connectors (webhook, REST, SAP, Slack, etc.) | Architecture | 33.1 |
-| Expanded Built-in Packs (14 packs) | Content | 33.1 |
-| Expanded KPIs (14 metrics) | Analytics | 33.3 |
-| Business Process Engine Vision | Architecture | All |
+| Component | Status |
+|---|---|
+| Workflow Versioning (mandatory, pinned instances) | ✅ Locked |
+| Workflow Pack Hierarchy (parent/child inheritance) | ✅ Locked |
+| Workflow Validation Engine (13 checks + health score) | ✅ Locked |
+| JSON Logic Engine (portable, composable rules) | ✅ Locked |
+| Business Rule Catalog (reusable rules across workflows) | ✅ Locked |
+| Dynamic Metadata Provider (extensible context providers) | ✅ Locked |
+| Business Calendar Engine (business hours SLA) | ✅ Locked |
+| Workflow Simulator Engine (pure function + sandbox) | ✅ Locked |
+| Simulation History (audit trail of design decisions) | ✅ Locked |
+| Dry Run (simulate against last N contracts) | ✅ Locked |
+| Workflow Impact Analysis (templates, contracts, depts) | ✅ Locked |
+| Action Catalog (provider-abstracted stage actions) | ✅ Locked |
+| Event Bus (standard events for all consumers) | ✅ Locked |
+| Environment Promotion (Dev → Sandbox → Test → UAT → Prod) | ✅ Locked |
+| Feature Flags (per-tenant capability toggles) | ✅ Locked |
+| Workflow Variables (overridable per tenant) | ✅ Locked |
+| Contract-Type Mapping (auto-select workflow) | ✅ Locked |
+| AI Workflow Recommendation (confidence + reasons) | ✅ Locked |
+| Workflow Context Viewer (full evaluation snapshot) | ✅ Locked |
+| Workflow Debug Mode (per-instance rule trace) | ✅ Locked |
+| Assignment Preview (candidates + selection reason) | ✅ Locked |
+| Visual Diff Between Versions | ✅ Locked |
+| 14 Built-in Marketplace Packs | ✅ Locked |
+| 20 KPI Metrics | ✅ Locked |
+| AI Explain for Workflow | ✅ Locked |
 
 ---
 
-## Overall Roadmap
+## Full Roadmap
 
 ```
-Sprint 32.5    Sprint 33.1     Sprint 33.2     Sprint 33.3     Sprint 34      Sprint 35
-───────────    ───────────     ───────────     ───────────     ───────────     ───────────
-Clause         Foundation      Admin UI        Operations      Rich            Production
-Intelligence   • Validation    • Pack Library  • Monitor       Authoring       Readiness
-• AI→Clause    • Versioning    • Editor        • Timeline      • TipTap        • Multi-tenant
-  mapping      • JSON Logic    • Stage Editor  • Analytics     • Clause        • Backup/
-• Insert/      • Simulator     • Rule Builder  • Health          insertion     • Restore
-  Replace      • Impact        • Simulator UI  • AI Explain    • Compare       • Monitoring
-• Bulk         • Templates     • Visual Diff   • Audit         • Variables     • Docs
-  Actions      • Environments  • Environment   • Dashboard     • Exhibits      • Onboarding
-• Compare      • Feature Flags   Manager         Widgets
-• Analytics    • Health Score
-               • Connectors
+Sprint 32.5   Sprint 33.1    Sprint 33.2    Sprint 33.3    Sprint 34     Sprint 35      Sprint 36        Sprint 37
+───────────   ───────────    ───────────    ───────────    ──────────    ──────────     ───────────      ───────────
+Clause        Foundation     Admin UI       Operations     Rich          Production     Enterprise       AI Copilot
+Intelligence  • Validation   • Pack Lib     • Monitor      Authoring     Readiness      Integrations     • NL workflow
+• AI→Clause   • Versioning   • Editor       • Timeline     • TipTap      • Multi-       • SAP              creation
+  mapping     • JSON Logic   • Stage Ed     • Analytics      editor        tenant        • Salesforce     • Draft
+• Insert/     • Simulator    • Rule Builder • Health       • Clause      • Backup/      • Microsoft        assistance
+  Replace     • Impact       • Simulator    • AI Explain     insertion     Restore        365             • Intelligent
+• Bulk        • Templates    • Context      • Audit        • Compare     • Monitoring   • OneDrive/        search
+  Actions     • Environments   Viewer      • Dashboard    • Variables   • Docs           SharePoint      • Workflow
+• Compare     • Feature      • Debug Mode     Widgets     • Exhibits    • Onboarding   • Slack/Teams       recommend
+• Analytics     Flags        • Visual Diff                              • Perf          • Webhooks
+               • Health      • Impact                                                                   
+               • Calendar       Analysis
+               • Rule        • Environ
+                 Catalog        Manager
+               • Event Bus   • Sandbox
+               • Contract-
+                 Type Map
+               • AI Recommend
 ```
+
+**Architecture is frozen. Begin implementation.**
