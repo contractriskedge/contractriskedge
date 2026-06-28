@@ -3,6 +3,7 @@
 **Theme:** Administrator product — not workflow logic, but workflow configuration.
 **Foundation:** ✅ Sprint 33.1 frozen. No engine changes unless defects found.
 **Duration:** 2 weeks
+**Status:** 🔒 Plan locked. Begin execution.
 **After this:** Sprint 33.3 (Operations) → Sprint 34 (Production Readiness)
 
 ---
@@ -65,7 +66,8 @@ Browse, search, filter, clone, and manage workflow packs.
 │  ┌────────────────────────┐  ┌────────────────────────┐    │
 │  │ ⭐ NDA Review     🔵   │  │ Procurement     🔵     │    │
 │  │ v3 · Published          │  │ v2 · Published          │    │
-│  │ Used 1,234x · ✅ 100/100│  │ Used 892x · ✅ 96/100  │    │
+│  │ ✅ 100/100 · 1,234x     │  │ ✅ 96/100 · 892x       │    │
+│  │ 42 running · 5d ago     │  │ 28 running · 12d ago   │    │
 │  │ [Clone] [Edit] [▸ ▸ ▸]│  │ [Clone] [Edit] [▸ ▸ ▸]│    │
 │  └────────────────────────┘  └────────────────────────┘    │
 │                                                             │
@@ -110,6 +112,12 @@ A summary page for each workflow pack, similar to Contract Details. Becomes the 
 ┌─────────────────────────────────────────────────────────────┐
 │  NDA Review v3                                   [Edit]   │
 ├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─ Health ───────────────────────────────────────────────┐ │
+│  │  ✅ Validation: 100/100 · Published · Active            │ │
+│  │  12 templates · 183 running contracts · ⚠ 1 warning    │ │
+│  │  No blocking issues                                     │ │
+│  └─────────────────────────────────────────────────────────┘ │
 │                                                             │
 │  Overview                                                   │
 │  Status:    🔵 Published · v3 · Health: 96/100              │
