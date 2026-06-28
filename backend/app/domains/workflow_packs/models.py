@@ -195,7 +195,8 @@ class WorkflowInstance(Base):
 
     __table_args__ = (
         Index("idx_workflow_instances_tenant_status", "tenant_id", "status"),
-        Index("idx_workflow_instances_correlation", "correlation_id"),
+        UniqueConstraint("tenant_id", "correlation_id", name="uq_workflow_instances_tenant_correlation"),
+        Index("ix_workflow_instances_correlation_id", "correlation_id"),
     )
 
     def __repr__(self) -> str:

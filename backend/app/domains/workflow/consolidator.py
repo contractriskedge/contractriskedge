@@ -36,18 +36,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domains.review.workflow import (
     WorkflowState as ReviewState,
     validate_transition as review_validate_transition,
-    TransitionResult,
+    TransitionRecord,
     map_legacy_status,
     to_db_status,
 )
-from app.domains.workflow.models import (
+from app.domains.workflow_packs.models import (
+    PackActivation,
+    WorkflowExecutionLog,
     WorkflowInstance,
     WorkflowInstanceStep,
-    WorkflowExecutionLog,
     WorkflowPack,
-    PackActivation,
+    WorkflowStatus,
+    WorkflowStepStatus,
 )
-from app.domains.workflow.engine import WorkflowStepStatus, WorkflowStatus
 
 logger = logging.getLogger(__name__)
 
@@ -115,11 +116,10 @@ async def resolve_workflow_pack(
     # 1. Look for tenant-activated packs
     stmt = (
         select(WorkflowPack)
-        .join(PackActivation, PackActivation.pack_id == WorkflowPack.id)
+        .join(PackActivation, PackActivation.pack_id == WorkflowPack.pack_id)
         .where(
             PackActivation.tenant_id == tenant_id,
             PackActivation.is_active == True,
-            WorkflowPack.is_built_in == True,
         )
         .order_by(WorkflowPack.created_at.desc())
     )
@@ -197,25 +197,22 @@ class WorkflowConsolidator:
         now = datetime.now(timezone.utc)
         instance = WorkflowInstance(
             tenant_id=self.tenant_id,
-            pack_id=pack.id if pack else None,
+            pack_id=pack.pack_id if pack else None,
             workflow_type=workflow_type,
             status=WorkflowStatus.RUNNING.value,
-            current_step="upload",
+            current_step=0,
             correlation_id=review_id,
-            context={
+            context_data={
                 "review_id": review_id,
                 "upload_id": upload_id,
                 "contract_type": contract_type,
                 "business_unit": business_unit,
                 "title": title,
             },
-            metadata={
+            metadata_json={
                 "source": "workflow_consolidator",
                 "created_via": "review_create",
             },
-            attempt_count=0,
-            max_attempts=1,
-            created_by=created_by,
             started_at=now,
         )
         self.session.add(instance)
@@ -223,26 +220,26 @@ class WorkflowConsolidator:
 
         # Create initial step record
         step = WorkflowInstanceStep(
-            instance_id=instance.id,
-            tenant_id=self.tenant_id,
+            workflow_id=instance.workflow_id,
             step_name="upload",
             status=WorkflowStepStatus.COMPLETED.value,
+            step_order=0,
             started_at=now,
             completed_at=now,
-            result={"review_id": review_id, "status": "uploaded"},
+            result_data={"review_id": review_id, "status": "uploaded"},
         )
         self.session.add(step)
         await self.session.flush()
 
         # Record execution log entry (distinct from review audit trail)
         log = WorkflowExecutionLog(
-            instance_id=instance.id,
+            workflow_id=instance.workflow_id,
             tenant_id=self.tenant_id,
             step_name="upload",
             event_type="lifecycle",
-            severity="info",
-            message=f"Workflow instance created for review {review_id[:12]}",
-            metadata={
+            details={
+                "severity": "info",
+                "message": f"Workflow instance created for review {review_id[:12]}",
                 "source": "workflow_consolidator",
                 "review_id": review_id,
                 "workflow_type": workflow_type,
@@ -254,7 +251,7 @@ class WorkflowConsolidator:
 
         logger.info(
             "Created workflow instance %s for review %s (type=%s)",
-            instance.id[:12], review_id, workflow_type,
+            instance.workflow_id[:12], review_id, workflow_type,
         )
         return instance
 
@@ -312,9 +309,8 @@ class WorkflowConsolidator:
         # Complete the previous step and create the next step
         prev_step_result = await self.session.execute(
             select(WorkflowInstanceStep).where(
-                WorkflowInstanceStep.instance_id == instance.id,
+                WorkflowInstanceStep.workflow_id == instance.workflow_id,
                 WorkflowInstanceStep.step_name == from_stage,
-                WorkflowInstanceStep.tenant_id == self.tenant_id,
             )
         )
         prev_step = prev_step_result.scalar_one_or_none()
@@ -322,8 +318,8 @@ class WorkflowConsolidator:
             prev_step.status = WorkflowStepStatus.COMPLETED.value
             prev_step.completed_at = now
             if reason:
-                prev_step.result = {
-                    **(prev_step.result or {}),
+                prev_step.result_data = {
+                    **(prev_step.result_data or {}),
                     "completed_by": actor_id,
                     "reason": reason,
                 }
@@ -333,49 +329,63 @@ class WorkflowConsolidator:
             # Check if step already exists
             existing_step_result = await self.session.execute(
                 select(WorkflowInstanceStep).where(
-                    WorkflowInstanceStep.instance_id == instance.id,
+                    WorkflowInstanceStep.workflow_id == instance.workflow_id,
                     WorkflowInstanceStep.step_name == to_stage,
-                    WorkflowInstanceStep.tenant_id == self.tenant_id,
                 )
             )
             if not existing_step_result.scalar_one_or_none():
                 new_step = WorkflowInstanceStep(
-                    instance_id=instance.id,
-                    tenant_id=self.tenant_id,
+                    workflow_id=instance.workflow_id,
                     step_name=to_stage,
                     status=WorkflowStepStatus.RUNNING.value,
                     started_at=now,
-                    result={"entered_via": "review_transition", "actor_id": actor_id},
+                    result_data={"entered_via": "review_transition", "actor_id": actor_id},
                 )
                 self.session.add(new_step)
 
         await self.session.flush()
 
-        # Record execution log entry (distinct from review audit trail)
-        log = WorkflowExecutionLog(
-            instance_id=instance.id,
-            tenant_id=self.tenant_id,
-            step_name=to_stage,
-            event_type="transition",
-            severity="info",
-            message=f"Review transition: {from_stage} → {to_stage}",
-            metadata={
-                "source": "workflow_consolidator",
-                "review_id": review_id,
-                "from_stage": from_stage,
-                "to_stage": to_stage,
-                "from_state": from_state.value,
-                "to_state": to_state.value,
-                "actor_id": actor_id,
-                "reason": reason,
-            },
+        # Record execution log entry (distinct from review audit trail).
+        # Check for existing log to guarantee idempotency on retry.
+        from sqlalchemy import exists, and_
+
+        log_exists = await self.session.execute(
+            select(exists().where(
+                and_(
+                    WorkflowExecutionLog.workflow_id == instance.workflow_id,
+                    WorkflowExecutionLog.event_type == "transition",
+                    WorkflowExecutionLog.step_name == to_stage,
+                    WorkflowExecutionLog.details.contains(
+                        {"from_state": from_state.value, "to_state": to_state.value}
+                    ),
+                )
+            ))
         )
-        self.session.add(log)
-        await self.session.flush()
+        if not log_exists.scalar():
+            log = WorkflowExecutionLog(
+                workflow_id=instance.workflow_id,
+                tenant_id=self.tenant_id,
+                step_name=to_stage,
+                event_type="transition",
+                details={
+                    "severity": "info",
+                    "message": f"Review transition: {from_stage} → {to_stage}",
+                    "source": "workflow_consolidator",
+                    "review_id": review_id,
+                    "from_stage": from_stage,
+                    "to_stage": to_stage,
+                    "from_state": from_state.value,
+                    "to_state": to_state.value,
+                    "actor_id": actor_id,
+                    "reason": reason,
+                },
+            )
+            self.session.add(log)
+            await self.session.flush()
 
         logger.debug(
             "Shadow workflow %s updated: %s → %s",
-            instance.id[:12], from_stage, to_stage,
+            instance.workflow_id[:12], from_stage, to_stage,
         )
 
     async def get_workflow_status(
@@ -414,8 +424,7 @@ class WorkflowConsolidator:
         if instance:
             steps_result = await self.session.execute(
                 select(WorkflowInstanceStep).where(
-                    WorkflowInstanceStep.instance_id == instance.id,
-                    WorkflowInstanceStep.tenant_id == self.tenant_id,
+                    WorkflowInstanceStep.workflow_id == instance.workflow_id,
                 ).order_by(WorkflowInstanceStep.started_at)
             )
             steps = [
@@ -431,7 +440,7 @@ class WorkflowConsolidator:
         return {
             "review_id": str(review.review_id),
             "review_status": review.status.value if hasattr(review.status, "value") else str(review.status),
-            "workflow_instance_id": str(instance.id) if instance else None,
+            "workflow_instance_id": str(instance.workflow_id) if instance else None,
             "workflow_status": instance.status if instance else None,
             "current_step": instance.current_step if instance else None,
             "steps": steps,

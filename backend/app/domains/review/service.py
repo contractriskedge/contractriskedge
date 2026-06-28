@@ -356,7 +356,8 @@ class ReviewService:
 
         # ── Shadow workflow instance ─────────────────────────────
         # Record this transition in the consolidated workflow instance.
-        # This is non-blocking — failures are logged but not raised.
+        # On failure, persist a reconciliation record so the background
+        # reconciliation job can recover the workflow state.
         try:
             from app.domains.workflow.consolidator import WorkflowConsolidator
             consolidator = WorkflowConsolidator(
@@ -370,10 +371,42 @@ class ReviewService:
                 reason=reason,
             )
         except Exception as exc:
-            logger.warning(
-                "Failed to shadow workflow transition for review %s: %s",
-                review_id, exc,
+            logger.error(
+                "Workflow sync FAILED for review %s transition %s -> %s: %s",
+                review_id, current_status, db_status, exc,
+                exc_info=True,
             )
+            # Persist a reconciliation event so the background worker
+            # can recover the workflow state.
+            try:
+                from app.domains.review.audit_trail import AuditTrailService
+                reconciliation = AuditTrailService(
+                    self.review_repo.session, self.tenant_id,
+                )
+                await reconciliation.record(
+                    event_type="workflow.reconciliation_needed",
+                    entity_type="review",
+                    entity_id=review_id,
+                    actor_id="system",
+                    action="reconcile",
+                    before_state={"review_status": current_status},
+                    after_state={"review_status": db_status, "workflow_sync": "pending"},
+                    description=(
+                        f"Workflow sync failed for transition {current_status} -> {db_status}. "
+                        f"Error: {exc}"
+                    ),
+                    metadata={
+                        "from_status": current_status,
+                        "to_status": db_status,
+                        "error": str(exc),
+                        "needs_reconciliation": True,
+                    },
+                )
+            except Exception as audit_exc:
+                logger.error(
+                    "Failed to persist reconciliation event for review %s: %s",
+                    review_id, audit_exc,
+                )
 
         return self._review_to_detail(review) if review else None
 
@@ -1478,11 +1511,18 @@ class ReviewService:
 
     async def _approve_impl(self, review_id: str, decision: str, comments: Optional[str] = None,
                               conditions: Optional[dict] = None) -> dict:
-        """Internal approve implementation — assumes idempotency check already passed."""
-        op_type = "approve" if decision == "approved" else "reject"
-        review = await self.review_repo.get_review(review_id, self.tenant_id)
-        if not review:
-            raise ConflictError(message=f"Review {review_id} not found")
+        """Internal approve implementation — assumes idempotency check already passed.
+
+        The entire approval flow is wrapped in a transaction so that review status,
+        workflow sync, audit trail, and approval record commit or rollback together.
+        """
+        from app.domains.review.failure_recovery import transactional_operation
+
+        async with transactional_operation(self.review_repo.session, f"{decision}_review"):
+            op_type = "approve" if decision == "approved" else "reject"
+            review = await self.review_repo.get_review(review_id, self.tenant_id)
+            if not review:
+                raise ConflictError(message=f"Review {review_id} not found")
 
         # Lock guard: verify we can approve/reject from current state
         raw_status = review.status
@@ -1625,11 +1665,12 @@ class ReviewService:
             },
         ))
 
-        # Mark idempotency complete
+        # Mark idempotency complete (in-memory, outside transaction)
         await self.idempotency.mark_completed(op_type, review_id, self.user.id, {
             "approval_id": str(approval.approval_id),
             "decision": decision,
         })
+        # ── Transaction commits here ────────────────────────────
 
         # Send approval/rejection notification (non-blocking — must not fail the approval)
         if self.notify_service:
