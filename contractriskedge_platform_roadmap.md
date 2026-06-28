@@ -1,6 +1,6 @@
 # ContractRiskEdge — Platform Architecture & Roadmap (v2.0 Freeze)
 
-**Status:** Architecture frozen. No further structural changes.
+**Status:** Architecture frozen. No further changes.
 **Date:** June 28, 2026
 **Theme:** Configuration-first business process engine with enterprise governance.
 
@@ -89,6 +89,93 @@
 
 ---
 
+## Cross-Cutting Initiative: UX & Product Polish
+
+**Applies to:** Sprints 33–38 (15–20% of every sprint)
+**Owner:** Every squad, every sprint
+
+### Areas
+
+| Area | Examples |
+|---|---|
+| **Empty states** | Guide users when no data exists — don't show blank screens |
+| **Loading** | Skeleton screens, progress indicators, optimistic UI |
+| **Keyboard shortcuts** | `j`/`k` navigate lists, `Enter` open, `Esc` close, `/` search |
+| **Contextual help** | Tooltips, "What's this?" links, in-panel documentation |
+| **Inline validation** | Validate on blur, show errors next to fields |
+| **Accessibility** | WCAG 2.1 AA compliance, screen reader support, focus management |
+| **Responsive** | Tablet and mobile layouts for review and approval tasks |
+| **Performance** | Sub-second page loads, infinite scroll, lazy loading |
+| **Terminology** | Consistent labels across all screens (e.g., "Review" not "Assessment") |
+| **Undo** | Undoable actions where feasible (delete, reject, dismiss) |
+| **Error messages** | Human-readable, actionable error messages — never raw stack traces |
+| **Guided onboarding** | First-run wizard, product tours, sample data |
+| **Notifications** | In-app notification center, email digests, preference controls |
+
+### Why this matters
+
+Customers notice polish more than they notice another backend feature. A product that feels polished at every interaction builds trust faster than one with more features but rough edges.
+
+---
+
+## Product-Level Definition of Done
+
+Before Sprint 34 (Production Readiness), every module must meet these criteria:
+
+### 1. Tenant Awareness
+- [ ] Every query is scoped by `tenant_id`
+- [ ] No cross-tenant data leakage (verified by test)
+- [ ] Tenant settings are respected (feature flags, calendars, branding)
+
+### 2. Audit Trail
+- [ ] Every business action is recorded in `governance_audit_events`
+- [ ] Audit records include: who, what, when, before/after state
+- [ ] Audit log is queryable and exportable
+
+### 3. API Documentation
+- [ ] All endpoints are documented via OpenAPI/Swagger
+- [ ] Request/response schemas are accurate
+- [ ] Error responses follow a consistent format
+
+### 4. Authorization (RBAC)
+- [ ] Every endpoint enforces permission checks
+- [ ] Role-permission matrix is documented
+- [ ] Unauthorized access returns 403, not 404
+
+### 5. Test Coverage
+- [ ] Unit test coverage ≥ 80% for backend services
+- [ ] Unit test coverage ≥ 60% for frontend components
+- [ ] Integration tests cover all critical workflows
+
+### 6. Integration Tests
+- [ ] Review creation → AI analysis → finding resolution → approval
+- [ ] Template → contract generation → editing → finalization
+- [ ] Workflow creation → publish → simulate → execute → complete
+- [ ] Signature request → envelope send → webhook receive → status update
+
+### 7. Performance Targets
+- [ ] P95 API response time < 500ms for read endpoints
+- [ ] P95 API response time < 2s for write endpoints
+- [ ] Page load time < 2s (P95)
+- [ ] Concurrent user load: 100 simultaneous users without degradation
+
+### 8. Accessibility
+- [ ] WCAG 2.1 AA compliance for all user-facing screens
+- [ ] Keyboard navigable
+- [ ] Screen reader compatible
+
+### 9. Monitoring & Health
+- [ ] Health check endpoint (`/health`) returns DB, cache, queue status
+- [ ] Key metrics exposed (request rate, error rate, latency)
+- [ ] Alerts configured for error rate spikes and service degradation
+
+### 10. Backup & Restore
+- [ ] Database backup procedure documented and tested
+- [ ] Point-in-time recovery verified
+- [ ] Configuration backup (workflow packs, templates, settings) included
+
+---
+
 ## Roadmap (Frozen)
 
 ### Sprint 32.5 — Clause Intelligence & Recommendation Engine
@@ -99,6 +186,7 @@
 * Clause Comparison (current vs suggested with word-level diff)
 * Recommendation Engine as reusable platform service with scoring
 * Clause Analytics & Usage Metrics (adoption data for Legal Ops)
+* **UX:** Empty states for clause library, inline validation on insert
 
 ---
 
@@ -119,6 +207,7 @@
 * Contract-Type Mapping (auto-select workflow)
 * AI Workflow Recommendation (confidence + reasons)
 * Workflow Variables (overridable per tenant)
+* **UX:** Keyboard navigation for workflow canvas, contextual help on stage types
 
 ---
 
@@ -135,6 +224,7 @@
 * Impact Analysis UI
 * Environment Manager + Sandbox
 * Assignment Preview (candidates, strategy, selection reason)
+* **UX:** Skeleton loading for pack library, inline validation on stage editor, undo for stage deletion
 
 ---
 
@@ -148,6 +238,7 @@
 * Audit Viewer (searchable, filterable, exportable)
 * Simulation History Browser
 * Dashboard Integration (widgets on Executive Dashboard)
+* **UX:** Empty states for monitors, keyboard shortcuts for audit viewer, export progress indicators
 
 ---
 
@@ -163,6 +254,8 @@
 * Logging improvements
 * Documentation (admin guide, user guide, API reference)
 * Customer onboarding materials
+* Product-level Definition of Done verification
+* **UX:** Guided onboarding wizard, sample datasets, product tour
 
 ---
 
@@ -183,6 +276,7 @@
 * Comments on selections
 * PDF preview
 * Version history with snapshots
+* **UX:** Keyboard shortcuts for formatting, contextual help on clause types, inline validation on variables
 
 ---
 
@@ -196,6 +290,7 @@
 * Webhook action provider
 * REST API action provider
 * Custom connector SDK
+* **UX:** Connection status indicators, setup wizards, test-connection buttons
 
 ---
 
@@ -206,10 +301,11 @@
 * Intelligent search across all contracts, clauses, and templates
 * Workflow recommendations based on contract content
 * AI-assisted clause negotiation suggestions
+* **UX:** Conversational interface, suggestion cards, confidence indicators
 
 ---
 
-### Sprint 38 — Administration Center (Future)
+### Sprint 38 — Administration Center
 
 * Unified admin console
 * Metadata Designer (custom fields, validation rules, defaults, visibility)
@@ -234,15 +330,49 @@
 * Backup management
 * Retention policy configuration
 * License management
+* **UX:** Searchable settings, bulk operations, export/import configurations
 
 ---
 
-## Guiding Principle
+## After Sprint 38
 
-**Stop adding architectural concepts. Execute this roadmap with high quality.**
+No new major platform modules. Focus on:
 
-The remaining value comes from polish, usability, performance, and reliability — not from introducing new foundational components.
+* Customer pilots
+* Performance testing at scale
+* Security review and penetration testing
+* API documentation completion
+* Administrator guide
+* End-user guide
+* Deployment automation (Docker, Kubernetes, CI/CD)
+* Observability and monitoring maturity
+* Demo environments with sample datasets
+* Competitive analysis and positioning
+
+---
+
+## Guiding Principles
+
+1. **Architecture is frozen.** No new foundational components. Execute with quality.
+2. **UX polish is not optional.** 15-20% of every sprint. Customers notice polish more than features.
+3. **Production Readiness before Authoring.** Make it stable before making it sophisticated.
+4. **Contract Authoring Studio is a product, not a feature.** Build the best contract editor, not Microsoft Word.
+5. **Stop adding architectural concepts.** The remaining value comes from execution quality, usability, performance, and reliability.
+
+---
+
+## Summary
+
+```
+32.5  →  33.1   →  33.2   →  33.3   →  34    →  35    →  36    →  37    →  38
+Clause    Workflow  Workflow  Workflow  Prod    Auth   Enterp  AI      Admin
+Intel     Found     Admin     Ops       Ready   Studio  Ints    Copilot Center
+                                                                              
+         ─────────── UX & Product Polish (15-20% every sprint) ─────────────→
+```
 
 Six months ago, ContractRiskEdge was a solid contract review tool.
 
 Today, it is an **enterprise CLM platform**.
+
+The roadmap is frozen. Begin execution.
