@@ -4,6 +4,10 @@ import React, { useState } from "react";
 import { ArrowLeft, Activity, ListTodo, Heart, Shield, BarChart3, Search } from "lucide-react";
 import { WorkflowInstanceMonitor } from "./WorkflowInstanceMonitor";
 import { UsageDashboard } from "./UsageDashboard";
+import { TimelineViewer } from "./TimelineViewer";
+import { TaskQueue } from "./TaskQueue";
+import { WorkflowHealth } from "./WorkflowHealth";
+import { AuditExplorer } from "./AuditExplorer";
 
 type OpsView = "monitor" | "tasks" | "health" | "audit" | "bottlenecks" | "dashboard";
 
@@ -63,32 +67,16 @@ export function WorkflowOperationsCenter({ onBack }: Props) {
           <UsageDashboard onBack={() => setActiveView("monitor")} />
         )}
         {activeView === "tasks" && (
-          <div className="text-center py-16 text-gray-500">
-            <ListTodo className="w-12 h-12 mx-auto mb-3 text-gray-600" />
-            <p>Task Queue — Coming soon</p>
-            <p className="text-sm">View pending tasks, assignments, and SLA deadlines</p>
-          </div>
+          <TaskQueue onBack={() => setActiveView("monitor")} />
         )}
         {activeView === "bottlenecks" && (
-          <div className="text-center py-16 text-gray-500">
-            <BarChart3 className="w-12 h-12 mx-auto mb-3 text-gray-600" />
-            <p>Bottleneck Analysis — Coming soon</p>
-            <p className="text-sm">Stage-level performance metrics and queue analysis</p>
-          </div>
+          <TaskQueue onBack={() => setActiveView("monitor")} />
         )}
         {activeView === "health" && (
-          <div className="text-center py-16 text-gray-500">
-            <Heart className="w-12 h-12 mx-auto mb-3 text-gray-600" />
-            <p>Workflow Health Dashboard — Coming soon</p>
-            <p className="text-sm">Per-workflow health scores, failure rates, and duration</p>
-          </div>
+          <WorkflowHealth onBack={() => setActiveView("monitor")} />
         )}
         {activeView === "audit" && (
-          <div className="text-center py-16 text-gray-500">
-            <Shield className="w-12 h-12 mx-auto mb-3 text-gray-600" />
-            <p>Audit Explorer — Coming soon</p>
-            <p className="text-sm">Searchable, filterable event log for all workflow actions</p>
-          </div>
+          <AuditExplorer onBack={() => setActiveView("monitor")} />
         )}
       </div>
     </div>
