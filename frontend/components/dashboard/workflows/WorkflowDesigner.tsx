@@ -230,20 +230,18 @@ export function WorkflowDesigner({ initialStages, onSave, onBack }: Props) {
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-100">Workflow Stages</h2>
           <div className="flex items-center gap-1">
-            <button
+            <div
               onClick={undo}
-              disabled={state.history.length === 0}
-              className="px-2 py-1 text-xs bg-navy-800 text-gray-300 rounded hover:bg-navy-700 disabled:opacity-30"
+              className={`px-2 py-1 text-xs rounded cursor-pointer ${state.history.length === 0 ? "bg-navy-900 text-gray-600 cursor-not-allowed" : "bg-navy-800 text-gray-300 hover:bg-navy-700"}`}
             >
               Undo
-            </button>
-            <button
+            </div>
+            <div
               onClick={redo}
-              disabled={state.future.length === 0}
-              className="px-2 py-1 text-xs bg-navy-800 text-gray-300 rounded hover:bg-navy-700 disabled:opacity-30"
+              className={`px-2 py-1 text-xs rounded cursor-pointer ${state.future.length === 0 ? "bg-navy-900 text-gray-600 cursor-not-allowed" : "bg-navy-800 text-gray-300 hover:bg-navy-700"}`}
             >
               Redo
-            </button>
+            </div>
           </div>
         </div>
 
@@ -296,21 +294,18 @@ export function WorkflowDesigner({ initialStages, onSave, onBack }: Props) {
                   )}
                 </div>
                 <div className="flex items-center gap-0.5">
-                  <button onClick={(e) => { e.stopPropagation(); moveStage(i, "up"); }}
-                    className="p-1 text-gray-500 hover:text-gray-200 disabled:opacity-20"
-                    disabled={i <= 1}>
+                  <div onClick={(e) => { e.stopPropagation(); moveStage(i, "up"); }}
+                    className={`p-1 cursor-pointer ${i <= 1 ? "text-gray-700 cursor-not-allowed" : "text-gray-500 hover:text-gray-200"}`}>
                     <ArrowUp className="w-3.5 h-3.5" />
-                  </button>
-                  <button onClick={(e) => { e.stopPropagation(); moveStage(i, "down"); }}
-                    className="p-1 text-gray-500 hover:text-gray-200 disabled:opacity-20"
-                    disabled={i >= state.stages.length - 2}>
+                  </div>
+                  <div onClick={(e) => { e.stopPropagation(); moveStage(i, "down"); }}
+                    className={`p-1 cursor-pointer ${i >= state.stages.length - 2 ? "text-gray-700 cursor-not-allowed" : "text-gray-500 hover:text-gray-200"}`}>
                     <ArrowDown className="w-3.5 h-3.5" />
-                  </button>
-                  <button onClick={(e) => { e.stopPropagation(); deleteStage(i); }}
-                    className="p-1 text-gray-500 hover:text-red-400 disabled:opacity-20"
-                    disabled={state.stages.length <= 2}>
+                  </div>
+                  <div onClick={(e) => { e.stopPropagation(); deleteStage(i); }}
+                    className={`p-1 cursor-pointer ${state.stages.length <= 2 ? "text-gray-700 cursor-not-allowed" : "text-gray-500 hover:text-red-400"}`}>
                     <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  </div>
                 </div>
               </button>
               {/* Arrow between stages */}
