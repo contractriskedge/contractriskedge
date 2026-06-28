@@ -177,6 +177,34 @@ class AppMetrics:
             ["priority"],
         )
 
+        # ── Workflow Instance Metrics ──
+        self.workflow_instances_started = Counter(
+            "workflow_instances_started_total",
+            "Total workflow instances started",
+            ["workflow_type"],
+        )
+        self.workflow_instances_completed = Counter(
+            "workflow_instances_completed_total",
+            "Total workflow instances completed",
+            ["workflow_type", "outcome"],  # approved, rejected, escalated
+        )
+        self.workflow_instances_rejected = Counter(
+            "workflow_instances_rejected_total",
+            "Total workflow instances rejected",
+            ["workflow_type"],
+        )
+        self.workflow_instances_escalated = Counter(
+            "workflow_instances_escalated_total",
+            "Total workflow instances escalated",
+            ["workflow_type"],
+        )
+        self.workflow_duration_seconds = Histogram(
+            "workflow_duration_seconds",
+            "Workflow instance duration in seconds",
+            ["workflow_type", "outcome"],
+            buckets=(10, 60, 300, 900, 3600, 14400, 86400, 259200),
+        )
+
         # ── Search Metrics ──
         self.search_queries_total = Counter(
             "search_queries_total",

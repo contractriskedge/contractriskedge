@@ -5,10 +5,11 @@
  * Supports cards, tables, text lines, and custom layouts.
  *
  * Usage:
- *   import { CardSkeleton, TableSkeleton, TextSkeleton } from '@/components/shared/LoadingSkeleton';
+ *   import { LoadingSkeleton, CardSkeleton, TableSkeleton, TextSkeleton } from '@/components/shared/LoadingSkeleton';
  *
  *   {isLoading && <CardSkeleton count={3} />}
  *   {isLoading && <TableSkeleton rows={5} columns={4} />}
+ *   {isLoading && <LoadingSkeleton className="h-48 rounded-xl" />}
  */
 
 "use client";
@@ -28,6 +29,16 @@ function Skeleton({ className = "" }: SkeletonProps) {
       aria-hidden="true"
     />
   );
+}
+
+// ── Generic Loading Skeleton (single block) ───────────────────────
+
+interface LoadingSkeletonProps {
+  className?: string;
+}
+
+export function LoadingSkeleton({ className = "" }: LoadingSkeletonProps) {
+  return <Skeleton className={className} />;
 }
 
 // ── Card Skeleton ─────────────────────────────────────────────────

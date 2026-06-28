@@ -31,6 +31,14 @@ EXCLUDED_PATHS: frozenset[str] = frozenset(
             "/api/v1/auth/token",
             "/api/v1/ws/health",
             "/metrics",
+            "/api/v1/operations/health",
+            "/api/v1/operations/queues",
+            "/api/v1/operations/scheduler",
+            "/api/v1/operations/integrations",
+            "/api/v1/operations/errors",
+            "/api/v1/operations/slow",
+            "/api/v1/operations/alerts",
+            "/api/v1/operations/support-bundle",
         )
     }
 )

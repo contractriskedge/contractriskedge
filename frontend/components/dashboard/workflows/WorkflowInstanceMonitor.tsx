@@ -8,7 +8,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { fetchInstances } from "@/services/api/workflowAdmin";
 import type { InstanceSummary } from "@/services/api/workflowAdmin";
-import { LoadingSkeleton } from "@/components/shared/LoadingSkeleton";
+
 import { ErrorState } from "@/components/shared/ErrorState";
 import { EmptyState } from "@/components/shared/EmptyState";
 
@@ -91,7 +91,7 @@ export function WorkflowInstanceMonitor({ onBack, onSelectInstance }: Props) {
       {isLoading ? (
         <div className="space-y-2">
           {Array.from({ length: 5 }).map((_, i) => (
-            <LoadingSkeleton key={i} className="h-16 rounded-lg" />
+            <div key={i} className="h-16 rounded-lg animate-pulse bg-gray-200 dark:bg-gray-700" />
           ))}
         </div>
       ) : error ? (

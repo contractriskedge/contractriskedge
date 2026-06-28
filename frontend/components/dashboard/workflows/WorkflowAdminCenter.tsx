@@ -3,7 +3,6 @@
 import React, { useState } from "react";
 import { Workflow, Plus, Search, LayoutGrid, List, ArrowLeft, Activity } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
-import { LoadingSkeleton } from "@/components/shared/LoadingSkeleton";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { useWorkflowPacks } from "@/services/hooks/useWorkflowAdmin";
@@ -271,7 +270,7 @@ export function WorkflowAdminCenter() {
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {Array.from({ length: 6 }).map((_, i) => (
-            <LoadingSkeleton key={i} className="h-48 rounded-xl" />
+            <div key={i} className="h-48 rounded-xl animate-pulse bg-gray-200 dark:bg-gray-700" />
           ))}
         </div>
       ) : error ? (
@@ -280,7 +279,7 @@ export function WorkflowAdminCenter() {
         <EmptyState
           icon={<Workflow className="w-12 h-12" />}
           title="No workflow packs yet"
-          description='Clone a built-in pack or create a new one to get started.'
+          message="Clone a built-in pack or create a new one to get started."
           action={
             <button
               onClick={() => setShowCreateDialog(true)}

@@ -95,6 +95,7 @@ const navGroups: NavGroup[] = [
     label: "Operations",
     items: [
       { id: "command-center", label: "Command Center", icon: LayoutDashboard, permission: "contracts:read" },
+      { id: "operations-center", label: "Operations Center", icon: Activity, permission: "admin:tenant" },
       { id: "activity-center", label: "Activity Center", icon: Activity, permission: "contracts:read" },
       { id: "reviewer-operations", label: "Reviewer Ops", icon: ClipboardCheck, permission: "workflows:read" },
       { id: "workflow-intelligence-dashboard", label: "Workflow Intel", icon: BarChart3, permission: "workflows:read" },

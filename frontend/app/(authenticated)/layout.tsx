@@ -27,7 +27,7 @@ import { useRealtimeCoordinator } from "@/src/lib/realtime/realtimeCoordinator";
 import { useInvalidationOrchestrator } from "@/src/lib/realtime/invalidationOrchestrator";
 import { Sun, Moon, ZoomIn, ZoomOut } from "lucide-react";
 
-type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "templates" | "packages" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "signatures" | "ingestion" | "compliance" | "review" | "executive-dashboard" | "policy" | "clause-intelligence" | "redline-knowledge-center" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center" | "activity-center";
+type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "templates" | "packages" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "signatures" | "ingestion" | "compliance" | "review" | "executive-dashboard" | "policy" | "clause-intelligence" | "redline-knowledge-center" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center" | "activity-center" | "operations-center";
 
 export default function AuthenticatedLayout({
   children,
@@ -80,6 +80,7 @@ export default function AuthenticatedLayout({
     else if (path.startsWith("/ai-operations-dashboard")) setActiveView("ai-operations-dashboard");
     else if (path.startsWith("/tenant-settings")) setActiveView("tenant-settings");
     else if (path.startsWith("/ai-operations-dashboard")) setActiveView("ai-operations-dashboard");
+    else if (path.startsWith("/operations-center")) setActiveView("operations-center");
     else if (path.startsWith("/relationships")) setActiveView("relationships");
     else setActiveView("ingestion");
   }, []);
@@ -134,6 +135,7 @@ export default function AuthenticatedLayout({
               "tenant-settings": "/tenant-settings",
               "review-dashboard": "/reviews",
               "activity-center": "/activity",
+              "operations-center": "/operations-center",
               signatures: "/signatures",
             };
             const target = routeMap[view] || "/reviews";

@@ -28,6 +28,7 @@ from app.kernel.middleware.tenant_context import TenantContextMiddleware
 from app.kernel.middleware.auth_context import AuthContextMiddleware
 from app.kernel.middleware.audit_response import AuditResponseMiddleware
 from app.kernel.middleware.logging_middleware import LoggingMiddleware
+from app.kernel.middleware.structured_logging_middleware import StructuredLoggingMiddleware
 from app.kernel.middleware.deadline import RequestDeadlineMiddleware
 from app.kernel.middleware.request_size import RequestBodySizeMiddleware
 from app.kernel.telemetry.logger import setup_logging
@@ -265,7 +266,9 @@ def create_app() -> FastAPI:
         app.add_middleware(RateLimitMiddleware)
     app.add_middleware(RequestDeadlineMiddleware, timeout_seconds=settings.request_timeout_seconds)
     app.add_middleware(RequestBodySizeMiddleware, max_bytes=settings.max_request_body_bytes)
-    app.add_middleware(LoggingMiddleware)
+    from app.kernel.middleware.correlation_id import CorrelationIDMiddleware
+    app.add_middleware(StructuredLoggingMiddleware)
+    app.add_middleware(CorrelationIDMiddleware)
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(TenantContextMiddleware)
     app.add_middleware(AuthContextMiddleware)
@@ -459,6 +462,9 @@ def create_app() -> FastAPI:
     # ── Tenant Configuration router (feature flags, policy packs, scoring, compliance) ──
     from app.domains.tenant_config.router import router as tenant_config_router
     app.include_router(tenant_config_router, prefix="/api/v1")
+    # ── Operations & Observability router ──
+    from app.domains.operations.router import router as operations_router
+    app.include_router(operations_router)
 
     # ── Prometheus metrics endpoint (no prefix, no auth) ──
     from app.kernel.telemetry.metrics import metrics_endpoint
