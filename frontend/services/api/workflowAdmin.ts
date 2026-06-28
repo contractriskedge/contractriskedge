@@ -214,7 +214,9 @@ export async function fetchWorkflowPacks(params?: {
   if (params?.page) searchParams.set("page", String(params.page));
   if (params?.page_size) searchParams.set("page_size", String(params.page_size));
   const qs = searchParams.toString();
-  return api.get(`/workflow-packs${qs ? `?${qs}` : ""}`);
+  const result = await api.get<WorkflowPackSummary[]>(`/workflow-packs${qs ? `?${qs}` : ""}`);
+  // Backend returns a plain array; wrap it in the expected shape
+  return { items: Array.isArray(result) ? result : [], total: Array.isArray(result) ? result.length : 0 };
 }
 
 export async function fetchWorkflowPack(packId: string): Promise<WorkflowPackDetail> {
