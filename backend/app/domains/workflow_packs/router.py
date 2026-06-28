@@ -15,6 +15,7 @@ from app.domains.workflow_packs.schemas import (
     WorkflowPackCategory,
     WorkflowPackCreate, WorkflowPackResponse, WorkflowPackSummary,
     PackActivation, PackActivateRequest,
+    WorkflowVersionSummary,
 )
 from app.domains.workflow_packs.service import WorkflowPackService
 
@@ -82,6 +83,94 @@ async def delete_workflow_pack(
     if not deleted:
         raise HTTPException(status_code=404, detail="Workflow pack not found")
     return {"status": "deleted"}
+
+
+# ── Versions ─────────────────────────────────────────────────────────
+
+
+@router.get("/{pack_id}/versions", response_model=list[WorkflowVersionSummary])
+async def list_workflow_versions(
+    pack_id: str,
+    service: WorkflowPackService = Depends(get_pack_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """List all versions of a workflow pack."""
+    return await service.list_versions(pack_id)
+
+
+@router.post("/{pack_id}/versions", response_model=dict, status_code=201)
+async def create_workflow_version(
+    pack_id: str,
+    data: dict,
+    service: WorkflowPackService = Depends(get_pack_service),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Create a new version for a workflow pack."""
+    return await service.create_version(pack_id, data, actor=user.id)
+
+
+@router.post("/{pack_id}/versions/{version_id}/publish", response_model=dict)
+async def publish_workflow_version(
+    pack_id: str,
+    version_id: str,
+    data: Optional[dict] = None,
+    service: WorkflowPackService = Depends(get_pack_service),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Publish a workflow version."""
+    effective_date = None
+    if data and "effective_date" in data:
+        from datetime import datetime
+        effective_date = datetime.fromisoformat(data["effective_date"].replace("Z", "+00:00"))
+    return await service.publish_version(pack_id, version_id, actor=user.id, effective_date=effective_date)
+
+
+@router.get("/{pack_id}/versions/{version_id}/validate", response_model=dict)
+async def validate_workflow_version(
+    pack_id: str,
+    version_id: str,
+    service: WorkflowPackService = Depends(get_pack_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Validate a workflow version."""
+    return await service.validate_version(pack_id, version_id)
+
+
+@router.get("/{pack_id}/versions/{version_id}/impact", response_model=dict)
+async def impact_workflow_version(
+    pack_id: str,
+    version_id: str,
+    service: WorkflowPackService = Depends(get_pack_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Analyze impact of a workflow version."""
+    return await service.impact_analysis(pack_id, version_id)
+
+
+@router.post("/{pack_id}/versions/{version_id}/simulate", response_model=dict)
+async def simulate_workflow_version(
+    pack_id: str,
+    version_id: str,
+    input_data: dict,
+    service: WorkflowPackService = Depends(get_pack_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Simulate a workflow version with test input."""
+    return await service.simulate_version(pack_id, version_id, input_data)
+
+
+@router.get("/{pack_id}/versions/{version_id_a}/compare/{version_id_b}", response_model=dict)
+async def compare_workflow_versions(
+    pack_id: str,
+    version_id_a: str,
+    version_id_b: str,
+    service: WorkflowPackService = Depends(get_pack_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Compare two versions of a workflow pack."""
+    return await service.compare_versions(pack_id, version_id_a, version_id_b)
 
 
 # ── Pack Activation ─────────────────────────────────────────────────

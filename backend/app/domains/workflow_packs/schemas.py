@@ -76,6 +76,22 @@ class WorkflowStageDef(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
+class WorkflowVersionSummary(BaseModel):
+    """Summary of a workflow version."""
+    version_id: str
+    pack_id: str
+    version_number: int
+    status: str
+    stage_count: int = 0
+    rule_count: int = 0
+    health_score: int = 0
+    change_summary: Optional[str] = None
+    published_by: Optional[str] = None
+    published_at: Optional[datetime] = None
+    created_by: Optional[str] = None
+    created_at: datetime
+
+
 class WorkflowPackRule(BaseModel):
     """A rule specific to this workflow pack."""
     rule_name: str
