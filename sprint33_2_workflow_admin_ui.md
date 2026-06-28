@@ -9,15 +9,36 @@
 
 ## Design Principle
 
-Administrators should never have to edit JSON or think about database tables. Every workflow operation — create, edit, simulate, validate, publish, version, archive, and monitor — should be achievable through the UI.
+Administrators should never have to edit JSON or think about database tables. Every workflow operation — create, edit, simulate, validate, publish, version, compare, archive, and monitor — should be achievable through the UI.
+
+**No drag-and-drop canvas, no BPMN editor, no fancy animations.** Large enterprise products use structured form-based designers because they're easier to validate, version, diff, and maintain.
 
 ---
 
-## Deliverable 1: Workflow Pack Library
+## Implementation Order
 
-### Views
+Dependency chain drives the order:
 
-**Library grid:**
+```
+Week 1                    Week 2
+─────────                 ─────────
+Pack Library              Simulator UI (depends on Rule Builder)
+Workflow Details Page     Publishing Flow (depends on Validation)
+Workflow Designer         Version Comparison (depends on Versioning)
+Rule Builder              Usage Dashboard (depends on Execution)
+```
+
+---
+
+## Week 1 Deliverables
+
+---
+
+### 1. Workflow Pack Library
+
+Browse, search, filter, clone, and manage workflow packs.
+
+**Views:**
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -26,54 +47,91 @@ Administrators should never have to edit JSON or think about database tables. Ev
 │  🔍 Search packs...                    [All Categories ▾]  │
 │                                                             │
 │  ┌────────────────────────┐  ┌────────────────────────┐    │
-│  │ NDA Review        🔵   │  │ Procurement     🔵     │    │
-│  │ v3 · Published         │  │ v2 · Published          │    │
-│  │ Used 1,234x            │  │ Used 892x               │    │
+│  │ ⭐ NDA Review     🔵   │  │ Procurement     🔵     │    │
+│  │ v3 · Published          │  │ v2 · Published          │    │
+│  │ Used 1,234x · ✅ 100/100│  │ Used 892x · ✅ 96/100  │    │
 │  │ [Clone] [Edit] [▸ ▸ ▸]│  │ [Clone] [Edit] [▸ ▸ ▸]│    │
 │  └────────────────────────┘  └────────────────────────┘    │
 │                                                             │
 │  ┌────────────────────────┐  ┌────────────────────────┐    │
-│  │ Sales Contract   🟡   │  │ High Value       📋   │    │
-│  │ v1 · Draft             │  │ Built-in               │    │
-│  │ ⚠ 2 validation warns   │  │ [Clone] [Preview]      │    │
+│  │ Sales Contract   🟡   │  │ 📋 High Value          │    │
+│  │ v1 · Draft             │  │ Built-in · v2           │    │
+│  │ ⚠ 2 warnings · 72/100 │  │ [Clone] [Preview]       │    │
 │  │ [Edit] [Validate] [Pub]│  │                        │    │
 │  └────────────────────────┘  └────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**Actions per pack:**
+- Clone (create tenant copy of built-in or existing pack)
+- Duplicate (copy within same tenant)
+- Export (JSON/YAML for cross-environment migration)
+- Import (validate before importing)
+- Archive / Restore
+- Favorite (⭐)
+
 **Version history (flyout):**
 
 ```
 NDA Review — Versions
-┌──────┬──────────┬──────────┬──────────┬──────────────────┐
-│  Ver │ Status   │ Published│  By      │  Stages │ Rules  │
-├──────┼──────────┼──────────┼──────────┼──────────────────┤
-│  v3  │ 🔵 Pub  │ 06-15    │ JSmith   │  5      │ 8      │
-│  v2  │ 🔵 Pub  │ 05-20    │ JSmith   │  5      │ 6      │
-│  v1  │ 📦 Arch │ 04-01    │ LWang    │  4      │ 4      │
-└──────┴──────────┴──────────┴──────────┴──────────────────┘
+┌──────┬──────────┬──────────┬──────────┬─────────┬──────────┐
+│  Ver │ Status   │ Published│  By      │  Score  │ Stages  │
+├──────┼──────────┼──────────┼──────────┼─────────┼──────────┤
+│  v3  │ 🔵 Pub  │ 06-15    │ JSmith   │ 100/100 │ 5       │
+│  v2  │ 🔵 Pub  │ 05-20    │ JSmith   │ 96/100  │ 5       │
+│  v1  │ 📦 Arch │ 04-01    │ LWang    │ 88/100  │ 4       │
+└──────┴──────────┴──────────┴──────────┴─────────┴──────────┘
 [Compare v2 vs v3]  [Clone v2]
-```
-
-**Pack detail:**
-
-```
-NDA Review v3
-  Status: ✅ Published · Health: 96/100
-  Stages: 5 · Rules: 8 · Active instances: 47
-  Last published: 2026-06-15 by JSmith
-  ⚠ 1 warning: Stage 'Security Review' has no SLA configured
 ```
 
 ---
 
-## Deliverable 2: Workflow Designer
+### 2. Workflow Details Page
 
-### What it is
+A summary page for each workflow pack, similar to Contract Details.
 
-A structured, step-by-step workflow builder. Not a free-form canvas — a reliable form-based designer that administrators can use without training.
+```
+┌─────────────────────────────────────────────────────────────┐
+│  NDA Review v3                                   [Edit]   │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Status:    🔵 Published · v3                               │
+│  Health:    ✅ 100/100 · 0 errors · 0 warnings              │
+│  Owner:     Legal Team                                       │
+│  Created:   2026-01-15 by JSmith                             │
+│  Published: 2026-06-15 by JSmith                             │
+│                                                             │
+│  ┌──────────────┬──────────────┬──────────────┬──────────┐  │
+│  │ Running      │ Completed    │ Avg Duration │ Templates│  │
+│  │ 47           │ 1,234        │ 48h          │ 12       │  │
+│  └──────────────┴──────────────┴──────────────┴──────────┘  │
+│                                                             │
+│  Quick Actions:                                             │
+│  [Designer] [Simulator] [Publish] [Versions] [Compare]      │
+│  [Impact Analysis] [Audit] [Clone] [Export] [Archive]      │
+│                                                             │
+│  ── Current Version ─────────────────────────────────────  │
+│  Stages: Intake → AI Analysis → Legal Review → Finalize     │
+│  Rules: 8 (4 routing, 2 escalation, 2 assignment)           │
+│                                                             │
+│  ── Templates Using This Workflow ────────────────────────  │
+│  • Standard NDA (v2)                                        │
+│  • International NDA (v3)                                    │
+│  • Employee NDA (v1)                                        │
+│                                                             │
+│  ── Recent Activity ──────────────────────────────────────  │
+│  06-28  JSmith  Published v3                                │
+│  06-27  LWang   Updated Legal Review SLA (24h → 48h)       │
+│  06-25  JSmith  Validated v3 — 100/100                      │
+│  06-20  LWang   Created v3 (draft)                          │
+└─────────────────────────────────────────────────────────────┘
+```
 
-### View
+---
+
+### 3. Workflow Designer
+
+A structured, step-by-step workflow builder. Not a free-form canvas.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -83,17 +141,17 @@ A structured, step-by-step workflow builder. Not a free-form canvas — a reliab
 │  Workflow Stages                                           │
 │                                                             │
 │  ┌── 1 ──────────────────────────────────────────────────┐  │
-│  │  Intake           (Start)                   [Edit] [X]│  │
+│  │  ↑ ↓  Intake           (Start)             [Edit] [X] │  │
 │  └────────────────────────────────────────────────────────┘  │
 │       │                                                     │
 │       ▼                                                     │
 │  ┌── 2 ──────────────────────────────────────────────────┐  │
-│  │  AI Analysis      (Automatic)                [Edit] [X]│  │
+│  │  ↑ ↓  AI Analysis      (Automatic)           [Edit] [X] │  │
 │  └────────────────────────────────────────────────────────┘  │
 │       │                                                     │
 │       ▼                                                     │
 │  ┌── 3 ──────────────────────────────────────────────────┐  │
-│  │  Legal Review     (Approval · ⚡ 48h SLA)     [Edit] [X]│  │
+│  │  ↑ ↓  Legal Review     (Approval · ⚡ 48h)    [Edit] [X] │  │
 │  └────────────────────────────────────────────────────────┘  │
 │       │                                                     │
 │       ├──→ ┌── 3a ───────────────────────────────────────┐  │
@@ -101,13 +159,13 @@ A structured, step-by-step workflow builder. Not a free-form canvas — a reliab
 │       │    └──────────────────────────────────────────────┘  │
 │       ▼                                                     │
 │  ┌── 4 ──────────────────────────────────────────────────┐  │
-│  │  Finalize        (Automatic)                  [Edit] [X]│  │
+│  │  ↑ ↓  Finalize         (Automatic)           [Edit] [X] │  │
 │  └────────────────────────────────────────────────────────┘  │
 │                                                             │
 │  [+ Add Stage]  [+ Add Escalation]                          │
 │                                                             │
-│  ── Stage Configuration ──────────────────────────────────  │
-│  (opens when a stage is selected)                           │
+│  ═════════════════════════════════════════════════════════  │
+│  Stage Configuration                                        │
 │                                                             │
 │  Name:     [Legal Review              ]                     │
 │  Type:     [⚡ Approval Required  ▾]                        │
@@ -120,23 +178,19 @@ A structured, step-by-step workflow builder. Not a free-form canvas — a reliab
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Key behaviors
-
+**Behaviors:**
 - Click a stage → side panel opens with full configuration
 - "Add Stage" appends to the end
-- Drag handles for reordering (simple up/down arrows)
+- ↑↓ arrows for reordering
 - Stage type determines available configuration fields
-- Validation status indicator at the top (green/red)
+- Validation indicator at top (green/red)
+- SLA calendar picker references Business Calendars
 
 ---
 
-## Deliverable 3: Rule Builder
+### 4. Rule Builder
 
-### What it is
-
-A visual condition builder that generates JSON Logic automatically. Administrators choose fields, operators, and values — they never see raw JSON.
-
-### View
+Visual condition builder that generates JSON Logic automatically. Supports nested groups.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -145,22 +199,31 @@ A visual condition builder that generates JSON Logic automatically. Administrato
 │                                                             │
 │  ┌─ Rule 1 ──────────────────────────────────────────────┐  │
 │  │  IF                                                     │  │
-│  │    ┌──────────┐  ┌──────┐  ┌──────────┐                │  │
-│  │    │ Risk     │  │ >    │  │ 80       │                │  │
-│  │    │ Score    │  │      │  │          │                │  │
-│  │    └──────────┘  └──────┘  └──────────┘                │  │
-│  │    AND                                                 │  │
-│  │    ┌──────────┐  ┌──────┐  ┌──────────┐                │  │
-│  │    │Jurisdict-│  │ =    │  │ Germany  │                │  │
-│  │    │ion       │  │      │  │          │                │  │
-│  │    └──────────┘  └──────┘  └──────────┘                │  │
+│  │    ┌─ ALL ──────────────────────────────────────────┐  │  │
+│  │    │  ┌──────────┐  ┌──────┐  ┌──────────┐          │  │  │
+│  │    │  │ Risk     │  │ >    │  │ 80       │          │  │  │
+│  │    │  │ Score    │  │      │  │          │          │  │  │
+│  │    │  └──────────┘  └──────┘  └──────────┘          │  │  │
+│  │    │  AND                                           │  │  │
+│  │    │  ┌─ ANY ───────────────────────────────────┐   │  │  │
+│  │    │  │  ┌──────────┐  ┌──────┐  ┌──────────┐  │   │  │  │
+│  │    │  │  │Jurisdict-│  │ =    │  │ Germany  │  │   │  │  │
+│  │    │  │  │ion       │  │      │  │          │  │   │  │  │
+│  │    │  │  └──────────┘  └──────┘  └──────────┘  │   │  │  │
+│  │    │  │  OR                                     │   │  │  │
+│  │    │  │  ┌──────────┐  ┌──────┐  ┌──────────┐  │   │  │  │
+│  │    │  │  │Jurisdict-│  │ =    │  │ France   │  │   │  │  │
+│  │    │  │  │ion       │  │      │  │          │  │   │  │  │
+│  │    │  │  └──────────┘  └──────┘  └──────────┘  │   │  │  │
+│  │    │  └─────────────────────────────────────────┘   │  │  │
+│  │    └────────────────────────────────────────────────┘  │  │
 │  │                                                         │  │
 │  │  THEN                                                   │  │
 │  │    Assign to:  [VP Legal          ▾]                    │  │
 │  │    Mode:       [All Required      ▾]                    │  │
 │  │    Strategy:   [Least Loaded      ▾]                    │  │
 │  │                                                         │  │
-│  │  [+ Add Condition]  [+ Add Group (AND/OR)]              │  │
+│  │  [+ Add Condition]  [+ Add Group (ALL/ANY)]             │  │
 │  └─────────────────────────────────────────────────────────┘  │
 │                                                             │
 │  ┌─ Rule 2 ──────────────────────────────────────────────┐  │
@@ -178,46 +241,43 @@ A visual condition builder that generates JSON Logic automatically. Administrato
 │                                                             │
 │  [+ Add Rule]                                               │
 │                                                             │
-│  ── Available Fields ─────────────────────────────────────  │
-│  Contract: Risk Score, Value, Jurisdiction, Type, ...       │
-│  Supplier: Region, Tier                                     │
-│  AI: Findings Count, Top Risk                                │
-│  User: Role, Department                                      │
+│  ── Assignment Preview ───────────────────────────────────  │
+│  Matched Rule 1: Risk 92 > 80 AND Country = Germany         │
+│  → VP Legal (All Required, Least Loaded)                    │
+│  → Candidates: John (5), Lisa (3), Mike (7)                 │
+│  → Would select: Lisa (least loaded — 3 open tasks)         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### What the engine receives (hidden from admin)
+**Engine receives (hidden from admin):**
 
 ```json
 {
   "and": [
     {">": [{"var": "contract.risk_score"}, 80]},
-    {"==": [{"var": "contract.jurisdiction"}, "Germany"]}
+    {"or": [
+      {"==": [{"var": "contract.jurisdiction"}, "Germany"]},
+      {"==": [{"var": "contract.jurisdiction"}, "France"]}
+    ]}
   ]
 }
 ```
 
-### Assignment Preview
-
-When conditions are set, show:
-
-```
-Assignment Preview
-  Matched Rule 1: Risk > 80 AND Country = Germany
-  → VP Legal (All Required, Least Loaded)
-  → Current candidates: John (5), Lisa (3), Mike (7)
-  → Would select: Lisa (least loaded — 3 open tasks)
-```
+**Available fields come from Metadata Providers:**
+- Contract: Risk Score, Value, Jurisdiction, Type, Department, Region, Has Redlines
+- Supplier: Region, Tier
+- AI: Findings Count, Top Risk
+- User: Role, Department
 
 ---
 
-## Deliverable 4: Simulator UI
+## Week 2 Deliverables
 
-### What it is
+---
 
-A form where administrators enter contract metadata and see the exact approval path.
+### 5. Simulator UI
 
-### View
+One of the flagship features. Input contract metadata → see exact approval path.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -233,11 +293,12 @@ A form where administrators enter contract metadata and see the exact approval p
 │  │ Has Redlines:  [Yes  ▾]                              │   │
 │  └──────────────────────────────────────────────────────┘   │
 │                                                             │
-│  Test Cases: [High Risk NDA ▾]  [Save]  [Load]              │
+│  Test Cases: [High Risk NDA ▾]  [Save Current]  [Load]     │
 │                                                             │
-│  ── Result ───────────────────────────────────────────────  │
+│  ═════════════════════════════════════════════════════════  │
+│  Result                                                     │
 │                                                             │
-│  ✅ Matched: High Value Workflow                            │
+│  ✅ Selected: High Value Workflow (v3)                      │
 │                                                             │
 │  Stage 1: Intake                    Auto    0.1s            │
 │  Stage 2: AI Analysis               Auto    2m              │
@@ -261,13 +322,9 @@ A form where administrators enter contract metadata and see the exact approval p
 
 ---
 
-## Deliverable 5: Publishing Flow
+### 6. Publishing Flow
 
-### What it is
-
-Publishing is never a simple button. It always shows validation results and impact analysis first.
-
-### View
+Never a simple button. Always shows validation + impact analysis first.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -298,13 +355,9 @@ Publishing is never a simple button. It always shows validation results and impa
 
 ---
 
-## Deliverable 6: Version Comparison
+### 7. Version Comparison
 
-### What it is
-
-Side-by-side view of two versions showing what changed.
-
-### View
+Compare business concepts, not JSON. Highlight additions, changes, removals.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -312,13 +365,19 @@ Side-by-side view of two versions showing what changed.
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  Stages:                                                    │
-│    + Security Review                  (added)                │
-│    ~ Legal Review                     (SLA: 24h → 48h)      │
-│    ~ Legal Review                     (escalation added)    │
+│    ┌────────────────────────────────────────────────────┐   │
+│    │ v2:  Intake → AI → Legal → Finalize                │   │
+│    │ v3:  Intake → AI → Legal → Security → Finalize     │   │
+│    │                                                   │   │
+│    │  + Security Review                  (added)        │   │
+│    │  ~ Legal Review                     (SLA 24→48h)   │   │
+│    │  ~ Legal Review                     (escalation +)  │   │
+│    └────────────────────────────────────────────────────┘   │
 │                                                             │
 │  Rules:                                                     │
 │    + Rule 4: Value > $5M → VP Legal   (added)               │
 │    ~ Rule 2: Risk threshold           (80 → 75)             │
+│    - Rule 3: Low Risk Auto-Approve    (removed)             │
 │                                                             │
 │  Health: 96 → 100                    (improved)             │
 └─────────────────────────────────────────────────────────────┘
@@ -326,38 +385,44 @@ Side-by-side view of two versions showing what changed.
 
 ---
 
-## Deliverable 7: Workflow Usage Dashboard
+### 8. Workflow Usage Dashboard
 
-### What it is
-
-Aggregated metrics for all published workflows.
-
-### View
+Actionable operational metrics, not just charts.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Workflow Analytics — Last 30 Days                          │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│  📊 Most Used Workflows                                     │
+│  📊 Volume                                                   │
+│  ┌──────────────┬──────────────┬──────────────┬──────────┐  │
+│  │ Running      │ Completed    │ Avg Duration │ Pending  │  │
+│  │ 47           │ 1,234        │ 52.3h        │ 12       │  │
+│  └──────────────┴──────────────┴──────────────┴──────────┘  │
+│                                                             │
+│  ⏱ Performance                                              │
+│  ┌──────────────┬──────────────┬──────────────┬──────────┐  │
+│  │ Avg Approval │ Avg Stage    │ Slowest      │ Fastest  │  │
+│  │ 18.2h        │ 6.4h         │ Legal 28.4h  │ AI 2.3m  │  │
+│  └──────────────┴──────────────┴──────────────┴──────────┘  │
+│                                                             │
+│  🚦 Quality                                                 │
+│  ┌──────────────┬──────────────┬──────────────┬──────────┐  │
+│  │ Rejected %   │ Escalated %  │ Auto-Approved│ SLA Breach│  │
+│  │ 12.3%        │ 8.2%         │ 23.4%        │ 4.2%     │  │
+│  └──────────────┴──────────────┴──────────────┴──────────┘  │
+│                                                             │
+│  🔥 Top Bottlenecks                                         │
+│  1. Exec Approval   (avg 18.2h · 12.3% rejection)          │
+│  2. Legal Review    (avg 28.4h · 8.2% breach rate)          │
+│  3. Security Review (avg 6.1h  · 3.1% breach rate)          │
+│                                                             │
+│  📈 Most Used Workflows                                     │
 │  1. NDA Review             1,234 runs   48h avg             │
 │  2. Procurement            892 runs     72h avg             │
 │  3. Legal Review           567 runs     96h avg             │
 │                                                             │
-│  ⏱ Performance                                              │
-│  Average completion:       52.3h                            │
-│  Slowest stage:            Legal Review (28.4h)             │
-│  Most rejected stage:      Exec Approval (12.3%)            │
-│  Most escalated workflow:  High Value (8.2%)                │
-│  Approval bottlenecks:     Legal Review → Exec Approval     │
-│                                                             │
-│  🚦 Current Status                                           │
-│  Active instances:         47                               │
-│  Pending approvals:        12                               │
-│  SLA breaches:             4.2%                             │
-│  Running workflows:        22                               │
-│                                                             │
-│  📈 Trends (7-day rolling)                                  │
+│  📉 Trends (7-day rolling)                                  │
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │  Completion Time                                     │   │
 │  │  ▁▃▄▆▇▆▅▄▃▂▁▁▂▃▄▅▆▇▆▅▄▃▂▁   Current: 52.3h         │   │
@@ -367,24 +432,22 @@ Aggregated metrics for all published workflows.
 
 ---
 
-## Implementation Order
-
-| Day | Deliverable |
-|---|---|
-| 1-2 | Workflow Pack Library (list, detail, version history, clone) |
-| 3-5 | Workflow Designer (stage list, configuration panel, add/reorder/delete) |
-| 5-7 | Rule Builder (field/operator/value rows, assignment preview) |
-| 7-9 | Simulator UI (input form, results display, explanation tree, test cases) |
-| 9-10 | Publishing Flow (validation results, impact analysis, effective date) |
-| 10-11 | Version Comparison (side-by-side diff) |
-| 11-12 | Workflow Usage Dashboard (metrics, trends, bottlenecks) |
-| 12-14 | Integration testing, polish, UX refinement |
-
 ## UX Notes (15-20% of sprint)
 
-- Empty states: "No workflows yet. Clone a built-in pack to get started."
-- Loading: Skeleton screens for pack library, simulator results
-- Validation: Inline validation on stage editor, rule builder
-- Keyboard shortcuts: `Ctrl+Enter` to save, `Esc` to close panels
-- Error messages: Human-readable, actionable ("Stage name is required" not "Field cannot be null")
-- Responsive: Side panels collapse on narrow screens
+- **Empty states:** "No workflows yet. Clone a built-in pack to get started."
+- **Loading:** Skeleton screens for pack library, simulator results
+- **Validation:** Inline validation on stage editor, rule builder
+- **Keyboard shortcuts:** `Ctrl+Enter` save, `Esc` close panels, `↑↓` reorder
+- **Error messages:** Human-readable, actionable ("Stage name is required" not "Field cannot be null")
+- **Responsive:** Side panels collapse on narrow screens
+- **Consistent terminology:** "Publish" not "Deploy", "Stage" not "Step", "Rule" not "Condition"
+
+---
+
+## What NOT to build
+
+- Drag-and-drop canvas designer
+- BPMN editor
+- Fancy animations
+- Real-time collaborative editing
+- These can be added later if customers request them
