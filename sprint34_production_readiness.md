@@ -165,30 +165,58 @@ A single page administrators open first to understand platform status.
 - `docker-compose.prod.yml` for production (with secrets, volumes)
 - Services: API, Worker, Frontend, Database, Cache, Queue
 
-### 4.2 Backup & Restore
+### 4.2 Backup & Restore + Disaster Recovery Validation
 
 - [ ] Automated daily database backup (pg_dump + WAL archiving)
 - [ ] Object storage backup (contracts, documents)
 - [ ] Configuration backup (workflow packs, templates, clauses)
 - [ ] Documented restore procedure
-- [ ] RTO / RPO defined
-- [ ] One-click restore script
+- [ ] RTO (Recovery Time Objective) and RPO (Recovery Point Objective) defined
 
-### 4.3 Environment Validation
-
-On startup, verify:
+**Disaster Recovery Validation — must be tested, not just documented:**
 
 ```
-✅ Database — connection successful
-✅ Storage — bucket accessible
-✅ Cache — Redis connected
-✅ AI Model — model loaded
-✅ Email — SMTP configured
-✅ DocuSign — API credentials valid
-✅ Secrets — all required env vars present
+1. Take full backup
+2. Delete database
+3. Restore from backup
+4. Run full acceptance test suite
+5. Verify all 35+ tests pass
+6. Record RTO and RPO
 ```
 
-If any check fails, the service logs a clear error and exits.
+**Deliverable:**
+
+```
+Recovery Time (RTO):    < 10 min
+Recovery Point (RPO):   < 5 min
+Acceptance Tests:       35/35 Passed
+```
+
+### 4.3 Production Configuration Validator
+
+Before the application starts, verify every required dependency:
+
+```python
+# On startup, check:
+✅ DATABASE_URL — connection successful
+✅ REDIS_URL — cache connected
+✅ STORAGE_BUCKET — bucket accessible
+✅ AI_PROVIDER — model loaded and responsive
+✅ SMTP_HOST — email configured
+✅ DOCUSIGN_CLIENT_ID — API credentials valid
+✅ JWT_SECRET — signing key present
+✅ All required env vars — present and non-empty
+✅ Disk space — sufficient (> 10% free)
+✅ TLS certificates — valid (if HTTPS enabled)
+```
+
+If any check fails, the service logs a clear error and exits immediately:
+
+```
+Startup Failed
+Reason: Missing DOCUSIGN_CLIENT_ID
+Expected: Set DOCUSIGN_CLIENT_ID environment variable
+```
 
 ### 4.4 OpenAPI Documentation
 
@@ -199,7 +227,32 @@ If any check fails, the service logs a clear error and exits.
 - [ ] Rate limits documented
 - [ ] Pagination documented
 
-### 4.5 Demo Seed Data
+### 4.5 API Compatibility Tests
+
+Automated API regression tests that run after every build. Every major module must have at least one test:
+
+```
+✅ GET    /api/v1/contracts
+✅ POST   /api/v1/templates
+✅ POST   /api/v1/contracts/generate
+✅ POST   /api/v1/reviews
+✅ POST   /api/v1/reviews/{id}/approve
+✅ POST   /api/v1/signatures/send
+✅ POST   /api/v1/obligations
+✅ GET    /api/v1/search
+✅ GET    /api/v1/dashboard
+✅ GET    /api/v1/workflow-packs
+✅ POST   /api/v1/workflow-packs/{id}/validate
+✅ POST   /api/v1/workflow-packs/{id}/simulate
+✅ POST   /api/v1/workflow-packs/{id}/publish
+✅ GET    /api/v1/workflow-instances
+✅ GET    /api/v1/workflow-analytics
+✅ GET    /api/v1/workflow-audit
+```
+
+**Implementation:** One pytest file (`test_api_compatibility.py`) that calls every endpoint and asserts `2xx` response.
+
+### 4.6 Demo Seed Data
 
 Create a realistic demo tenant:
 
@@ -227,16 +280,18 @@ At the end of Sprint 34, produce this report:
 
 | Area              | Status | Notes |
 |-------------------|--------|-------|
-| Tenant Isolation  | ✅     | 15/15 entities verified |
+| Tenant Isolation  | ✅     | 15/15 entities verified, cross-tenant attacks tested |
 | Security Audit    | ✅     | 12/12 checks passed |
-| RBAC              | ✅     | 6 roles verified |
-| Performance       | ✅     | All P95 targets met |
+| RBAC              | ✅     | 6 roles verified, privilege escalation tested |
+| Performance       | ✅     | All P95 targets met, baselines recorded |
 | Health Checks     | ✅     | 10 subsystems monitored |
-| Monitoring        | ✅     | Metrics + logging + alerts |
-| Backup            | ✅     | Automated daily |
-| Restore           | ✅     | Documented + tested |
+| Monitoring        | ✅     | Prometheus metrics + structured logging + alerts |
+| Backup            | ✅     | Automated daily, RTO < 10min, RPO < 5min |
+| Restore           | ✅     | Tested: delete → restore → 35/35 tests pass |
+| API Compatibility | ✅     | 16 endpoint regression tests pass |
+| Config Validation | ✅     | 10 startup checks, fails fast on missing config |
 | API Docs          | ✅     | OpenAPI complete |
-| Demo Environment  | ✅     | 100+ contracts, 20 workflows |
+| Demo Environment  | ✅     | 100+ contracts, 20 workflows, realistic data |
 | Integration Tests | ✅     | Full lifecycle validated |
 ```
 
