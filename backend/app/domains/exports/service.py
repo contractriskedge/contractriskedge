@@ -138,13 +138,13 @@ class ExportService:
                    metadata, created_at
             FROM governance_audit_events
             WHERE tenant_id = :tenant_id
-              AND created_at > NOW() - :period::interval
+              AND created_at > NOW() - make_interval(days => :period_days)
             ORDER BY created_at DESC
             LIMIT 500
         """)
         result = await self.session.execute(sql, {
             "tenant_id": self.tenant_id,
-            "period": f"{period_days} days",
+            "period_days": period_days,
         })
         return [dict(r._mapping) for r in result.fetchall()]
 
@@ -156,11 +156,11 @@ class ExportService:
                 COUNT(DISTINCT event_type)::int AS unique_types
             FROM governance_audit_events
             WHERE tenant_id = :tenant_id
-              AND created_at > NOW() - :period::interval
+              AND created_at > NOW() - make_interval(days => :period_days)
         """)
         result = await self.session.execute(sql, {
             "tenant_id": self.tenant_id,
-            "period": f"{period_days} days",
+            "period_days": period_days,
         })
         return dict(result.fetchone()._mapping)
 

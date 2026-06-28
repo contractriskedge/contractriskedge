@@ -201,23 +201,22 @@ class AuditService:
 
     async def get_summary(self, period_days: int = 7) -> AuditSummaryResponse:
         """Get summary of audit activity for the period."""
-        period = f"{period_days} days"
         gov_count = (await self.session.execute(
             sa_text("""
                 SELECT COUNT(*)::int FROM governance_audit_events
                 WHERE tenant_id = :tenant_id
-                  AND created_at > NOW() - :period::interval
+                  AND created_at > NOW() - make_interval(days => :period_days)
             """),
-            {"tenant_id": self.tenant_id, "period": period},
+            {"tenant_id": self.tenant_id, "period_days": period_days},
         )).scalar() or 0
 
         review_count = (await self.session.execute(
             sa_text("""
                 SELECT COUNT(*)::int FROM review_status_history
                 WHERE tenant_id = :tenant_id
-                  AND created_at > NOW() - :period::interval
+                  AND created_at > NOW() - make_interval(days => :period_days)
             """),
-            {"tenant_id": self.tenant_id, "period": period},
+            {"tenant_id": self.tenant_id, "period_days": period_days},
         )).scalar() or 0
 
         total = gov_count + review_count
@@ -227,12 +226,12 @@ class AuditService:
                 SELECT event_type, COUNT(*)::int AS count
                 FROM governance_audit_events
                 WHERE tenant_id = :tenant_id
-                  AND created_at > NOW() - :period::interval
+                  AND created_at > NOW() - make_interval(days => :period_days)
                 GROUP BY event_type
                 ORDER BY count DESC
                 LIMIT 20
             """),
-            {"tenant_id": self.tenant_id, "period": period},
+            {"tenant_id": self.tenant_id, "period_days": period_days},
         )).fetchall()
         by_type = [
             AuditEventTypeCount(event_type=row.event_type, count=row.count)
@@ -245,9 +244,9 @@ class AuditService:
             sa_text("""
                 SELECT COUNT(DISTINCT actor_id)::int FROM governance_audit_events
                 WHERE tenant_id = :tenant_id
-                  AND created_at > NOW() - :period::interval
+                  AND created_at > NOW() - make_interval(days => :period_days)
             """),
-            {"tenant_id": self.tenant_id, "period": period},
+            {"tenant_id": self.tenant_id, "period_days": period_days},
         )).scalar() or 0
 
         return AuditSummaryResponse(
