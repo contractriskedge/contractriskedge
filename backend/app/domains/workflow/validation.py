@@ -280,11 +280,12 @@ class WorkflowValidator:
         referenced_rules: set[str] = set()
         for stage in stages:
             for transition in stage.get("transitions", []):
-                condition = transition.get("condition", {})
-                if isinstance(condition, dict):
-                    ref = condition.get("ref") or condition.get("rule")
-                    if ref:
-                        referenced_rules.add(ref)
+                if isinstance(transition, dict):
+                    condition = transition.get("condition", {})
+                    if isinstance(condition, dict):
+                        ref = condition.get("ref") or condition.get("rule")
+                        if ref:
+                            referenced_rules.add(ref)
         for rule in (rules or []):
             rule_name = rule.get("rule_name", "")
             if rule_name and rule_name not in referenced_rules:
@@ -355,7 +356,12 @@ class WorkflowValidator:
             visited.add(node)
             rec_stack.add(node)
             for transition in stage_transitions.get(node, []):
-                target = transition.get("target", "")
+                if isinstance(transition, str):
+                    target = transition
+                elif isinstance(transition, dict):
+                    target = transition.get("target", transition.get("name", ""))
+                else:
+                    target = ""
                 if target and target in stage_names:
                     if target not in visited:
                         parent_map[target] = node
@@ -397,7 +403,12 @@ class WorkflowValidator:
                 continue
             reachable.add(current)
             for transition in stage_transitions.get(current, []):
-                target = transition.get("target", "")
+                if isinstance(transition, str):
+                    target = transition
+                elif isinstance(transition, dict):
+                    target = transition.get("target", "")
+                else:
+                    target = ""
                 if target and target in stage_names:
                     queue.append(target)
 
