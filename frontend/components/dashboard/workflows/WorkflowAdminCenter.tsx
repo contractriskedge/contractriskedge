@@ -13,6 +13,7 @@ import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
 import { WorkflowDesigner } from "./WorkflowDesigner";
 import { RuleBuilder } from "./RuleBuilder";
 import { WorkflowSimulator } from "./WorkflowSimulator";
+import { PublishingFlow } from "./PublishingFlow";
 
 export function WorkflowAdminCenter() {
   const [search, setSearch] = useState("");
@@ -23,6 +24,7 @@ export function WorkflowAdminCenter() {
   const [designerPackId, setDesignerPackId] = useState<string | null>(null);
   const [ruleBuilderOpen, setRuleBuilderOpen] = useState(false);
   const [simulatorOpen, setSimulatorOpen] = useState(false);
+  const [publishOpen, setPublishOpen] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
 
   const { data, isLoading, error, refetch } = useWorkflowPacks({
@@ -91,6 +93,34 @@ export function WorkflowAdminCenter() {
           Back to Workflow Packs
         </button>
         <WorkflowSimulator onBack={() => setSimulatorOpen(false)} />
+      </div>
+    );
+  }
+
+  // If Publishing Flow is open, show it
+  if (publishOpen) {
+    return (
+      <div className="space-y-4">
+        <button
+          onClick={() => setPublishOpen(false)}
+          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Workflow Packs
+        </button>
+        <PublishingFlow
+          packName="NDA Review"
+          versionInfo={{ current_version: 2, current_status: "published", new_version: 3 }}
+          onPublish={(data) => {
+            console.log("Publishing:", data);
+            setPublishOpen(false);
+          }}
+          onRollback={(targetVersion) => {
+            console.log("Rollback to:", targetVersion);
+            setPublishOpen(false);
+          }}
+          onBack={() => setPublishOpen(false)}
+        />
       </div>
     );
   }
