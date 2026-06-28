@@ -1,25 +1,29 @@
-# Sprint 32.5 — Contract Authoring & Clause Intelligence
+# Sprint 32.5 — Clause Intelligence & Recommendation Engine
 
-**Theme:** Close the gap between AI detection and real contract editing.
-**Goal:** Make the Clause Library the source of truth for AI recommendations, enable bulk actions, and provide rich contract authoring.
+**Theme:** Close the gap between AI detection and actionable clause resolution.
 **Duration:** 2 weeks
+**After this sprint:** Sprint 33 (Workflow Administration) → Sprint 34 (Rich Authoring)
 
 ---
 
-## Why this sprint exists
+## Why this scope
 
-The product today detects issues well but doesn't let users fix them efficiently:
+The original plan bundled four products into one sprint. This version scopes to **six focused deliverables** that unblock Workflow Administration:
 
-| Gap | Symptom | Fix |
+| Deliverable | Why now | Why not later |
 |---|---|---|
-| AI finds missing clauses | Shows "No Template Available" | Map findings → Clause Library → one-click insert |
-| Bulk checkboxes do nothing | Users select items, no action bar appears | Real bulk actions: approve, reject, insert, assign, export |
-| Generated contracts are read-only | Users must download DOCX, edit externally, re-upload | Rich in-app authoring with clause insertion, AI rewrite, track changes |
-| Placeholder text has no fix button | AI says "Placeholder Governing Law" but no action | One-click replace with approved library clause |
+| AI → Clause Library mapping | "No Template Available" is actively confusing users | Blocks every AI finding from being actionable |
+| One-click Insert / Replace | Users need to act on recommendations | Without this, Clause Library feels disconnected |
+| Bulk Actions | Checkboxes exist but do nothing | Visible UX gap that erodes trust |
+| Clause Comparison | Lawyers need before/after before replacing | Without this, one-click replace is too risky |
+| Recommendation Engine (platform service) | Multiple consumers (AI Review, Templates, Negotiation) | Will be harder to extract later |
+| Clause Analytics & Usage | Legal Ops needs adoption metrics | Data is already there, just not exposed |
+
+**Removed from this sprint:** Rich in-browser authoring (TipTap, tables, exhibits, variable sync). That moves to Sprint 34 after Workflow Administration is complete.
 
 ---
 
-## Feature 1: Clause Recommendations
+## Deliverable 1: AI → Clause Library Mapping
 
 ### Current behavior
 
@@ -42,55 +46,112 @@ AI Finding:
 Recommendation Engine queries Clause Library
 
 ```
-Clause Type = GDPR
-Status = Published
-Jurisdiction = EU
-Risk = Critical
-```
-
-↓
-
-```
 Suggested Clauses (3)
 
-☐ GDPR Standard v5     ★★★★☆  Published  Legal Approved
-☐ GDPR EU v2           ★★★★☆  Published  Legal Approved
-☐ GDPR UK v1           ★★★☆☆  Draft      Pending Review
+  ☐ GDPR Standard v7     96%  ★★★★★  Published  Used 412x
+  ☐ GDPR EU v2           88%  ★★★★☆  Published  Used 189x
+  ☐ GDPR UK v1           72%  ★★★☆☆  Draft      Used 23x
 
-[Insert Selected]  [View Full Clause]
+[Preview] [Insert] [Replace] [Dismiss]
 ```
 
 ### Implementation
 
-1. **Backend: `RecommendationEngine.lookup_clauses(finding)`**
-   - Accept an AI finding
-   - Extract `clause_type`, `jurisdiction`, `risk_level` from finding metadata
-   - Query `clause_library` table for matching published clauses
-   - Return ranked results (by match score, star rating, version)
+1. **Backend: `RecommendationEngine.lookup_clauses(finding, tenant_context)`**
+   - Extract `clause_type`, `jurisdiction`, `industry`, `risk_level` from finding metadata
+   - Query `clause_library` for matching published clauses
+   - Score each match (see Deliverable 5 for scoring model)
+   - Exclude deprecated/superseded/archived clauses
+   - Return top-5 ranked results
 
 2. **Backend: `POST /api/v1/recommendations/resolve`**
    - Body: `{ finding_id, clause_id, action: "insert" | "replace" | "dismiss" }`
-   - On "insert": add clause text to document at the appropriate section
-   - On "replace": swap placeholder/weak clause text with library clause
-   - On "dismiss": mark finding as resolved with a note
+   - On "insert": add clause text to document, create new version
+   - On "replace": swap target text with clause text, create new version with diff
+   - On "dismiss": mark finding resolved with audit note
 
 3. **Frontend: Finding card update**
    - Replace "No Template Available" with `SuggestedClauses` component
-   - Show clause name, rating, status, version
-   - "Insert Clause" button triggers API call
-   - After insertion, finding transitions to "resolved"
+   - Show: clause name, match score, rating, health status, usage count
+   - Actions: Preview (modal), Insert, Replace, Dismiss
 
 ### Acceptance criteria
 
-- [ ] Every AI finding with a `clause_type` returns at least one suggestion if a matching published clause exists
+- [ ] Every AI finding with a `clause_type` returns suggestions if matching published clauses exist
 - [ ] "No Template Available" only shows when zero published clauses match
-- [ ] One-click insert adds clause text to the document
-- [ ] One-click replace swaps placeholder text with approved language
-- [ ] Insertion/replacement is recorded in the authoring audit trail
+- [ ] Deprecated/superseded clauses are excluded from results
+- [ ] Match score is displayed as a percentage
+- [ ] Clicking Preview opens a read-only modal with full clause text
+- [ ] Insert/Replace creates a new document version
 
 ---
 
-## Feature 2: Real Bulk Actions
+## Deliverable 2: One-click Insert / Replace with Preview
+
+### Current behavior
+
+Finding says "Placeholder Governing Law" but there's no fix button.
+
+### Target behavior
+
+```
+Placeholder Governing Law
+
+⚠ Current: "Delaware" — may not be appropriate for UK entity
+
+Suggested Replacements:
+  ○ Governing Law (UK) — English law, exclusive jurisdiction of London Courts
+  ● Governing Law (EU) — Irish law, subject to CJEU jurisdiction
+
+[Preview]  [Compare]  [Replace]  [Dismiss]
+```
+
+Clicking **Compare** shows:
+
+```
+┌─────────────────────┬─────────────────────────┐
+│ Current (§12.1)     │ Suggested               │
+├─────────────────────┼─────────────────────────┤
+│ This Agreement shall│ This Agreement shall be │
+│ be governed by the  │ governed by the laws of │
+│ laws of the State of│ England and Wales. The  │
+│ Delaware.           │ parties submit to the   │
+│                     │ exclusive jurisdiction  │
+│                     │ of the London Courts.   │
+├─────────────────────┼─────────────────────────┤
+│                     │ [Accept Replacement]    │
+└─────────────────────┴─────────────────────────┘
+```
+
+### Implementation
+
+1. **Backend: `POST /api/v1/findings/{id}/preview-replacement`**
+   - Body: `{ replacement_clause_id: "..." }`
+   - Returns `{ current_text, suggested_text, section, diff_html }`
+
+2. **Backend: `POST /api/v1/findings/{id}/replace`**
+   - Body: `{ replacement_clause_id: "...", section: "12.1" }`
+   - Replaces text in document, creates new version
+   - Records replacement in audit trail
+   - Resolves the finding
+
+3. **Frontend: Comparison dialog**
+   - Side-by-side view: current vs suggested
+   - Inline diff highlighting
+   - "Accept Replacement" button
+   - "Cancel" returns to finding card
+
+### Acceptance criteria
+
+- [ ] Every finding with `suggested_replacement` shows a "Compare" button
+- [ ] Comparison shows current text vs suggested text side-by-side
+- [ ] Diff is highlighted inline
+- [ ] Accepting a replacement creates a new document version
+- [ ] Replacement is recorded in the audit trail
+
+---
+
+## Deliverable 3: Bulk Actions
 
 ### Current behavior
 
@@ -109,274 +170,265 @@ Suggested Clauses (3)
 ☑ Finding 2
 ☑ Finding 3
 
-▼ Bulk Actions
-  ✓ Approve Selected (3)
+▼ Bulk Actions (3 selected)
+  ✓ Approve Selected
   ✗ Reject Selected
+  ✓ Resolve Selected
   ✎ Accept AI Rewrite
   + Insert Clauses
   👤 Assign To...
   🚫 Mark False Positive
   📥 Export Selected
-  🗑 Delete
 ```
+
+### Actions
+
+| Action | Behavior |
+|---|---|
+| Approve | Sets finding status to `approved`, records audit event |
+| Reject | Sets finding status to `rejected`, requires reason |
+| Resolve | Sets finding status to `resolved` (for duplicates, intentional accepts) |
+| Accept AI Rewrite | Applies the AI-suggested rewrite to each finding |
+| Insert Clauses | Opens clause picker, inserts selected clause for each finding |
+| Assign To | Opens user picker, assigns all selected to chosen user |
+| Mark False Positive | Sets finding status to `false_positive` |
+| Export | Generates CSV/PDF report of selected findings |
 
 ### Implementation
 
 1. **Backend: `POST /api/v1/findings/bulk`**
-   - Body: `{ finding_ids: [...], action: "approve" | "reject" | "accept_rewrite" | "insert_clauses" | "assign" | "false_positive" | "export" | "delete" }`
+   - Body: `{ finding_ids: [...], action: "approve" \| "reject" \| "resolve" \| "accept_rewrite" \| "insert_clauses" \| "assign" \| "false_positive" \| "export", params: {...} }`
    - Processes all findings in a single transaction
-   - Returns `{ succeeded: [...], failed: [...] }`
+   - Returns `{ succeeded: [{id, status}], failed: [{id, error}] }`
 
 2. **Frontend: Bulk action bar**
    - Appears when ≥ 1 finding is selected
-   Shows count: "3 selected"
+   - Shows count: "3 selected"
    - Dropdown menu with all applicable actions
-   - Confirmation dialog for destructive actions (delete, reject)
+   - Confirmation dialog for destructive actions
    - Progress indicator during bulk processing
 
 ### Acceptance criteria
 
 - [ ] Bulk actions bar appears when findings are selected
-- [ ] Bulk approve/reject works across findings from different reviews
-- [ ] Bulk assign opens user picker, assigns all selected
-- [ ] Bulk export generates a single report with all selected findings
+- [ ] All 8 actions work correctly
 - [ ] Partial failures are reported per-finding
-- [ ] All bulk actions are recorded in the audit trail
+- [ ] Every bulk action is recorded in the audit trail
+- [ ] Bulk export generates a valid CSV/PDF
 
 ---
 
-## Feature 3: Rich Contract Authoring
+## Deliverable 4: Clause Comparison
 
-### Current behavior
+### What it is
 
-Template → Generate → Download DOCX → Edit externally → Re-upload
+A dedicated comparison view that lets users see **exactly what changes** before accepting a clause replacement.
 
-### Target behavior
+### Why it's separate from Insert/Replace
 
-Template → Generate → **Author Mode** → Edit in-app
-
-```
-┌──────────────────────────────────────────────────────┐
-│  📝 Author Mode                                      │
-│  ┌──────────────────────────────────────────────────┐│
-│  │ [Insert Clause] [Insert Table] [AI Rewrite] [TC] ││
-│  ├──────────────────────────────────────────────────┤│
-│  │                                                  ││
-│  │  MASTER SERVICES AGREEMENT                       ││
-│  │                                                  ││
-│  │  1. Definitions. [{{Vendor}} means...]           ││
-│  │                                                  ││
-│  │  2. Payment. Net 30 days from invoice.           ││
-│  │                                                  ││
-│  │  ╔══════════════════════════════════════════════╗ ││
-│  │  ║ [Insert Clause from Library...]              ║ ││
-│  │  ╚══════════════════════════════════════════════╝ ││
-│  │                                                  ││
-│  │  IN WITNESS WHEREOF...                           ││
-│  │                                                  ││
-│  └──────────────────────────────────────────────────┘│
-└──────────────────────────────────────────────────────┘
-```
-
-### Editor capabilities
-
-| Feature | Implementation |
-|---|---|
-| Rich text editing | TipTap/ProseMirror-based editor (already partially in use) |
-| Clause insertion | Command palette → search Clause Library → insert at cursor |
-| Table insertion | Insert/edit tables with header rows |
-| Exhibit support | Insert exhibit placeholders with auto-numbering |
-| Signature blocks | Insert signature block with party name, title, date fields |
-| Variable synchronization | `{{Vendor}}` → all instances update when one changes |
-| Track changes | Built-in document diff (existing `VersionDiffViewer`) |
-| Comments | Sidebar comments on any selection (existing) |
-| Version history | Auto-save on edit, explicit version snapshots (existing) |
-
-### Authoring audit trail
-
-Every edit is recorded:
-
-```
-2026-06-28 11:32  Legal Team  Inserted clause "GDPR Standard v5" at §8.3
-2026-06-28 11:15  Business    Changed "Net 30" to "Net 45" at §2.1
-2026-06-28 10:58  AI          Rewrote §3.2 for clarity (suggestion accepted)
-```
-
-### Implementation approach
-
-Rather than building a full Word processor from scratch:
-
-1. **Extend existing TipTap editor** — already used in redline workspace
-2. **Add Clause Library integration** — command palette searches published clauses
-3. **Add variable awareness** — `{{VARIABLE}}` tokens render as editable fields; changing one updates all
-4. **Auto-save** — debounced save to `contract_document_versions` every 30 seconds
-5. **Version on explicit save** — user clicks "Save Version" → creates snapshot
-
-### Acceptance criteria
-
-- [ ] Generated contracts open in editable mode
-- [ ] Users can type, format, and restructure text
-- [ ] Clause Library is accessible from an "Insert Clause" command
-- [ ] Inserting a clause adds it to the document and records the action in the audit trail
-- [ ] `{{VARIABLE}}` tokens are editable; changing one updates all occurrences
-- [ ] Tables can be inserted, edited, and deleted
-- [ ] Auto-save preserves work on browser close
-- [ ] Version history is accessible from the document workspace
-
----
-
-## Feature 4: Clause Replacement Workflow
-
-### Current behavior
-
-AI Finding:
-
-> Placeholder Governing Law — "Delaware" may not be appropriate for UK entity
-
-No action available.
-
-### Target behavior
-
-```
-Placeholder Governing Law
-
-⚠ Current: "Delaware" — may not be appropriate for UK entity
-
-Suggested Replacements:
-  ○ Governing Law (UK) — English law, exclusive jurisdiction of London
-  ● Governing Law (EU) — Irish law, CJEU jurisdiction
-  ○ Governing Law (US) — Delaware law (current)
-
-[Replace] [Dismiss] [View Comparison]
-```
+Insert/Replace is the action. Comparison is the **review step** before the action. Lawyers will not replace contract text without seeing the diff first.
 
 ### Implementation
 
-1. **Backend: `POST /api/v1/findings/{id}/replace`**
-   - Body: `{ replacement_clause_id: "...", section: "12.1" }`
-   - Finds the target text range in the document
-   - Replaces with the selected clause text
-   - Creates a new document version
-   - Records the replacement in the audit trail
-   - Resolves the finding
+1. **Backend: Text diff engine**
+   - Compute word-level diff between current text and replacement text
+   - Return structured diff data (insertions, deletions, unchanged segments)
+   - Store diff in the document version metadata
 
-2. **Frontend: Replacement dialog**
-   - Shows current text vs. replacement text side-by-side
-   - "Replace" button executes the swap
-   - "View Comparison" shows redline diff
-
-### Acceptance criteria
-
-- [ ] Findings with `suggested_replacement` show replacement options
-- [ ] One-click replace swaps text and creates a new document version
-- [ ] Replacement is shown in the version diff viewer
-- [ ] Audit trail records who replaced what and why
-
----
-
-## Feature 5: Variable Synchronization
-
-### Current behavior
-
-Template variables are rendered once at generation time. Changing a value requires regenerating the entire document.
-
-### Target behavior
-
-```
-{{Vendor}} = Acme Corp
-
-All 14 occurrences update simultaneously.
-
-┌────────────────────────────────────┐
-│  Vendor Name                       │
-│  ┌──────────────────────────────┐  │
-│  │ Acme Corp                    │  │
-│  └──────────────────────────────┘  │
-│                                    │
-│  Update all 14 occurrences?        │
-│                                    │
-│  [Update All]  [Update This Only]  │
-└────────────────────────────────────┘
-```
-
-### Implementation
-
-1. **Variable registry** — on document generation, scan for `{{VARIABLE}}` tokens and build a registry
-2. **Variable editor** — clicking any variable opens an inline editor
-3. **Propagation** — "Update All" changes every occurrence; "Update This Only" breaks the link
-4. **Persistence** — variable values stored in `contract_document_versions.variables` JSONB column
+2. **Frontend: Comparison view**
+   - Reuse existing `VersionDiffViewer` component
+   - Left pane: current text
+   - Right pane: replacement text
+   - Highlighted insertions (green) and deletions (red)
+   - "Accept" button at bottom
 
 ### Acceptance criteria
 
-- [ ] All `{{VARIABLE}}` tokens are detected at generation time
-- [ ] Clicking a variable opens an inline editor
-- [ ] "Update All" changes every linked occurrence
-- [ ] "Update This Only" changes one occurrence and delinks it
-- [ ] Variable changes create a new document version
+- [ ] Comparison view opens from any finding with a suggested replacement
+- [ ] Word-level diff is displayed with insertions in green, deletions in red
+- [ ] Unchanged text is shown in normal weight
+- [ ] Accepting navigates back to the finding and triggers the replace action
 
 ---
 
-## Feature 6: Authoring Audit Trail
+## Deliverable 5: Recommendation Engine (Platform Service)
 
-### Current behavior
-
-Audit trail exists for review transitions but not for document edits.
-
-### Target behavior
+### Architecture
 
 ```
-Document Activity
-
-Today
-  11:32  Legal Team    Inserted clause "GDPR Standard v5" at §8.3
-  11:15  Business      Changed "Net 30" to "Net 45" at §2.1
-  10:58  AI            Rewrote §3.2 for clarity (accepted)
-
-Yesterday
-  16:45  System        Generated from template "MSA v3"
-  14:30  Legal Team    Published clause "GDPR Standard v5"
+                    ┌─────────────────────────────┐
+                    │   Recommendation Engine      │
+                    │                              │
+Input:              │  ┌───────────────────────┐   │  Output:
+context             │  │  Scoring Pipeline      │   │  Ranked clauses
+entity              │  │                        │   │  with scores
+tenant              │  │  1. Type Match (30%)   │   │  and explanations
+document            │  │  2. Jurisdiction (20%) │   │
+                    │  │  3. Industry (15%)     │   │
+                    │  │  4. Risk Level (15%)   │   │
+                    │  │  5. Usage Rate (10%)   │   │
+                    │  │  6. Freshness (10%)    │   │
+                    │  └───────────────────────┘   │
+                    └─────────────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────────────────┐
+                    │      Consumers               │
+                    │                              │
+                    │  • AI Review (Sprint 32.5)   │
+                    │  • Template Generation (exists)│
+                    │  • Negotiation (future)      │
+                    │  • Workflow (future)         │
+                    │  • Policy Engine (future)    │
+                    └─────────────────────────────┘
 ```
 
-### Implementation
+### Scoring model
 
-Add a new event type to the existing `governance_audit_events` table:
+Each candidate clause gets a score 0-100 based on:
+
+| Factor | Weight | Source |
+|---|---|---|
+| Clause type match | 30% | Finding metadata vs clause category |
+| Jurisdiction match | 20% | Finding jurisdiction vs clause jurisdiction |
+| Industry match | 15% | Tenant industry vs clause industry tags |
+| Risk level alignment | 15% | Finding severity vs clause risk level |
+| Usage / acceptance rate | 10% | How often this clause is used and accepted |
+| Freshness (version recency) | 10% | Newer versions score higher |
+
+### Explanation output
+
+```json
+{
+  "clause_id": "cl_gdpr_v7",
+  "score": 96,
+  "explanation": [
+    {"factor": "Jurisdiction", "match": true, "weight": 20, "score": 20},
+    {"factor": "Industry", "match": true, "weight": 15, "score": 15},
+    {"factor": "Contract Type", "match": true, "weight": 30, "score": 30},
+    {"factor": "Risk Level", "match": true, "weight": 15, "score": 15},
+    {"factor": "Usage Rate", "value": "82% acceptance", "weight": 10, "score": 8},
+    {"factor": "Freshness", "value": "Published 2026-03", "weight": 10, "score": 8}
+  ]
+}
+```
+
+### Service interface
 
 ```python
-event_type = "document.edited"
-entity_type = "document_version"
-```
+class RecommendationEngine:
+    async def recommend_clauses(
+        self,
+        *,
+        tenant_id: str,
+        context: RecommendationContext,
+        limit: int = 5,
+    ) -> list[ScoredClause]:
+        ...
 
-Each edit records:
-- `actor_id` — who made the change
-- `description` — what changed (e.g., "Inserted clause 'GDPR Standard v5' at §8.3")
-- `metadata` — `{ "edit_type": "clause_insert" | "text_change" | "variable_update" | "ai_rewrite", "section": "8.3", "clause_id": "..." }`
+@dataclass
+class RecommendationContext:
+    clause_type: Optional[str] = None
+    jurisdiction: Optional[str] = None
+    industry: Optional[str] = None
+    risk_level: Optional[str] = None
+    contract_type: Optional[str] = None
+    document_text: Optional[str] = None
+    finding_id: Optional[str] = None
+```
 
 ### Acceptance criteria
 
-- [ ] Every clause insertion is recorded
-- [ ] Every text change over 50 characters is recorded
-- [ ] Every variable update is recorded
-- [ ] Every AI rewrite accept/reject is recorded
-- [ ] Audit trail is visible from the document workspace
+- [ ] Recommendation Engine is a standalone service, not coupled to AI Review
+- [ ] Scoring considers all 6 factors
+- [ ] Each result includes a breakdown explanation
+- [ ] Engine can be called from AI Review, Template Generation, and API
+- [ ] Deprecated/superseded clauses are filtered out before scoring
 
 ---
 
-## Implementation Order
+## Deliverable 6: Clause Analytics & Usage Metrics
 
-| Week | Features | Dependencies |
+### What it exposes
+
+For every clause in the Clause Library:
+
+```
+GDPR Standard v7
+
+Health: ✅ Published (v7) · Supersedes v4, v5, v6
+
+Usage:
+  Templates:      321  (in 12 active templates)
+  Contracts:    5,412  (inserted into generated contracts)
+  Acceptance:     69%  (accepted vs rejected when AI-suggested)
+  AI Suggestions: 812  (times recommended by AI)
+  AI Acceptance:  87%  (of those, accepted by users)
+
+Trend:
+  Last 30 days: +42 insertions, 91% acceptance rate
+  Last 90 days: +156 insertions, 85% acceptance rate
+
+Top Users:
+  Legal Team:    2,341 insertions
+  Procurement:   1,892 insertions
+  Compliance:    1,179 insertions
+```
+
+### Why this matters
+
+Legal Operations teams need adoption metrics to:
+- Identify which clauses are most valuable
+- Retire clauses that are always rejected
+- Negotiate better terms based on usage data
+- Prove ROI of the Clause Library to leadership
+
+### Implementation
+
+1. **Backend: Analytics queries**
+   - Aggregate from `contract_document_versions`, `governance_audit_events`, `clause_library`
+   - Cache computed metrics (refresh daily or on-demand)
+   - Expose via `GET /api/v1/clause-analytics/{clause_id}`
+
+2. **Frontend: Analytics panel**
+   - Tab on the Clause Detail page
+   - Usage summary cards
+   - Trend chart (30/90 day)
+   - Top users table
+
+### Acceptance criteria
+
+- [ ] Every published clause has an analytics view
+- [ ] Usage counts (templates, contracts) are accurate
+- [ ] Acceptance rate is computed from audit events
+- [ ] AI suggestion/accepted counts are tracked
+- [ ] 30/90 day trends are charted
+- [ ] Analytics data is cached for performance
+
+---
+
+## What this sprint does NOT include
+
+| Feature | Moved to | Rationale |
 |---|---|---|
-| Week 1 | Clause Recommendations + Clause Replacement | Existing Clause Library, AI Finding schema |
-| Week 1 | Real Bulk Actions | Existing finding API |
-| Week 2 | Rich Contract Authoring (basic) | Existing TipTap editor, document version model |
-| Week 2 | Variable Sync + Authoring Audit Trail | Authoring implementation |
+| Rich in-browser authoring (TipTap, tables, exhibits) | Sprint 34 | Would delay Workflow Administration |
+| Variable synchronization | Sprint 34 | Part of rich authoring |
+| Auto-save / version snapshots | Sprint 34 | Part of rich authoring |
+| Track changes UI | Sprint 34 | Part of rich authoring |
+| Comments on document selections | Sprint 34 | Part of rich authoring |
+| Word Content Controls / Salesforce / SAP metadata | Future | Requires variable sync foundation first |
 
-## What this enables
+---
 
-After Sprint 32.5, the product will feel like a complete CLM:
+## Sequencing after this sprint
 
-- AI finds issues **and** fixes them with one click
-- Bulk operations work like users expect
-- Contracts are editable in-app, not just downloadable
-- Every change is tracked and auditable
+```
+Sprint 32.5  →  Sprint 33  →  Sprint 34
+(Clause       (Workflow     (Rich Authoring)
+ Intelligence)  Administration)
+```
 
-Then Sprint 33.2 (Workflow Administration) becomes the final layer that orchestrates this polished authoring experience.
+This sequence:
+1. Fixes the visible UX gaps (no more "No Template Available", bulk actions work)
+2. Builds the Workflow Administration layer on a stable foundation
+3. Delivers rich authoring last, when the platform is fully orchestrated
