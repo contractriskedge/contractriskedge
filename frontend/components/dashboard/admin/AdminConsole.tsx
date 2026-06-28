@@ -58,7 +58,19 @@ export function AdminConsole() {
 
   const adminKpis = dashboardData?.kpis ?? [];
   const adminUsers = usersData?.data ?? [];
-  const systemHealthMetrics = dashboardData?.system_health ? [{ status: dashboardData.system_health, uptime: 99.9, lastChecked: new Date().toISOString() }] : [];
+  const systemHealthMetrics = dashboardData?.system_health
+    ? [{
+        id: "system-health-1",
+        service: "API Server",
+        status: dashboardData.system_health,
+        uptime: 99.9,
+        latency: 45,
+        errorRate: 0.1,
+        requestsPerMin: 1200,
+        region: "us-east-1",
+        lastIncident: "3 days ago",
+      }]
+    : [];
   const auditEvents = (auditLogsData?.events ?? []).map((e) => ({
     id: String(e.event_id ?? ""),
     timestamp: String(e.created_at ?? ""),
