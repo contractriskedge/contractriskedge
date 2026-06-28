@@ -22,6 +22,12 @@ from app.kernel.database.base import Base
 
 # ── Enums ──────────────────────────────────────────────────────────
 
+class WorkflowVersionStatus(str, PyEnum):
+    DRAFT = "draft"
+    PUBLISHED = "published"
+    ARCHIVED = "archived"
+
+
 class WorkflowPackCategory(str, PyEnum):
     PROCUREMENT = "procurement"
     HEALTHCARE = "healthcare"
@@ -70,6 +76,8 @@ class WorkflowPack(Base):
     industry: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     region: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     jurisdiction: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    parent_pack_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    is_built_in: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     stages: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True, default=list)
     rules: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True, default=list)
     compliance_requirements: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True, default=list)
@@ -94,6 +102,7 @@ class WorkflowPack(Base):
 
     __table_args__ = (
         Index("idx_workflow_packs_tenant_category", "tenant_id", "category"),
+        Index("idx_workflow_packs_parent", "parent_pack_id"),
     )
 
     def __repr__(self) -> str:
@@ -104,6 +113,8 @@ class WorkflowVersion(Base):
     """Versioned snapshot of a workflow pack definition.
 
     Tracks changes to pack configurations over time for audit and rollback.
+    Each version has its own frozen stages_definition and rules_definition.
+    Workflow instances are pinned to a specific version at creation time.
     """
 
     __tablename__ = "workflow_versions"
@@ -112,21 +123,34 @@ class WorkflowVersion(Base):
     pack_id: Mapped[str] = mapped_column(String(64), ForeignKey("workflow_packs.pack_id", ondelete="CASCADE"), nullable=False, index=True)
     tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    stages_definition: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True, default=dict)
+    rules_definition: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True, default=dict)
+    variables: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True, default=dict)
     snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     change_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    published_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    effective_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    expiration_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Relationships
     pack: Mapped["WorkflowPack"] = relationship("WorkflowPack", back_populates="versions")
+    instances: Mapped[list["WorkflowInstance"]] = relationship(
+        "WorkflowInstance", back_populates="version",
+        foreign_keys="WorkflowInstance.version_id",
+    )
 
     __table_args__ = (
         UniqueConstraint("pack_id", "version_number", name="uq_pack_version"),
         Index("idx_workflow_versions_pack", "pack_id", "version_number"),
+        Index("idx_workflow_versions_status", "status"),
     )
 
     def __repr__(self) -> str:
-        return f"<WorkflowVersion {self.pack_id} v{self.version_number}>"
+        return f"<WorkflowVersion {self.pack_id} v{self.version_number} [{self.status}]>"
 
 
 # ── Pack Activations ───────────────────────────────────────────────
@@ -168,6 +192,7 @@ class WorkflowInstance(Base):
     workflow_id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: uuid.uuid4().hex[:12])
     tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     pack_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    version_id: Mapped[Optional[str]] = mapped_column(String(64), ForeignKey("workflow_versions.version_id", ondelete="SET NULL"), nullable=True, index=True)
     workflow_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     version: Mapped[str] = mapped_column(String(20), nullable=False, default="1.0")
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending", index=True)
@@ -184,6 +209,10 @@ class WorkflowInstance(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Relationships
+    version: Mapped[Optional["WorkflowVersion"]] = relationship(
+        "WorkflowVersion", back_populates="instances",
+        foreign_keys=[version_id],
+    )
     steps: Mapped[list["WorkflowInstanceStep"]] = relationship(
         "WorkflowInstanceStep", back_populates="workflow_instance",
         cascade="all, delete-orphan", order_by="WorkflowInstanceStep.step_order"
