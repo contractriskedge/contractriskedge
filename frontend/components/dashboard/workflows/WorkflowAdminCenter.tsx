@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Workflow, Plus, Search, Filter, LayoutGrid, List } from "lucide-react";
+import { Workflow, Plus, Search, LayoutGrid, List, ArrowLeft } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { LoadingSkeleton } from "@/components/shared/LoadingSkeleton";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -10,6 +10,8 @@ import { useWorkflowPacks } from "@/services/hooks/useWorkflowAdmin";
 import { WorkflowPackCard } from "./WorkflowPackCard";
 import { WorkflowPackDetailDrawer } from "./WorkflowPackDetailDrawer";
 import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
+import { WorkflowDesigner } from "./WorkflowDesigner";
+import { RuleBuilder } from "./RuleBuilder";
 
 export function WorkflowAdminCenter() {
   const [search, setSearch] = useState("");
@@ -17,6 +19,8 @@ export function WorkflowAdminCenter() {
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [selectedPackId, setSelectedPackId] = useState<string | null>(null);
+  const [designerPackId, setDesignerPackId] = useState<string | null>(null);
+  const [ruleBuilderOpen, setRuleBuilderOpen] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
 
   const { data, isLoading, error, refetch } = useWorkflowPacks({
@@ -28,10 +32,54 @@ export function WorkflowAdminCenter() {
   const packs = data?.items ?? [];
   const total = data?.total ?? 0;
 
+  // If Designer is open, show it instead of the library
+  if (designerPackId) {
+    return (
+      <div className="space-y-4">
+        <button
+          onClick={() => setDesignerPackId(null)}
+          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Workflow Packs
+        </button>
+        <WorkflowDesigner
+          initialStages={[]}
+          onSave={(stages) => {
+            console.log("Saving stages:", stages);
+            setDesignerPackId(null);
+          }}
+          onBack={() => setDesignerPackId(null)}
+        />
+      </div>
+    );
+  }
+
+  // If Rule Builder is open, show it
+  if (ruleBuilderOpen) {
+    return (
+      <div className="space-y-4">
+        <button
+          onClick={() => setRuleBuilderOpen(false)}
+          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Workflow Packs
+        </button>
+        <RuleBuilder
+          onSave={(rules) => {
+            console.log("Saving rules:", rules);
+            setRuleBuilderOpen(false);
+          }}
+          onBack={() => setRuleBuilderOpen(false)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
-        icon={<Workflow className="w-6 h-6" />}
         title="Workflow Administration"
         description="Configure, validate, simulate, and publish workflow packs"
         actions={
@@ -158,6 +206,10 @@ export function WorkflowAdminCenter() {
         <WorkflowPackDetailDrawer
           packId={selectedPackId}
           onClose={() => setSelectedPackId(null)}
+          onOpenDesigner={(id: string) => {
+            setSelectedPackId(null);
+            setDesignerPackId(id);
+          }}
         />
       )}
 

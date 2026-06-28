@@ -13,9 +13,10 @@ import { useWorkflowPack, useVersions } from "@/services/hooks/useWorkflowAdmin"
 interface Props {
   packId: string;
   onClose: () => void;
+  onOpenDesigner?: (packId: string) => void;
 }
 
-export function WorkflowPackDetailDrawer({ packId, onClose }: Props) {
+export function WorkflowPackDetailDrawer({ packId, onClose, onOpenDesigner }: Props) {
   const [activeTab, setActiveTab] = useState<"overview" | "versions" | "analytics" | "timeline">("overview");
   const { data: pack, isLoading, error } = useWorkflowPack(packId);
   const { data: versions } = useVersions(packId);
@@ -49,7 +50,11 @@ export function WorkflowPackDetailDrawer({ packId, onClose }: Props) {
           {/* Quick Actions */}
           {pack && (
             <div className="flex gap-2 px-4 pb-4">
-              <ActionButton icon={<Edit className="w-4 h-4" />} label="Designer" />
+              <ActionButton
+                icon={<Edit className="w-4 h-4" />}
+                label="Designer"
+                onClick={() => onOpenDesigner?.(packId)}
+              />
               <ActionButton icon={<Play className="w-4 h-4" />} label="Simulator" />
               <ActionButton icon={<CheckCircle className="w-4 h-4" />} label="Validate" />
               <ActionButton icon={<Layers className="w-4 h-4" />} label="Publish" />
@@ -106,9 +111,12 @@ export function WorkflowPackDetailDrawer({ packId, onClose }: Props) {
   );
 }
 
-function ActionButton({ icon, label }: { icon: React.ReactNode; label: string }) {
+function ActionButton({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick?: () => void }) {
   return (
-    <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-navy-800 text-gray-300 rounded-lg hover:bg-navy-700 hover:text-gold-400 transition-colors">
+    <button
+      onClick={onClick}
+      className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-navy-800 text-gray-300 rounded-lg hover:bg-navy-700 hover:text-gold-400 transition-colors"
+    >
       {icon}
       {label}
     </button>
