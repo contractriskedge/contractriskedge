@@ -75,18 +75,18 @@ export function WorkflowPackCard({ pack, viewMode, onClick }: Props) {
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button
+          <div
             onClick={(e) => { e.stopPropagation(); }}
-            className="p-1.5 text-gray-500 hover:text-gold-400 transition-colors"
+            className="p-1.5 text-gray-500 hover:text-gold-400 transition-colors cursor-pointer"
           >
             <Star className={`w-4 h-4 ${pack.is_favorite ? "fill-gold-400 text-gold-400" : ""}`} />
-          </button>
-          <button
+          </div>
+          <div
             onClick={(e) => { e.stopPropagation(); }}
-            className="p-1.5 text-gray-500 hover:text-gray-300 transition-colors"
+            className="p-1.5 text-gray-500 hover:text-gray-300 transition-colors cursor-pointer"
           >
             <MoreHorizontal className="w-4 h-4" />
-          </button>
+          </div>
         </div>
       </div>
 
@@ -132,18 +132,18 @@ export function WorkflowPackCard({ pack, viewMode, onClick }: Props) {
 
       {/* Hover actions */}
       <div className="absolute top-12 right-2 hidden group-hover:flex flex-col gap-1 bg-navy-900 border border-navy-600 rounded-lg p-1 shadow-xl z-10">
-        <button className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-300 hover:text-gold-400 hover:bg-navy-700 rounded">
+        <div className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-300 hover:text-gold-400 hover:bg-navy-700 rounded cursor-pointer">
           <Copy className="w-3.5 h-3.5" /> Clone
-        </button>
-        <button className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-300 hover:text-gold-400 hover:bg-navy-700 rounded">
+        </div>
+        <div className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-300 hover:text-gold-400 hover:bg-navy-700 rounded cursor-pointer">
           <Download className="w-3.5 h-3.5" /> Export
-        </button>
-        <button className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-300 hover:text-gold-400 hover:bg-navy-700 rounded">
+        </div>
+        <div className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-300 hover:text-gold-400 hover:bg-navy-700 rounded cursor-pointer">
           <FileJson className="w-3.5 h-3.5" /> Import
-        </button>
-        <button className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-300 hover:text-red-400 hover:bg-navy-700 rounded">
+        </div>
+        <div className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-300 hover:text-red-400 hover:bg-navy-700 rounded cursor-pointer">
           <Archive className="w-3.5 h-3.5" /> Archive
-        </button>
+        </div>
       </div>
     </button>
   );
