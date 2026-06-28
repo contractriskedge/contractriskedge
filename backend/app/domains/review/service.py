@@ -1524,153 +1524,154 @@ class ReviewService:
             if not review:
                 raise ConflictError(message=f"Review {review_id} not found")
 
-        # Lock guard: verify we can approve/reject from current state
-        raw_status = review.status
-        status_str = raw_status.value if hasattr(raw_status, 'value') else str(raw_status)
-        try:
-            assert_can_approve_or_reject(status_str, review_id)
-        except ImmutableReviewError as e:
-            raise ValueError(str(e))
+            # Lock guard: verify we can approve/reject from current state
+            raw_status = review.status
+            status_str = raw_status.value if hasattr(raw_status, 'value') else str(raw_status)
+            try:
+                assert_can_approve_or_reject(status_str, review_id)
+            except ImmutableReviewError as e:
+                raise ValueError(str(e))
 
-        # Guard: rejection requires a reason
-        if decision == "rejected" and not (comments and comments.strip()):
-            raise ValueError("Rejection reason (comments) is required when rejecting a review.")
+            # Guard: rejection requires a reason
+            if decision == "rejected" and not (comments and comments.strip()):
+                raise ValueError("Rejection reason (comments) is required when rejecting a review.")
 
-        # Guard: if approving, check for unresolved critical/high findings
-        if decision == "approved" or decision == "conditionally_approved":
-            from app.domains.review.models import ReviewFinding
-            from sqlalchemy import select, func as sa_func
-            unresolved = await self.review_repo.session.execute(
-                select(sa_func.count()).select_from(ReviewFinding).where(
-                    ReviewFinding.review_id == review_id,
-                    ReviewFinding.tenant_id == self.tenant_id,
-                    ReviewFinding.resolution.is_(None),
-                    ReviewFinding.severity.in_(["critical", "high"]),
+            # Guard: if approving, check for unresolved critical/high findings
+            if decision == "approved" or decision == "conditionally_approved":
+                from app.domains.review.models import ReviewFinding
+                from sqlalchemy import select, func as sa_func
+                unresolved = await self.review_repo.session.execute(
+                    select(sa_func.count()).select_from(ReviewFinding).where(
+                        ReviewFinding.review_id == review_id,
+                        ReviewFinding.tenant_id == self.tenant_id,
+                        ReviewFinding.resolution.is_(None),
+                        ReviewFinding.severity.in_(["critical", "high"]),
+                    )
                 )
-            )
-            count = unresolved.scalar() or 0
-            if count > 0:
-                # Allow override if reason is provided (admin bypass)
-                if comments and "override:" in comments.lower():
-                    logger.info(
-                        "Approval override for review %s: %d unresolved findings overridden by %s",
-                        review_id, count, self.user.id,
-                    )
-                    # Store override metadata on the review
-                    from app.domains.review.models import ContractReview
-                    from sqlalchemy import update as sa_update
-                    from datetime import datetime, timezone
-                    stmt = (
-                        sa_update(ContractReview)
-                        .where(ContractReview.review_id == review_id)
-                        .values(
-                            approval_override_reason=comments,
-                            approval_override_by=self.user.id,
-                            approval_override_timestamp=datetime.now(timezone.utc),
+                count = unresolved.scalar() or 0
+                if count > 0:
+                    # Allow override if reason is provided (admin bypass)
+                    if comments and "override:" in comments.lower():
+                        logger.info(
+                            "Approval override for review %s: %d unresolved findings overridden by %s",
+                            review_id, count, self.user.id,
                         )
-                    )
-                    await self.review_repo.session.execute(stmt)
-                else:
-                    action_label = "approve" if decision == "approved" else "conditionally approve"
-                    raise ConflictError(
-                        message=(
-                            f"Cannot {action_label}: {count} critical/high finding(s) are still open. "
-                            "Resolve or dismiss them in Findings first, or add 'override:' to your comments to bypass."
-                        ),
-                        details={"unresolved_critical_high_count": count},
-                    )
+                        # Store override metadata on the review
+                        from app.domains.review.models import ContractReview
+                        from sqlalchemy import update as sa_update
+                        from datetime import datetime, timezone
+                        stmt = (
+                            sa_update(ContractReview)
+                            .where(ContractReview.review_id == review_id)
+                            .values(
+                                approval_override_reason=comments,
+                                approval_override_by=self.user.id,
+                                approval_override_timestamp=datetime.now(timezone.utc),
+                            )
+                        )
+                        await self.review_repo.session.execute(stmt)
+                    else:
+                        action_label = "approve" if decision == "approved" else "conditionally approve"
+                        raise ConflictError(
+                            message=(
+                                f"Cannot {action_label}: {count} critical/high finding(s) are still open. "
+                                "Resolve or dismiss them in Findings first, or add 'override:' to your comments to bypass."
+                            ),
+                            details={"unresolved_critical_high_count": count},
+                        )
 
-            # Open obligations do NOT block approval.
-            # Per enterprise CLM best practice, obligations are future commitments
-            # that remain open after approval and are tracked during the active phase.
-            # Only contract closure is blocked by open obligations.
+                # Open obligations do NOT block approval.
+                # Per enterprise CLM best practice, obligations are future commitments
+                # that remain open after approval and are tracked during the active phase.
+                # Only contract closure is blocked by open obligations.
 
-        new_status = ReviewStatus.APPROVED if decision == "approved" else ReviewStatus.REJECTED
-        if decision == "conditionally_approved":
-            new_status = ReviewStatus.APPROVED
+            new_status = ReviewStatus.APPROVED if decision == "approved" else ReviewStatus.REJECTED
+            if decision == "conditionally_approved":
+                new_status = ReviewStatus.APPROVED
 
-        current = review.status
-        if isinstance(current, str):
-            current = ReviewStatus(current)
+            current = review.status
+            if isinstance(current, str):
+                current = ReviewStatus(current)
 
-        approval = await self.review_repo.approve(
-            review_id, self.tenant_id, self.user.id, decision, comments, conditions,
-        )
-        await self.review_repo.update_status(
-            review_id, self.tenant_id, new_status,
-            changed_by=self.user.id, reason=comments,
-        )
+            approval = await self.review_repo.approve(
+                review_id, self.tenant_id, self.user.id, decision, comments, conditions,
+            )
+            await self.review_repo.update_status(
+                review_id, self.tenant_id, new_status,
+                changed_by=self.user.id, reason=comments,
+            )
 
-        # Audit trail for approval/rejection
-        await self.audit_trail.record_approval_action(
-            review_id=review_id,
-            actor_id=self.user.id,
-            decision=decision,
-            conditions=conditions,
-            description=comments or f"Review {decision} by {self.user.id}",
-        )
+            # Audit trail for approval/rejection
+            await self.audit_trail.record_approval_action(
+                review_id=review_id,
+                actor_id=self.user.id,
+                decision=decision,
+                conditions=conditions,
+                description=comments or f"Review {decision} by {self.user.id}",
+            )
 
-        # Record status transition in audit trail
-        await self.audit_trail.record_transition(
-            review_id=review_id,
-            from_status=status_str,
-            to_status=new_status.value,
-            actor_id=self.user.id,
-            reason=comments,
-        )
+            # Record status transition in audit trail
+            await self.audit_trail.record_transition(
+                review_id=review_id,
+                from_status=status_str,
+                to_status=new_status.value,
+                actor_id=self.user.id,
+                reason=comments,
+            )
 
-        # Update review with approval/rejection metadata
-        from sqlalchemy import update, func
-        from app.domains.review.models import ContractReview
+            # Update review with approval/rejection metadata
+            from sqlalchemy import update, func
+            from app.domains.review.models import ContractReview
 
-        update_values: dict = {
-            "completed_at": func.now(),
-            "updated_at": func.now(),
-        }
+            update_values: dict = {
+                "completed_at": func.now(),
+                "updated_at": func.now(),
+            }
 
-        if new_status == ReviewStatus.APPROVED:
-            await self._link_approved_document_version(review_id)
+            if new_status == ReviewStatus.APPROVED:
+                await self._link_approved_document_version(review_id)
 
-        if new_status == ReviewStatus.REJECTED:
-            # If conditions dict contains rejection_category, store it
-            rejection_category = None
-            rejection_severity = None
-            if conditions:
-                rejection_category = conditions.get("category")
-                rejection_severity = conditions.get("severity")
-            update_values["rejection_reason"] = comments
-            update_values["rejection_category"] = rejection_category
-            update_values["rejection_severity"] = rejection_severity
-            update_values["rejected_by"] = self.user.id
-            update_values["rejected_at"] = func.now()
+            if new_status == ReviewStatus.REJECTED:
+                # If conditions dict contains rejection_category, store it
+                rejection_category = None
+                rejection_severity = None
+                if conditions:
+                    rejection_category = conditions.get("category")
+                    rejection_severity = conditions.get("severity")
+                update_values["rejection_reason"] = comments
+                update_values["rejection_category"] = rejection_category
+                update_values["rejection_severity"] = rejection_severity
+                update_values["rejected_by"] = self.user.id
+                update_values["rejected_at"] = func.now()
 
-        await self.review_repo.session.execute(
-            update(ContractReview)
-            .where(ContractReview.review_id == review_id, ContractReview.tenant_id == self.tenant_id)
-            .values(**update_values)
-        )
+            await self.review_repo.session.execute(
+                update(ContractReview)
+                .where(ContractReview.review_id == review_id, ContractReview.tenant_id == self.tenant_id)
+                .values(**update_values)
+            )
 
-        # Emit approval/rejection event
-        event_cls = ReviewApproved if new_status == ReviewStatus.APPROVED else ReviewRejected
-        await self.event_bus.emit(event_cls(
-            tenant_id=self.tenant_id,
-            actor_id=self.user.id,
-            data={
-                "review_id": review_id,
-                "decision": decision,
-                "approved_by": self.user.id,
-                "approved_at": utc_now().isoformat(),
-                "comments": comments,
-                "conditions": conditions,
-            },
-        ))
+            # Emit approval/rejection event
+            event_cls = ReviewApproved if new_status == ReviewStatus.APPROVED else ReviewRejected
+            await self.event_bus.emit(event_cls(
+                tenant_id=self.tenant_id,
+                actor_id=self.user.id,
+                data={
+                    "review_id": review_id,
+                    "decision": decision,
+                    "approved_by": self.user.id,
+                    "approved_at": utc_now().isoformat(),
+                    "comments": comments,
+                    "conditions": conditions,
+                },
+            ))
+
+        # ── Transaction commits here (context manager exit) ─────
 
         # Mark idempotency complete (in-memory, outside transaction)
         await self.idempotency.mark_completed(op_type, review_id, self.user.id, {
             "approval_id": str(approval.approval_id),
             "decision": decision,
         })
-        # ── Transaction commits here ────────────────────────────
 
         # Send approval/rejection notification (non-blocking — must not fail the approval)
         if self.notify_service:

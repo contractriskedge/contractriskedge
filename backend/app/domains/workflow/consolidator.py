@@ -92,6 +92,30 @@ STAGE_TO_REVIEW_STATE: dict[str, ReviewState] = {
     v: k for k, v in REVIEW_STATE_TO_STAGE.items()
 }
 
+# Ordered list of stages — index in this list is the current_step integer value.
+# The order follows the typical contract review lifecycle progression.
+STAGE_ORDER: list[str] = [
+    "upload",
+    "ai_analysis",
+    "ai_review_complete",
+    "procurement_review",
+    "legal_review",
+    "security_review",
+    "negotiation",
+    "in_review",
+    "escalated",
+    "executive_approval",
+    "approved",
+    "rejected",
+    "finalized",
+    "executed",
+    "archived",
+]
+
+STAGE_TO_INDEX: dict[str, int] = {
+    stage: idx for idx, stage in enumerate(STAGE_ORDER)
+}
+
 
 # ── Workflow Pack Resolution ─────────────────────────────────────
 
@@ -295,7 +319,8 @@ class WorkflowConsolidator:
 
         # Update instance
         now = datetime.now(timezone.utc)
-        instance.current_step = to_stage
+        step_index = STAGE_TO_INDEX.get(to_stage, 0)
+        instance.current_step = step_index
         instance.updated_at = now
 
         # Map terminal states
