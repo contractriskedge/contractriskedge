@@ -65,19 +65,25 @@ class BusinessHoursCalculator:
 
         total_hours = 0.0
         current = start
-        day_start_hour, day_end_hour = calendar.working_hours
+
+        # Parse working hours
+        if isinstance(calendar.working_hours, dict):
+            start_str = calendar.working_hours.get("start", "09:00")
+            end_str = calendar.working_hours.get("end", "17:00")
+        else:
+            start_str, end_str = calendar.working_hours
+        ds_h, ds_m = map(int, start_str.split(":"))
+        de_h, de_m = map(int, end_str.split(":"))
 
         while current < end:
             if self._is_working_day(current, calendar):
                 # Calculate business hours for this day
                 day_start = current.replace(
-                    hour=int(day_start_hour),
-                    minute=int((day_start_hour % 1) * 60),
+                    hour=ds_h, minute=ds_m,
                     second=0, microsecond=0,
                 )
                 day_end = current.replace(
-                    hour=int(day_end_hour),
-                    minute=int((day_end_hour % 1) * 60),
+                    hour=de_h, minute=de_m,
                     second=0, microsecond=0,
                 )
 
@@ -125,18 +131,25 @@ class BusinessHoursCalculator:
 
         remaining = duration_hours
         current = start
-        day_start_hour, day_end_hour = calendar.working_hours
+
+        # Parse working hours from dict or tuple
+        if isinstance(calendar.working_hours, dict):
+            start_str = calendar.working_hours.get("start", "09:00")
+            end_str = calendar.working_hours.get("end", "17:00")
+        else:
+            start_str, end_str = calendar.working_hours
+
+        day_start_h, day_start_m = map(int, start_str.split(":"))
+        day_end_h, day_end_m = map(int, end_str.split(":"))
 
         while remaining > 0:
             if self._is_working_day(current, calendar):
                 day_start = current.replace(
-                    hour=int(day_start_hour),
-                    minute=int((day_start_hour % 1) * 60),
+                    hour=day_start_h, minute=day_start_m,
                     second=0, microsecond=0,
                 )
                 day_end = current.replace(
-                    hour=int(day_end_hour),
-                    minute=int((day_end_hour % 1) * 60),
+                    hour=day_end_h, minute=day_end_m,
                     second=0, microsecond=0,
                 )
 
@@ -155,7 +168,7 @@ class BusinessHoursCalculator:
                     remaining -= available
 
             current = (current + timedelta(days=1)).replace(
-                hour=day_start_hour if day_start_hour < 24 else 0,
+                hour=day_start_h if day_start_h < 24 else 0,
                 minute=0, second=0, microsecond=0,
             )
 
@@ -211,17 +224,25 @@ class BusinessHoursCalculator:
         """Check if a given datetime falls on a working day."""
         # Check if it's a holiday
         for holiday in calendar.holidays:
-            holiday_date = holiday.get("date")
-            if isinstance(holiday_date, date):
-                if dt.date() == holiday_date:
-                    return False
-            elif isinstance(holiday_date, str):
+            if isinstance(holiday, str):
                 try:
-                    h_date = datetime.fromisoformat(holiday_date).date()
+                    h_date = datetime.fromisoformat(holiday).date()
                     if dt.date() == h_date:
                         return False
                 except (ValueError, TypeError):
                     continue
+            elif isinstance(holiday, dict):
+                holiday_date = holiday.get("date")
+                if isinstance(holiday_date, date):
+                    if dt.date() == holiday_date:
+                        return False
+                elif isinstance(holiday_date, str):
+                    try:
+                        h_date = datetime.fromisoformat(holiday_date).date()
+                        if dt.date() == h_date:
+                            return False
+                    except (ValueError, TypeError):
+                        continue
 
         # Check if it's a working day (weekday)
         return dt.weekday() in calendar.working_days

@@ -94,8 +94,15 @@ class WorkflowValidator:
         """
         result = ValidationResult()
 
-        stages = _safe_get(version, "stages_definition", [])
+        stages_raw = _safe_get(version, "stages_definition", [])
         rules = _safe_get(version, "rules_definition", [])
+
+        # Extract stages list (supports list, dict with "stages" key, or empty)
+        stages = []
+        if isinstance(stages_raw, list):
+            stages = stages_raw
+        elif isinstance(stages_raw, dict):
+            stages = stages_raw.get("stages", stages_raw.get("nodes", []))
 
         if not stages:
             result.errors.append(ValidationIssue(
