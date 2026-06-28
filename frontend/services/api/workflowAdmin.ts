@@ -345,3 +345,132 @@ export async function fetchPackAnalytics(packId: string): Promise<{
 }> {
   return api.get(`/workflow-packs/${packId}/analytics`);
 }
+
+// ── Operations / Monitoring ────────────────────────────────────────
+
+export interface InstanceSummary {
+  workflow_id: string;
+  pack_name: string;
+  contract_name: string;
+  current_stage: string;
+  status: string;
+  assigned_to: string | null;
+  sla_remaining_hours: number;
+  sla_breached: boolean;
+  created_at: string;
+  updated_at: string;
+  version_number: number;
+}
+
+export interface InstanceDetail extends InstanceSummary {
+  stages: InstanceStage[];
+  execution_context: Record<string, unknown>;
+  matched_rules: { rule_name: string; matched: boolean }[];
+  timeline: TimelineEvent[];
+}
+
+export interface InstanceStage {
+  step_name: string;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  assigned_to: string | null;
+  sla_hours: number;
+}
+
+export interface TimelineEvent {
+  event_type: string;
+  actor_id: string;
+  timestamp: string;
+  details: string;
+}
+
+export interface TaskSummary {
+  task_id: string;
+  workflow_id: string;
+  stage_name: string;
+  assigned_to: string;
+  status: string;
+  created_at: string;
+  sla_deadline: string;
+  sla_remaining_hours: number;
+  priority: string;
+}
+
+export interface BottleneckData {
+  stage_name: string;
+  avg_duration_hours: number;
+  instance_count: number;
+  rejection_rate: number;
+  escalation_rate: number;
+  queue_length: number;
+}
+
+export interface WorkflowHealthRow {
+  pack_id: string;
+  name: string;
+  running: number;
+  avg_duration_hours: number;
+  failures: number;
+  health_score: number;
+}
+
+export interface AuditEvent {
+  event_id: string;
+  workflow_id: string;
+  event_type: string;
+  actor_id: string;
+  timestamp: string;
+  details: string;
+  stage_name: string | null;
+}
+
+export async function fetchInstances(params?: {
+  status?: string;
+  pack_id?: string;
+  search?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<{ items: InstanceSummary[]; total: number }> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.pack_id) qs.set("pack_id", params.pack_id);
+  if (params?.search) qs.set("search", params.search);
+  if (params?.page) qs.set("page", String(params.page));
+  if (params?.page_size) qs.set("page_size", String(params.page_size));
+  return api.get(`/workflow-instances${qs.toString() ? `?${qs}` : ""}`);
+}
+
+export async function fetchInstanceDetail(workflowId: string): Promise<InstanceDetail> {
+  return api.get(`/workflow-instances/${workflowId}`);
+}
+
+export async function fetchTasks(params?: {
+  assigned_to?: string;
+  status?: string;
+}): Promise<TaskSummary[]> {
+  const qs = new URLSearchParams();
+  if (params?.assigned_to) qs.set("assigned_to", params.assigned_to);
+  if (params?.status) qs.set("status", params.status);
+  return api.get(`/workflow-tasks${qs.toString() ? `?${qs}` : ""}`);
+}
+
+export async function fetchBottlenecks(days?: number): Promise<BottleneckData[]> {
+  return api.get(`/workflow-analytics/bottlenecks${days ? `?days=${days}` : ""}`);
+}
+
+export async function fetchWorkflowHealth(): Promise<WorkflowHealthRow[]> {
+  return api.get("/workflow-analytics/health");
+}
+
+export async function fetchAuditEvents(params?: {
+  workflow_id?: string;
+  event_type?: string;
+  limit?: number;
+}): Promise<AuditEvent[]> {
+  const qs = new URLSearchParams();
+  if (params?.workflow_id) qs.set("workflow_id", params.workflow_id);
+  if (params?.event_type) qs.set("event_type", params.event_type);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  return api.get(`/workflow-audit${qs.toString() ? `?${qs}` : ""}`);
+}

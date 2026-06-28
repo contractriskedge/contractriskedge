@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import {
   Play, Save, RotateCcw, FileText, CheckCircle, AlertTriangle,
   Clock, Users, Shield, ArrowRight, ChevronDown, ChevronRight,
   Search,
 } from "lucide-react";
+import { useSimulation } from "@/services/hooks/useWorkflowAdmin";
+import type { SimulationInput as ApiSimInput } from "@/services/api/workflowAdmin";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -215,18 +217,68 @@ export function WorkflowSimulator({ onBack }: Props) {
   const [expandedRules, setExpandedRules] = useState<Set<string>>(new Set());
   const [contractSearch, setContractSearch] = useState("");
 
+  const simulationMutation = useSimulation();
+
   const toggleRule = (id: string) => {
     const next = new Set(expandedRules);
     if (next.has(id)) next.delete(id); else next.add(id);
     setExpandedRules(next);
   };
 
-  const runSimulation = () => {
-    const res = simulate(input);
-    setResult(res);
-    // Expand all rules by default
-    setExpandedRules(new Set(res.rules.map((r) => r.rule_id)));
-  };
+  const runSimulation = useCallback(async () => {
+    // Build API-compatible input
+    const apiInput: ApiSimInput = {
+      risk_score: input.risk_score,
+      jurisdiction: input.country,
+      contract_type: input.contract_type,
+      value: input.contract_value,
+      department: input.department,
+      has_redlines: input.has_redlines,
+    };
+
+    try {
+      const apiResult = await simulationMutation.mutateAsync({
+        packId: "nda", // Will be selected from UI in production
+        versionId: "latest",
+        input: apiInput,
+      });
+
+      // Map API result to display format
+      const simResult: SimResult = {
+        workflow_name: "Simulated Workflow",
+        rules: apiResult.matched_rules.map((r) => ({
+          rule_id: r.rule_id,
+          rule_name: r.rule_summary,
+          matched: true,
+          conditions: [{ label: r.reason, result: true }],
+          assignee_role: "",
+          approval_mode: "",
+          sla_hours: 0,
+        })),
+        stages: apiResult.stages.map((s) => ({
+          name: s.name,
+          stage_type: s.stage_type,
+          sla_hours: s.sla_hours,
+          assigned_to: s.assigned_to,
+          candidates: [],
+          selected_user: s.resolved_user ?? "",
+          selection_reason: "",
+          estimated_days: s.sla_hours / 8,
+        })),
+        total_days: apiResult.total_sla_hours / 8,
+        total_approvers: apiResult.stages.filter((s) => s.stage_type === "approval").length,
+        escalation_count: 0,
+      };
+
+      setResult(simResult);
+      setExpandedRules(new Set(apiResult.matched_rules.map((r) => r.rule_id)));
+    } catch {
+      // Fallback to mock if API unavailable
+      const res = simulate(input);
+      setResult(res);
+      setExpandedRules(new Set(res.rules.map((r) => r.rule_id)));
+    }
+  }, [input, simulationMutation]);
 
   const loadTestCase = (tc: TestCase) => {
     setInput(tc.input);

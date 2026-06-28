@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Workflow, Plus, Search, LayoutGrid, List, ArrowLeft } from "lucide-react";
+import { Workflow, Plus, Search, LayoutGrid, List, ArrowLeft, Activity } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { LoadingSkeleton } from "@/components/shared/LoadingSkeleton";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -16,6 +16,7 @@ import { WorkflowSimulator } from "./WorkflowSimulator";
 import { PublishingFlow } from "./PublishingFlow";
 import { VersionComparison } from "./VersionComparison";
 import { UsageDashboard } from "./UsageDashboard";
+import { WorkflowOperationsCenter } from "./WorkflowOperationsCenter";
 
 export function WorkflowAdminCenter() {
   const [search, setSearch] = useState("");
@@ -29,6 +30,7 @@ export function WorkflowAdminCenter() {
   const [publishOpen, setPublishOpen] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
   const [dashboardOpen, setDashboardOpen] = useState(false);
+  const [operationsOpen, setOperationsOpen] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
 
   const { data, isLoading, error, refetch } = useWorkflowPacks({
@@ -161,19 +163,44 @@ export function WorkflowAdminCenter() {
     );
   }
 
+  // If Operations Center is open, show it
+  if (operationsOpen) {
+    return (
+      <div className="space-y-4">
+        <button
+          onClick={() => setOperationsOpen(false)}
+          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Workflow Packs
+        </button>
+        <WorkflowOperationsCenter onBack={() => setOperationsOpen(false)} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Workflow Administration"
         description="Configure, validate, simulate, and publish workflow packs"
         actions={
-          <button
-            onClick={() => setShowCreateDialog(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-gold-500 text-navy-900 rounded-lg hover:bg-gold-400 transition-colors font-medium"
-          >
-            <Plus className="w-4 h-4" />
-            New Workflow Pack
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setOperationsOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-navy-800 text-gray-300 rounded-lg hover:bg-navy-700 transition-colors"
+            >
+              <Activity className="w-4 h-4" />
+              Operations
+            </button>
+            <button
+              onClick={() => setShowCreateDialog(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-gold-500 text-navy-900 rounded-lg hover:bg-gold-400 transition-colors font-medium"
+            >
+              <Plus className="w-4 h-4" />
+              New Workflow Pack
+            </button>
+          </div>
         }
       />
 
