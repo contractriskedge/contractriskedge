@@ -3,6 +3,8 @@
 **Status:** Architecture frozen. No further changes.
 **Date:** June 28, 2026
 **Theme:** Configuration-first business process engine with enterprise governance.
+**Sprint 33.1:** ✅ Complete — Foundation frozen. No engine changes unless defects found.
+**Current:** Sprint 33.2 — Workflow Administration UI
 
 ---
 
