@@ -88,42 +88,53 @@ NDA Review — Versions
 
 ### 2. Workflow Details Page
 
-A summary page for each workflow pack, similar to Contract Details.
+A summary page for each workflow pack, similar to Contract Details. Becomes the "home page" of every workflow.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  NDA Review v3                                   [Edit]   │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│  Status:    🔵 Published · v3                               │
-│  Health:    ✅ 100/100 · 0 errors · 0 warnings              │
+│  Overview                                                   │
+│  Status:    🔵 Published · v3 · Health: 96/100              │
 │  Owner:     Legal Team                                       │
+│  Category:  Legal                                            │
 │  Created:   2026-01-15 by JSmith                             │
 │  Published: 2026-06-15 by JSmith                             │
+│  Last Used: Yesterday (12 instances)                         │
 │                                                             │
-│  ┌──────────────┬──────────────┬──────────────┬──────────┐  │
-│  │ Running      │ Completed    │ Avg Duration │ Templates│  │
-│  │ 47           │ 1,234        │ 48h          │ 12       │  │
-│  └──────────────┴──────────────┴──────────────┴──────────┘  │
+│  Usage                                                      │
+│  ┌──────────┬──────────┬──────────┬──────────┬──────────┐   │
+│  │ Running  │ Completed│ Avg Dur  │ Avg App  │ SLA      │   │
+│  │ 47       │ 1,234    │ 48h      │ 18.2h    │ 4.2%     │   │
+│  └──────────┴──────────┴──────────┴──────────┴──────────┘   │
+│  ┌──────────┬──────────┬──────────┬──────────┬──────────┐   │
+│  │ Templates│ Contracts│ Failed   │ Cancelled│ Sim Runs │   │
+│  │ 12       │ 183      │ 23       │ 8        │ 156      │   │
+│  └──────────┴──────────┴──────────┴──────────┴──────────┘   │
 │                                                             │
-│  Quick Actions:                                             │
-│  [Designer] [Simulator] [Publish] [Versions] [Compare]      │
-│  [Impact Analysis] [Audit] [Clone] [Export] [Archive]      │
+│  Version                                                    │
+│  Current: v3 (Published) · Draft: v4 (in progress)          │
+│  [Compare v2 vs v3]  [View All Versions]                    │
 │                                                             │
-│  ── Current Version ─────────────────────────────────────  │
-│  Stages: Intake → AI Analysis → Legal Review → Finalize     │
-│  Rules: 8 (4 routing, 2 escalation, 2 assignment)           │
+│  Quick Actions                                              │
+│  [Designer] [Simulator] [Validate] [Publish] [Clone]        │
+│  [Export] [Archive] [Impact Analysis] [Audit]               │
 │                                                             │
 │  ── Templates Using This Workflow ────────────────────────  │
 │  • Standard NDA (v2)                                        │
 │  • International NDA (v3)                                    │
 │  • Employee NDA (v1)                                        │
 │                                                             │
-│  ── Recent Activity ──────────────────────────────────────  │
+│  ── Timeline ─────────────────────────────────────────────  │
 │  06-28  JSmith  Published v3                                │
 │  06-27  LWang   Updated Legal Review SLA (24h → 48h)       │
 │  06-25  JSmith  Validated v3 — 100/100                      │
+│  06-22  System  Simulation run (High Risk NDA test case)    │
 │  06-20  LWang   Created v3 (draft)                          │
+│  05-15  System  Archived v2 (superseded by v3)              │
+│  04-01  LWang   Published v2                                │
+│  02-15  LWang   Published v1                                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -244,8 +255,9 @@ Visual condition builder that generates JSON Logic automatically. Supports neste
 │  ── Assignment Preview ───────────────────────────────────  │
 │  Matched Rule 1: Risk 92 > 80 AND Country = Germany         │
 │  → VP Legal (All Required, Least Loaded)                    │
-│  → Candidates: John (5), Lisa (3), Mike (7)                 │
-│  → Would select: Lisa (least loaded — 3 open tasks)         │
+│  → Candidates: John (5 tasks), Lisa (3 tasks), Mike (7)     │
+│  → Selected: Lisa (least loaded — 3 open tasks)             │
+│  → Avg completion: 1.2 days · On-time rate: 94%             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -394,7 +406,7 @@ Actionable operational metrics, not just charts.
 │  Workflow Analytics — Last 30 Days                          │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│  📊 Volume                                                   │
+│  📊 Volume
 │  ┌──────────────┬──────────────┬──────────────┬──────────┐  │
 │  │ Running      │ Completed    │ Avg Duration │ Pending  │  │
 │  │ 47           │ 1,234        │ 52.3h        │ 12       │  │
