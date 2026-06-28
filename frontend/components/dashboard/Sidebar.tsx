@@ -42,7 +42,7 @@ import {
   ShoppingBag,
 } from "lucide-react";
 
-type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "templates" | "packages" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "signatures" | "ingestion" | "compliance" | "review" | "review-dashboard" | "executive-dashboard" | "policy" | "clause-intelligence" | "redline-knowledge-center" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center" | "activity-center";
+type ViewType = "cfo" | "legal" | "procurement" | "contracts" | "templates" | "packages" | "benchmarks" | "settings" | "admin" | "relationships" | "workflows" | "workflow-admin" | "contract-detail" | "clause-library" | "obligations" | "analytics" | "negotiation" | "search" | "signatures" | "ingestion" | "compliance" | "review" | "review-dashboard" | "executive-dashboard" | "policy" | "clause-intelligence" | "redline-knowledge-center" | "tenant-settings" | "executive-command-center" | "reviewer-operations" | "governance-dashboard" | "ai-operations-dashboard" | "workflow-intelligence-dashboard" | "command-center" | "activity-center";
 
 interface SidebarProps {
   activeView: ViewType;
@@ -116,7 +116,8 @@ const navGroups: NavGroup[] = [
       { id: "compliance", label: "Compliance", icon: ShieldCheck, permission: "contracts:read" },
       { id: "governance-dashboard", label: "Governance", icon: ShieldCheck, permission: "audit:read" },
       { id: "relationships", label: "Relationships", icon: Share2, permission: "contracts:read" },
-      { id: "workflows", label: "Workflows", icon: Workflow, permission: "workflows:read" },
+      { id: "workflows", label: "Workflow Center", icon: Workflow, permission: "workflows:read" },
+      { id: "workflow-admin", label: "Workflow Admin", icon: Settings, permission: "admin:tenant" },
     ],
   },
   {

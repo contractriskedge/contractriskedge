@@ -73,6 +73,7 @@ export default function AuthenticatedLayout({
     else if (path.startsWith("/clause-intelligence/knowledge-center")) setActiveView("redline-knowledge-center");
     else if (path.startsWith("/clause-intelligence")) setActiveView("clause-intelligence");
     else if (path.startsWith("/policy")) setActiveView("policy");
+    else if (path.startsWith("/workflows/admin")) setActiveView("workflow-admin");
     else if (path.startsWith("/relationships")) setActiveView("relationships");
     else if (path.startsWith("/governance-dashboard")) setActiveView("governance-dashboard");
     else if (path.startsWith("/reviewer-operations")) setActiveView("reviewer-operations");
@@ -110,6 +111,7 @@ export default function AuthenticatedLayout({
               procurement: "/procurement",
               compliance: "/compliance",
               workflows: "/workflows",
+              "workflow-admin": "/workflows/admin",
               analytics: "/analytics",
               benchmarks: "/benchmarks",
               admin: "/admin",
