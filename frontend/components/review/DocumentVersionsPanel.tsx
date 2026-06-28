@@ -19,8 +19,6 @@ import { Download, FileText, Clock, Loader2, CheckCircle, Archive, GitCompare, L
 import { reviewService } from "@/services/api/reviews";
 import { VersionDiffViewer } from "./VersionDiffViewer";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api/v1";
-
 interface DocumentVersion {
   version_id: string;
   review_id: string;
@@ -70,6 +68,25 @@ const STATUS_CONFIG: Record<string, { bg: string; text: string; icon: React.Reac
 };
 
 export function DocumentVersionsPanel({ reviewId }: DocumentVersionsPanelProps) {
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  const handleDownload = async (version: DocumentVersion, tracked = false) => {
+    setDownloadError(null);
+    setDownloadingId(version.version_id);
+    try {
+      const filename = `${version.label || "contract"}_v${version.version_number}.docx`;
+      if (tracked) {
+        await reviewService.exportTrackedChanges(reviewId, version.version_id);
+      } else {
+        await reviewService.downloadVersion(reviewId, version.version_id, filename);
+      }
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setDownloadingId(null);
+    }
+  };
   const [showDiff, setShowDiff] = useState(false);
   const { data: versions, isLoading } = useQuery<DocumentVersion[]>({
     queryKey: ["reviews", reviewId, "versions"],
@@ -100,6 +117,11 @@ export function DocumentVersionsPanel({ reviewId }: DocumentVersionsPanelProps) 
 
   return (
     <div className="space-y-3">
+      {downloadError && (
+        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {downloadError}
+        </p>
+      )}
       {/* Compare button */}
       {items.length >= 2 && (
         <button
@@ -182,26 +204,18 @@ export function DocumentVersionsPanel({ reviewId }: DocumentVersionsPanelProps) 
               {version.storage_key ? (
                 <div className="flex items-center gap-1">
                   <button
-                    onClick={() => {
-                      window.open(
-                        `${API_BASE}/reviews/${reviewId}/versions/${version.version_id}/export-tracked`,
-                        "_blank",
-                      );
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium rounded-lg bg-purple-100 text-purple-700 hover:bg-purple-200 transition-colors"
+                    onClick={() => handleDownload(version, true)}
+                    disabled={downloadingId === version.version_id}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium rounded-lg bg-purple-100 text-purple-700 hover:bg-purple-200 transition-colors disabled:opacity-50"
                     title="Download with tracked changes markup"
                   >
                     <FileText className="w-3 h-3" />
                     Tracked
                   </button>
                   <button
-                    onClick={() => {
-                      window.open(
-                        `${API_BASE}/reviews/${reviewId}/versions/${version.version_id}/download`,
-                        "_blank",
-                      );
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
+                    onClick={() => handleDownload(version, false)}
+                    disabled={downloadingId === version.version_id}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors disabled:opacity-50"
                   >
                     <Download className="w-3 h-3" />
                     Download

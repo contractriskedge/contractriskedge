@@ -144,6 +144,14 @@ celery_app.conf.update(
             "args": (),
             "options": {"queue": "email"},
         },
+
+        # Signature envelope status sync — every 2 minutes
+        "sync-signature-envelopes": {
+            "task": "sync_signature_envelopes",
+            "schedule": crontab(minute="*/2"),
+            "args": (),
+            "options": {"queue": "default"},
+        },
     },
     timezone="UTC",
 )

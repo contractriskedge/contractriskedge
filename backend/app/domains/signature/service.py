@@ -311,28 +311,40 @@ class SignatureService:
             expires_at=request.expires_at,
         )
 
-        # Update request with provider reference
+        # Determine effective status — the provider may return "completed"
+        # immediately (e.g., DevAutoSignProvider) or "sent" (DocuSign).
         now = datetime.now(timezone.utc)
+        effective_status = response.status if response.status in ("completed", "sent") else "sent"
+
+        extra = {"sent_at": now, "provider_metadata": response.raw_response or {}}
+        if effective_status == "completed":
+            extra["completed_at"] = now
+
         await self.repo.update_request_status(
             request_id,
-            status="sent",
+            status=effective_status,
             provider_reference=response.envelope_id,
-            provider_metadata=response.raw_response or {},
-            sent_at=now,
+            **extra,
         )
 
-        # Update signer provider recipient IDs
+        # Update signer provider recipient IDs and statuses
         for signer in signers:
             recipient_id = response.signing_urls.get(signer.id)
-            if recipient_id:
-                await self.repo.update_signer_status(
-                    signer.id, status="sent",
-                    provider_recipient_id=recipient_id,
-                )
+            signer_status = "sent"
+            signed_at = None
+            if effective_status == "completed":
+                signer_status = "signed"
+                signed_at = now
+            await self.repo.update_signer_status(
+                signer.id, status=signer_status,
+                provider_recipient_id=recipient_id,
+                signed_at=signed_at,
+            )
 
         # Log audit event
+        audit_event_type = f"envelope_{effective_status}"
         await self._log_audit(
-            request_id, "sent",
+            request_id, audit_event_type,
             actor_email=self.actor_id,
             details={"provider": request.provider, "provider_reference": response.envelope_id},
         )
@@ -343,13 +355,13 @@ class SignatureService:
                 from app.domains.audit.recorder import AuditRecorder
                 recorder = AuditRecorder(self.repo.session, self.repo.tenant_id)
                 await recorder.record(
-                    event_type="signature.sent",
+                    event_type=f"signature.{effective_status}",
                     actor_id=self.actor_id,
                     description=f"Sent for signature via {request.provider}: {request.title}",
                     entity_type="contract",
                     entity_id=request.contract_id,
                     before_state={"status": "draft"},
-                    after_state={"status": "sent"},
+                    after_state={"status": effective_status},
                     metadata={
                         "envelope_id": response.envelope_id,
                         "provider": request.provider,
@@ -359,9 +371,13 @@ class SignatureService:
             except Exception as exc:
                 logger.warning("Failed to log governance audit event: %s", exc)
 
+        # If auto-completed, trigger lifecycle transitions
+        if effective_status == "completed":
+            await self._trigger_lifecycle(request, "completed", request.status)
+
         logger.info(
-            "Signature request %s sent via %s (envelope: %s)",
-            request_id, request.provider, response.envelope_id,
+            "Signature request %s sent via %s (envelope: %s, status: %s)",
+            request_id, request.provider, response.envelope_id, effective_status,
         )
 
         return await self._build_response(request_id)
@@ -558,6 +574,28 @@ class SignatureService:
                         signed_at=datetime.now(timezone.utc) if new_status in ("completed", "partially_signed") else None,
                     )
                     break
+
+        # Log to governance_audit_events for contract timeline
+        if request.contract_id:
+            try:
+                from app.domains.audit.recorder import AuditRecorder
+                recorder = AuditRecorder(self.repo.session, self.repo.tenant_id)
+                await recorder.record(
+                    event_type=f"signature.{new_status}",
+                    actor_id=self.actor_id,
+                    description=f"Signature webhook: {request.title} ({current} -> {new_status})",
+                    entity_type="contract",
+                    entity_id=request.contract_id,
+                    before_state={"status": current},
+                    after_state={"status": new_status},
+                    metadata={
+                        "envelope_id": event.envelope_id,
+                        "provider": provider_name,
+                        "signature_request_id": request.id,
+                    },
+                )
+            except Exception as exc:
+                logger.warning("Failed to log governance audit event: %s", exc)
 
         # Trigger lifecycle transitions
         await self._trigger_lifecycle(request, new_status, current)
@@ -792,7 +830,7 @@ class SignatureService:
 
         await self.repo.update_request_status(request_id, new_status, **extra)
 
-        # Log audit event
+        # Log audit event to signature_audit_events
         await self._log_audit(
             request_id, f"envelope_{new_status}",
             details={
@@ -801,6 +839,28 @@ class SignatureService:
                 "envelope_status": envelope_status.status,
             },
         )
+
+        # Log to governance_audit_events for contract timeline
+        if request.contract_id:
+            try:
+                from app.domains.audit.recorder import AuditRecorder
+                recorder = AuditRecorder(self.repo.session, self.repo.tenant_id)
+                await recorder.record(
+                    event_type=f"signature.{new_status}",
+                    actor_id=self.actor_id,
+                    description=f"Signature envelope synced: {request.title} ({current} -> {new_status})",
+                    entity_type="contract",
+                    entity_id=request.contract_id,
+                    before_state={"status": current},
+                    after_state={"status": new_status},
+                    metadata={
+                        "envelope_id": request.provider_reference,
+                        "provider": request.provider,
+                        "signature_request_id": request_id,
+                    },
+                )
+            except Exception as exc:
+                logger.warning("Failed to log governance audit event: %s", exc)
 
         # Trigger lifecycle transitions
         await self._trigger_lifecycle(request, new_status, current)

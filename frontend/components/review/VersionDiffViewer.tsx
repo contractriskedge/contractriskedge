@@ -199,6 +199,20 @@ export function VersionDiffViewer({ reviewId }: VersionDiffViewerProps) {
   const [selectedV2, setSelectedV2] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [severityFilter, setSeverityFilter] = useState<string>("all");
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  const handleDownload = async (version: DocumentVersion) => {
+    setDownloadingId(version.version_id);
+    try {
+      await reviewService.downloadVersion(
+        reviewId,
+        version.version_id,
+        `contract_v${version.version_number}.docx`,
+      );
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   const { data: versions } = useQuery<DocumentVersion[]>({
     queryKey: ["reviews", reviewId, "versions"],
@@ -304,10 +318,16 @@ export function VersionDiffViewer({ reviewId }: VersionDiffViewerProps) {
               const v = items.find((x) => x.version_id === vid);
               if (!v) return null;
               return (
-                <a key={vid} href={`/api/v1/reviews/${reviewId}/versions/${vid}/download`}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors">
-                  <Download className="w-3 h-3" /> Download v{v.version_number}
-                </a>
+                <button
+                  key={vid}
+                  type="button"
+                  onClick={() => handleDownload(v)}
+                  disabled={downloadingId === vid}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors disabled:opacity-50"
+                >
+                  <Download className="w-3 h-3" />
+                  {downloadingId === vid ? "Downloading…" : `Download v${v.version_number}`}
+                </button>
               );
             })}
           </div>

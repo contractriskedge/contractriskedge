@@ -20,6 +20,7 @@ import type {
   Obligation,
   DocumentVersion,
 } from "./types";
+import type { DocumentVersionItem } from "@/services/api/client";
 
 // ── Finding / clause normalization ─────────────────────────────────────────
 
@@ -235,6 +236,7 @@ export function useContractActivity(contractId: string) {
   return useQuery({
     queryKey: contractDetailKeys.activity(contractId),
     queryFn: async () => {
+      // ── Step 1: Try the workspace endpoint (fast path) ──────────────
       try {
         const res = await api.get<{
           recent_activity?: Array<Record<string, unknown>>;
@@ -268,37 +270,112 @@ export function useContractActivity(contractId: string) {
           .slice(0, 10)
           .map((v) => normalizeVersionRow(v));
 
-        // Fall back to the contract creation if we still have nothing
-        // to show (e.g. very old contracts with no version rows).
-        const fallback: ActivityEvent[] = [];
-        if (statusEvents.length === 0 && versionEvents.length === 0) {
-          const createdAt = String(
-            res.review?.created_at ?? res.review?.createdAt ?? new Date().toISOString(),
-          );
-          const createdBy = String(
-            res.review?.created_by ?? res.review?.createdBy ?? "system",
-          );
-          fallback.push({
+        // If we have events from workspace, return them
+        if (statusEvents.length > 0 || versionEvents.length > 0) {
+          return {
+            events: [...statusEvents, ...versionEvents].sort(
+              (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+            ),
+          };
+        }
+      } catch {
+        // Workspace endpoint failed (e.g. 404 for contracts without review),
+        // continue to Step 2
+      }
+
+      // ── Step 2: Try the activity endpoint (more comprehensive) ──────
+      // The workspace endpoint may return empty or 404 for contracts
+      // that have governance audit events but no review_status_history rows.
+      try {
+        const actRes = await api.get<{
+          events?: Array<{
+            event_id: string;
+            event_type: string;
+            action: string;
+            actor_id: string;
+            actor_role?: string | null;
+            description: string;
+            created_at: string;
+          }>;
+        }>(`/reviews/${contractId}/activity`);
+
+        const govEvents: ActivityEvent[] = (actRes.events ?? []).map((e) => ({
+          id: e.event_id || `gov-${e.created_at}-${e.actor_id}`,
+          type: mapActivityEventType(e.event_type),
+          actor: e.actor_id || "system",
+          action: e.description || e.action || e.event_type,
+          timestamp: e.created_at || new Date().toISOString(),
+          details: e.description || undefined,
+        }));
+
+        if (govEvents.length > 0) {
+          return {
+            events: govEvents.sort(
+              (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+            ),
+          };
+        }
+      } catch {
+        // Activity endpoint failed, continue to fallback
+      }
+
+      // ── Step 3: Fallback — synthesize a "contract created" event ────
+      // Use contract detail to get creation info if available
+      try {
+        const detail = await api.get<Record<string, unknown>>(`/contracts/${contractId}`);
+        const createdAt = String(
+          detail.created_at ?? detail.createdAt ?? new Date().toISOString(),
+        );
+        const createdBy = String(
+          detail.owner ?? detail.ownerId ?? detail.created_by ?? "system",
+        );
+        return {
+          events: [{
             id: `fallback-${contractId}-created`,
-            type: "contract_created",
+            type: "contract_created" as ActivityEvent["type"],
             actor: createdBy,
             action: "Contract created",
             timestamp: createdAt,
-          });
-        }
-
-        return {
-          events: [...statusEvents, ...versionEvents, ...fallback].sort(
-            (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-          ),
+          }],
         };
       } catch {
-        return { events: [] };
+        return {
+          events: [{
+            id: `fallback-${contractId}-created`,
+            type: "contract_created" as ActivityEvent["type"],
+            actor: "system",
+            action: "Contract created",
+            timestamp: new Date().toISOString(),
+          }],
+        };
       }
     },
     enabled: !!contractId,
     staleTime: 30_000,
   });
+}
+
+/** Map backend governance event_type to frontend ActivityEventType. */
+function mapActivityEventType(eventType: string): ActivityEvent["type"] {
+  if (eventType.includes("signature.completed")) return "review_approved";
+  if (eventType.includes("signature.request_created")) return "status_changed";
+  if (eventType.includes("signature.sent")) return "status_changed";
+  if (eventType.includes("signature.")) return "status_changed";
+  if (eventType.includes("obligation.created")) return "obligation_created";
+  if (eventType.includes("obligation.completed")) return "obligation_completed";
+  if (eventType.includes("obligation.overdue")) return "obligation_overdue";
+  if (eventType.includes("obligation.")) return "obligation_updated";
+  if (eventType.includes("review.status_transition")) return "status_changed";
+  if (eventType.includes("review.assigned")) return "review_assigned";
+  if (eventType.includes("review.approved")) return "review_approved";
+  if (eventType.includes("review.rejected")) return "review_rejected";
+  if (eventType.includes("review.")) return "status_changed";
+  if (eventType.includes("redline.")) return "status_changed";
+  if (eventType.includes("finding.")) return "finding_resolved";
+  if (eventType.includes("approved")) return "review_approved";
+  if (eventType.includes("rejected")) return "review_rejected";
+  if (eventType.includes("completed")) return "review_approved";
+  return "status_changed";
 }
 
 /** Map a backend `review_status_history` row to the frontend ActivityEvent shape. */
@@ -437,9 +514,21 @@ export function useContractVersions(contractId: string) {
     queryKey: contractDetailKeys.versions(contractId),
     queryFn: async () => {
       try {
-        const res = await api.get<DocumentVersion[]>(`/reviews/${contractId}/versions`);
-        const items = Array.isArray(res) ? res : [];
-        return { versions: items };
+        // Backend returns DocumentVersionItem[] with version_id, created_by, created_at
+        const res = await api.get<DocumentVersionItem[]>(`/reviews/${contractId}/versions`);
+        const raw = Array.isArray(res) ? res : [];
+        // Map backend shape to frontend DocumentVersion interface
+        const versions: DocumentVersion[] = raw.map((v) => ({
+          id: v.version_id,
+          version_number: v.version_number,
+          label: v.label ?? "",
+          status: (v.status === "current" ? "current" : v.status === "finalized" ? "finalized" : "previous") as DocumentVersion["status"],
+          uploaded_by: v.created_by,
+          uploaded_at: v.created_at,
+          file_size: v.file_size_bytes ?? 0,
+          page_count: 0, // Not provided by backend, default to 0
+        }));
+        return { versions };
       } catch {
         return { versions: [] };
       }

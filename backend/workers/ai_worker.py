@@ -257,6 +257,29 @@ async def _analyze_contract(helper: WorkerAsyncHelper, task, upload_id: str, ten
                 logger.error("Failed to mark quota-exceeded run as FAILED: %s", mark_err)
             raise
 
+        except ValueError as exc:
+            await safe_session_rollback(session)
+            exc_msg = str(exc)
+            # "No chunks found" means ingestion hasn't finished yet — retry with
+            # a generous delay to give the pipeline time to complete chunking.
+            if "No chunks found" in exc_msg:
+                retries = getattr(task, "request", None)
+                attempt = retries.retries if retries else 0
+                countdown = min(60 * (attempt + 1), 600)  # 1m, 2m, 3m … capped at 10m
+                logger.warning(
+                    "No chunks yet for upload %s — ingestion may still be in progress "
+                    "(attempt %d/%d, retry in %ds).",
+                    upload_id, attempt + 1, MAX_RETRIES, countdown,
+                )
+                if attempt >= MAX_RETRIES - 1:
+                    logger.error(
+                        "Giving up on upload %s after %d retries — chunks never materialized.",
+                        upload_id, MAX_RETRIES,
+                    )
+                raise task.retry(countdown=countdown, exc=exc)
+            logger.error("AI analysis failed for %s: %s", upload_id, exc)
+            raise
+
         except Exception as exc:
             await safe_session_rollback(session)
             logger.error("AI analysis failed for %s: %s", upload_id, exc)

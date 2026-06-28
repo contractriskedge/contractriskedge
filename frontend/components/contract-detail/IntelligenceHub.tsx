@@ -13,7 +13,7 @@
 import React, { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  AlertTriangle, CheckCircle2, XCircle, FileText, GitBranch,
+  AlertTriangle, CheckCircle2, XCircle, FileText,
   TrendingUp, Shield, Clock, BookOpen, Sparkles,
 } from "lucide-react";
 import type { AiFinding, ClauseDeviation, Obligation } from "./types";
@@ -41,13 +41,6 @@ interface PolicyViolation {
   status: string;
 }
 
-interface RelatedReview {
-  id: string;
-  document_name?: string;
-  status?: string;
-  finding_count?: number;
-  updated_at?: string;
-}
 
 export function IntelligenceHub({
   findings, clauses, obligations, contractId, riskScore, findingCount,
@@ -94,23 +87,6 @@ export function IntelligenceHub({
     staleTime: 60_000,
   });
   const policyViolations = policyData?.violations ?? [];
-
-  // ── Related reviews (best-effort fetch) ─────────────────────────
-  const { data: relatedData } = useQuery<{ data?: RelatedReview[] }>({
-    queryKey: ["contract-related-reviews-hub", contractId],
-    queryFn: async () => {
-      try {
-        return await api.get<{ data?: RelatedReview[] }>(
-          `/reviews/?contract_id=${contractId}&page_size=5`,
-        );
-      } catch {
-        return { data: [] };
-      }
-    },
-    enabled: !!contractId,
-    staleTime: 30_000,
-  });
-  const relatedReviews = (relatedData?.data ?? []).filter(r => r.id !== contractId).slice(0, 3);
 
   // ── Open obligations count ──────────────────────────────────────
   const openObligations = obligations.filter(
@@ -228,31 +204,6 @@ export function IntelligenceHub({
                     v.severity === "critical" ? "bg-red-100 text-red-700" :
                     v.severity === "high" ? "bg-orange-100 text-orange-700" : "bg-amber-100 text-amber-700"
                   }`}>{v.severity}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {/* ── Related reviews ──────────────────────────────────────── */}
-        <div className="rounded-md border border-gray-100 dark:border-navy-700 p-2.5">
-          <div className="flex items-center gap-1.5 mb-2">
-            <GitBranch className="w-3 h-3 text-purple-500" />
-            <span className="text-[9px] font-semibold text-gray-500 uppercase">Related Reviews</span>
-          </div>
-          {relatedReviews.length === 0 ? (
-            <p className="text-[10px] text-gray-400 italic">No related reviews</p>
-          ) : (
-            <ul className="space-y-1">
-              {relatedReviews.map((r, idx) => (
-                <li key={r?.id || `related-${idx}`} className="flex items-center gap-1.5 text-[10px]">
-                  <FileText className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                  <span className="text-gray-700 dark:text-gray-200 truncate flex-1">
-                    {r?.document_name || (r?.id ? r.id.slice(0, 8) + "…" : "Unknown")}
-                  </span>
-                  {r?.finding_count !== undefined && (
-                    <span className="text-[8px] text-gray-400">{r.finding_count}f</span>
-                  )}
                 </li>
               ))}
             </ul>

@@ -13,13 +13,14 @@ from .base import SignatureProvider
 from .docusign import DocuSignProvider
 from .adobe import AdobeSignProvider
 from .dropbox import DropboxSignProvider
+from .dev_auto_sign import DevAutoSignProvider
 
 
 def create_provider(provider_name: str = "docusign") -> SignatureProvider:
     """Create a signature provider instance based on the provider name.
 
     Args:
-        provider_name: One of "docusign", "adobe_sign", "dropbox_sign"
+        provider_name: One of "docusign", "adobe_sign", "dropbox_sign", "dev_auto_sign"
 
     Returns:
         A configured SignatureProvider instance
@@ -41,10 +42,12 @@ def create_provider(provider_name: str = "docusign") -> SignatureProvider:
         return AdobeSignProvider()
     elif provider_name == "dropbox_sign":
         return DropboxSignProvider()
+    elif provider_name == "dev_auto_sign":
+        return DevAutoSignProvider()
     else:
         raise ValueError(
             f"Unknown signature provider: '{provider_name}'. "
-            f"Supported providers: docusign, adobe_sign, dropbox_sign"
+            f"Supported providers: docusign, adobe_sign, dropbox_sign, dev_auto_sign"
         )
 
 

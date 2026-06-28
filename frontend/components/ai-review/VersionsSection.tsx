@@ -27,8 +27,6 @@ import { VersionDiffViewer } from "@/components/review/VersionDiffViewer";
 import { useReviewContext } from "./ReviewContext";
 import { useVersions } from "./hooks";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api/v1";
-
 interface DocumentVersion {
   version_id: string;
   review_id: string;
@@ -77,6 +75,26 @@ export function VersionsSection() {
   const ctx = useReviewContext();
   const { selectedReviewId } = ctx;
   const [showDiff, setShowDiff] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  const handleDownload = async (version: DocumentVersion, tracked = false) => {
+    if (!selectedReviewId) return;
+    setDownloadError(null);
+    setDownloadingId(version.version_id);
+    try {
+      const filename = `${version.label || "contract"}_v${version.version_number}.docx`;
+      if (tracked) {
+        await reviewService.exportTrackedChanges(selectedReviewId, version.version_id);
+      } else {
+        await reviewService.downloadVersion(selectedReviewId, version.version_id, filename);
+      }
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   const { data: versions, isLoading } = useVersions(selectedReviewId ?? "");
 
@@ -103,6 +121,11 @@ export function VersionsSection() {
 
   return (
     <div className="p-4 space-y-4">
+      {downloadError && (
+        <p className="text-xs text-red-600 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2">
+          {downloadError}
+        </p>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -314,12 +337,16 @@ export function VersionsSection() {
                     )}
                     {version.storage_key ? (
                       <>
-                        <button onClick={() => window.open(`${API_BASE}/reviews/${selectedReviewId}/versions/${version.version_id}/export-tracked`, "_blank")}
-                          className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-purple-100 text-purple-700 hover:bg-purple-200 transition-colors">
+                        <button
+                          onClick={() => handleDownload(version, true)}
+                          disabled={downloadingId === version.version_id}
+                          className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-purple-100 text-purple-700 hover:bg-purple-200 transition-colors disabled:opacity-50">
                           <FileText className="w-2.5 h-2.5" /> Tracked
                         </button>
-                        <button onClick={() => window.open(`${API_BASE}/reviews/${selectedReviewId}/versions/${version.version_id}/download`, "_blank")}
-                          className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors">
+                        <button
+                          onClick={() => handleDownload(version, false)}
+                          disabled={downloadingId === version.version_id}
+                          className="flex items-center gap-1 px-2 py-1 text-[8px] font-medium rounded bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors disabled:opacity-50">
                           <Download className="w-2.5 h-2.5" /> Download
                         </button>
                       </>

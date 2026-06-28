@@ -9,6 +9,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.config import settings
@@ -343,6 +344,8 @@ class AIService:
             execution_context=execution_context,
         )
 
+        run_id_str = str(run.run_id)
+
         try:
             total_tokens = 0
             total_cost = 0.0
@@ -488,7 +491,7 @@ class AIService:
             logger.error("AI analysis failed for upload %s: %s", upload_id, exc, exc_info=True)
             try:
                 await safe_session_rollback(self.ai_repo.session)
-                await self.ai_repo.fail_run(run.run_id, str(exc))
+                await self.ai_repo.fail_run(run_id_str, str(exc))
                 await self.ai_repo.session.commit()
             except Exception as rollback_exc:
                 logger.error(
@@ -660,7 +663,7 @@ class AIService:
             # Backfill contract_number if missing (e.g., review was created before
             # create_review() was introduced, or by recovery daemon)
             if not review.document_metadata.get("contract_number"):
-                now = datetime.utcnow()
+                now = datetime.now(timezone.utc)
                 month_year = now.strftime("%m%Y")
                 count_stmt = select(func.count()).select_from(ContractReview).where(
                     ContractReview.tenant_id == self.tenant_id,
@@ -815,6 +818,7 @@ class AIService:
             "risk_score": risk_score,
             "ai_confidence": ai_confidence,
             "last_analysis_run_id": run_id,
+            "analysis_status": "completed",
         }
 
         # Transition status to AI_ANALYZED (only if currently DRAFT)
@@ -857,7 +861,7 @@ class AIService:
         except Exception as backfill_exc:
             logger.warning(
                 "Mitigation redline backfill failed for review %s: %s",
-                review.review_id, backfill_exc,
+                review.review_id, backfill_exc, exc_info=True,
             )
 
         # ── Contract Type Detection & Number Update ────────────────────────

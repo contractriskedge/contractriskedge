@@ -372,6 +372,7 @@ def create_app() -> FastAPI:
     from app.domains.admin.router import router as admin_router
     from app.domains.cases.router import router as cases_router
     from app.domains.signature.router import router as signature_router
+    from app.domains.templates.router import router as contract_template_router
     from app.kernel.events.router import router as events_router
     # ── Redline Template Library ──
     from app.domains.redline_templates.router import router as redline_template_router
@@ -398,6 +399,10 @@ def create_app() -> FastAPI:
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(cases_router, prefix="/api/v1")
     app.include_router(signature_router, prefix="/api/v1")
+    app.include_router(contract_template_router, prefix="/api/v1")
+    # ── Clause Recommendation Engine ──
+    from app.domains.templates.recommendation_router import router as recommendation_router
+    app.include_router(recommendation_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")
     # ── Redline Template Library ──
     app.include_router(redline_template_router, prefix="/api/v1")

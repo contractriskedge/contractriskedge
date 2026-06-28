@@ -1050,6 +1050,20 @@ def _handle_stuck_upload(session, upload, tenant_id: str) -> str | None:
             )
         )
 
+        # Also update the associated review to show failure status
+        session.execute(
+            sa_text("""
+                UPDATE contract_reviews
+                SET status = 'ingestion_failed',
+                    metadata = metadata || CAST(:error_meta AS jsonb)
+                WHERE upload_id = CAST(:upload_id AS uuid)
+                  AND tenant_id = CAST(:tenant_id AS uuid)
+            """).bindparams(
+                upload_id=upload_id, tenant_id=tenant_id,
+                error_meta=f'{{"ingestion_error": "Auto-recovered: stuck in {state} for {int(age)}min after {upload.retry_count} retries"}}',
+            )
+        )
+
         _record_recovery_action(
             session=session,
             entity_type="upload",
@@ -1133,8 +1147,8 @@ def _handle_stuck_ai_run(session, run, tenant_id: str) -> str | None:
 
     # Also record the failure (tenant-scoped)
     session.execute(sa_text("""
-        INSERT INTO ai_failures (run_id, tenant_id, failure_type, error_message, retry_count, created_at)
-        VALUES (:run_id, :tenant_id, 'timeout', :error_message, :retry_count, :created_at)
+        INSERT INTO ai_failures (failure_id, run_id, tenant_id, failure_type, error_message, retry_count, created_at)
+        VALUES (gen_random_uuid(), :run_id, :tenant_id, 'timeout', :error_message, :retry_count, :created_at)
     """), {
         "run_id": run_id,
         "tenant_id": tenant_id,
@@ -1142,6 +1156,21 @@ def _handle_stuck_ai_run(session, run, tenant_id: str) -> str | None:
         "retry_count": run.retry_count or 0,
         "created_at": utc_now(),
     })
+
+    # Update the associated review to reflect the AI failure
+    session.execute(
+        sa_text("""
+            UPDATE contract_reviews
+            SET status = 'ai_analysis_failed',
+                metadata = metadata || CAST(:error_meta AS jsonb)
+            WHERE upload_id = CAST(:upload_id AS uuid)
+              AND tenant_id = CAST(:tenant_id AS uuid)
+        """).bindparams(
+            upload_id=run.upload_id,
+            tenant_id=tenant_id,
+            error_meta=f'{{"ai_error": "Auto-recovered: stuck in {status} for {int(age)}min"}}',
+        )
+    )
 
     _record_recovery_action(
         session=session,

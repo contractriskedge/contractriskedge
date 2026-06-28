@@ -50,12 +50,25 @@ async def get_service(
     user: UserContext = Depends(get_current_user),
 ) -> SignatureService:
     service = SignatureService(repo, actor_id=user.id)
-    # Register the DocuSign provider so send_for_signature works
+
+    # In development mode, use the auto-sign provider so no manual
+    # DocuSign interaction is needed.  In production, use DocuSign.
+    is_dev = settings.environment == "development"
+    provider_name = "dev_auto_sign" if is_dev else "docusign"
+
     try:
-        provider = create_provider("docusign")
-        service.register_provider("docusign", provider)
+        provider = create_provider(provider_name)
+        service.register_provider(provider_name, provider)
+        if not is_dev:
+            # Also register dev_auto_sign as a fallback for testing
+            try:
+                dev_provider = create_provider("dev_auto_sign")
+                service.register_provider("dev_auto_sign", dev_provider)
+            except Exception:
+                pass
+        logger.info("Signature service using provider: %s", provider_name)
     except Exception as exc:
-        logger.warning("Failed to register DocuSign provider: %s", exc)
+        logger.warning("Failed to register provider '%s': %s", provider_name, exc)
     return service
 
 

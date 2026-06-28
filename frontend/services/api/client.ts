@@ -72,6 +72,12 @@ export interface ReviewStatusResponse {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  pipeline_phase?: string | null;
+  estimated_seconds_remaining?: number | null;
+  eta_label?: string | null;
+  finding_count?: number;
+  redline_count?: number;
+  analysis_source?: string | null;
 }
 
 /** Unwrap GET /reviews/:id when a proxy or bug returns a paginated envelope. */

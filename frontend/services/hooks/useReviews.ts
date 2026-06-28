@@ -181,18 +181,24 @@ export function useReviewStatus(
         return 5_000;
       }
 
-      const { status, progress, can_retry, review_status } = query.state.data;
+      const { status, progress, can_retry, review_status, pipeline_phase } = query.state.data;
 
       // Terminal states — stop polling entirely
       const terminalStatuses = ["completed", "failed", "approved", "rejected", "closed"];
-      if (terminalStatuses.includes(status)) {
+      if (terminalStatuses.includes(status) && pipeline_phase !== "ingesting" && pipeline_phase !== "analyzing" && pipeline_phase !== "queued") {
+        resetPollCount();
+        return false;
+      }
+
+      // Pipeline complete — findings/redlines ready
+      if (pipeline_phase === "ready" || (progress >= 100 && review_status === "ai_analyzed")) {
         resetPollCount();
         return false;
       }
 
       // Review has reached a stable post-analysis state — stop polling
-      const stableReviewStatuses = ["ai_analyzed", "under_review", "legal_review", "procurement_review", "security_review", "escalated"];
-      if (review_status && stableReviewStatuses.includes(review_status)) {
+      const stableReviewStatuses = ["ai_analyzed", "under_review", "legal_review", "procurement_review", "security_review", "escalated", "in_review"];
+      if (review_status && stableReviewStatuses.includes(review_status) && pipeline_phase !== "queued") {
         resetPollCount();
         return false;
       }

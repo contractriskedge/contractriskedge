@@ -55,7 +55,9 @@ class ContractSummary:
             return getattr(review, key, default)
 
         # Pull structured metadata (vendor, contract name, etc.)
-        doc_md = _get('document_metadata', None) or _get('metadata', None) or {}
+        doc_md = _get('document_metadata', None)
+        if doc_md is None:
+            doc_md = _get('metadata', None)
         if not isinstance(doc_md, dict):
             doc_md = {}
 
@@ -69,7 +71,12 @@ class ContractSummary:
         if not self.contractNumber:
             # Generate a fallback number from the upload date and review_id suffix
             created = _get('created_at', None)
-            date_part = created[:10].replace('-', '')[:6] if created else '000000'
+            if isinstance(created, str):
+                date_part = created[:10].replace('-', '')[:6]
+            elif hasattr(created, 'strftime'):
+                date_part = created.strftime('%y%m')
+            else:
+                date_part = '000000'
             suffix = str(_get('review_id', ''))[-4:] or '0000'
             self.contractNumber = f"C{date_part}-{suffix}"
         self.contractType = (doc_md.get('contract_type') or 'contract').strip()

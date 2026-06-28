@@ -268,6 +268,19 @@ export function RedlinesPanel({ reviewId, onRedlineSelect, review }: RedlinesPan
     setEditTarget(null);
   };
 
+  /** Reopen a rejected redline — sets status back to proposed */
+  const handleReopen = async (redlineId: string) => {
+    setErrorNotice(null);
+    try {
+      await updateMutation.mutateAsync({
+        redlineId,
+        body: { status: "proposed" as any, review_notes: "Reopened for review" },
+      });
+    } catch (e: any) {
+      setErrorNotice(e?.message || "Failed to reopen redline.");
+    }
+  };
+
   /** Regenerate a redline using the finding's category as mandatory filter */
   const handleRegenerate = async (redline: RedlineItem) => {
     if (!redline.finding_id || !redline.finding_category) {
@@ -440,6 +453,7 @@ export function RedlinesPanel({ reviewId, onRedlineSelect, review }: RedlinesPan
                         onLocate={onRedlineSelect ? () => onRedlineSelect(redline) : undefined}
                         onAccept={handleAccept}
                         onReject={handleReject}
+                        onReopen={handleReopen}
                         onEdit={setEditTarget}
                         onRegenerate={handleRegenerate}
                         immutable={immutable}

@@ -13,15 +13,6 @@ from app.domains.obligations.models import Obligation, ObligationAuditLog
 logger = logging.getLogger(__name__)
 
 
-@shared_task(name="ingest_document")
-def ingest_document(upload_id: str, tenant_id: str, user_id: str = "system"):
-    print(
-        f"[CELERY] ingest_document called "
-        f"upload_id={upload_id} tenant_id={tenant_id} user_id={user_id}"
-    )
-    # TODO: OCR, chunking, embeddings, indexing
-
-
 @shared_task(name="check_obligations_overdue", bind=True, max_retries=3, default_retry_delay=60)
 def check_obligations_overdue(self):
     """Periodic task: mark obligations as overdue when due_date has passed.
@@ -88,33 +79,24 @@ def check_obligations_overdue(self):
 
 @shared_task(name="sync_signature_envelopes", bind=True, max_retries=3, default_retry_delay=60)
 def sync_signature_envelopes(self):
-    """Periodic task: poll DocuSign for completed envelopes and update local status.
+    """Periodic task: poll DocuSign for completed envelopes and update local status."""
+    from workers.worker_loop import worker_loop
 
-    Runs every 5 minutes via Celery Beat.
-    Finds all signature requests in 'sent' status and checks their envelope status.
-    """
-    import asyncio
-    from app.kernel.database.session import TenantAwareSessionFactory
-    from app.config import settings
+    return worker_loop.run(_sync_signature_envelopes_async())
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
 
-    try:
-        factory = TenantAwareSessionFactory(database_url=settings.database_url)
-        session = loop.run_until_complete(
-            factory.create_session(tenant_id="system", user_id="system", user_role="admin")
-        )
+async def _sync_signature_envelopes_async():
+    """Async implementation using the persistent worker event loop."""
+    from workers.worker_loop import worker_loop
 
-        # Find all sent signature requests
-        rows = loop.run_until_complete(
-            session.execute(
-                sa_text("""
-                    SELECT id, tenant_id, provider_reference
-                    FROM signature_requests
-                    WHERE status = 'sent' AND provider_reference IS NOT NULL
-                """)
-            )
+    session = await worker_loop.create_session("system", "system", "admin")
+    async with worker_loop.session_scope(session):
+        rows = await session.execute(
+            sa_text("""
+                SELECT id, tenant_id, provider_reference
+                FROM signature_requests
+                WHERE status = 'sent' AND provider_reference IS NOT NULL
+            """)
         )
         requests = rows.fetchall()
         logger.info("sync_signature_envelopes: found %d sent envelopes to check", len(requests))
@@ -124,18 +106,17 @@ def sync_signature_envelopes(self):
             try:
                 from app.domains.signature.service import SignatureService
                 from app.domains.signature.repository import SignatureRepository
+                from app.domains.signature.providers.factory import create_provider
+                from app.config import settings
 
                 repo = SignatureRepository(session, str(row.tenant_id))
                 service = SignatureService(repo, actor_id="system")
 
-                # Register provider
-                from app.domains.signature.providers.factory import create_provider
-                provider = create_provider("docusign")
-                service.register_provider("docusign", provider)
+                pname = "dev_auto_sign" if settings.environment == "development" else "docusign"
+                provider = create_provider(pname)
+                service.register_provider(pname, provider)
 
-                result = loop.run_until_complete(
-                    service.sync_envelope_status(str(row.id))
-                )
+                result = await service.sync_envelope_status(str(row.id))
                 if result:
                     synced += 1
                     logger.info(
@@ -144,8 +125,10 @@ def sync_signature_envelopes(self):
             except Exception as exc:
                 logger.warning("Failed to sync envelope %s: %s", str(row.id)[:20], exc)
 
+        await session.commit()
         logger.info("sync_signature_envelopes complete: %d/%d synced", synced, len(requests))
-        return {"synced": synced, "total": len(requests), "checked_at": datetime.now(timezone.utc).isoformat()}
-    finally:
-        loop.run_until_complete(factory.close())
-        loop.close()
+        return {
+            "synced": synced,
+            "total": len(requests),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }

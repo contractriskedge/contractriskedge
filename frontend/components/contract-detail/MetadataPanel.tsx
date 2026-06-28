@@ -42,6 +42,7 @@ import {
   Download,
 } from "lucide-react";
 import type { ContractDetail, Obligation, DocumentVersion, AiFinding } from "./types";
+import { reviewService } from "@/services/api/reviews";
 import { RISK_BG, RISK_TEXT, RISK_BG_LIGHT } from "@/components/dashboard/contracts/types";
 import { formatDate } from "@/lib/date-utils";
 
@@ -81,6 +82,20 @@ export function MetadataPanel({
 }: MetadataPanelProps) {
   const [showAllObligations, setShowAllObligations] = useState(false);
   const [showAllVersions, setShowAllVersions] = useState(false);
+  const [downloadingVersionId, setDownloadingVersionId] = useState<string | null>(null);
+
+  const handleVersionDownload = async (version: DocumentVersion) => {
+    setDownloadingVersionId(version.id);
+    try {
+      await reviewService.downloadVersion(
+        contract.id,
+        version.id,
+        `${contract.filename || contract.name}_v${version.version_number}.docx`,
+      );
+    } finally {
+      setDownloadingVersionId(null);
+    }
+  };
 
   const criticalCount = findings.filter((f) => f.severity === "critical").length;
   const highCount = findings.filter((f) => f.severity === "high").length;
@@ -468,7 +483,9 @@ export function MetadataPanel({
                   </div>
                 </div>
                 <button
-                  className="p-1 rounded hover:bg-gray-100 dark:hover:bg-navy-700 text-gray-400"
+                  onClick={() => handleVersionDownload(v)}
+                  disabled={downloadingVersionId === v.id}
+                  className="p-1 rounded hover:bg-gray-100 dark:hover:bg-navy-700 text-gray-400 disabled:opacity-50"
                   aria-label={`Download version ${v.version_number}`}
                   title={`Download v${v.version_number}`}
                 >

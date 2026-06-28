@@ -446,12 +446,14 @@ async def hydrate_workspace(
         ai_status = raw_status.value if hasattr(raw_status, 'value') else raw_status
         ai_error = ai_run.error_message
 
-    progress, current_step, overall_status, error, error_code, can_retry = _compute_review_status(
+    progress, current_step, overall_status, error, error_code, can_retry, *_rest = _compute_review_status(
         review_status=_enum_value(_r("status")),
         ingestion_state=ingestion_state,
         ai_status=ai_status,
         ingestion_error=ingestion_error,
         ai_error=ai_error,
+        finding_count=_r("finding_count", 0) or 0,
+        redline_count=_r("redline_count", 0) or 0,
     )
 
     status_response = {
@@ -556,6 +558,7 @@ async def hydrate_workspace(
     current_version = versions[0] if versions else None
 
     # ── 6. Get recent activity ───────────────────────────────────
+    # 6a. Status transitions from review_status_history
     activity_result = await db.execute(
         sa_text("""
             SELECT h.history_id, h.from_status, h.to_status, h.changed_by,
@@ -577,6 +580,38 @@ async def hydrate_workspace(
         }
         for a in activity_result.fetchall()
     ]
+
+    # 6b. Governance audit events (signature, etc.) from governance_audit_events
+    gov_result = await db.execute(
+        sa_text("""
+            SELECT event_id, event_type, actor_id, change_summary, metadata, created_at
+            FROM governance_audit_events
+            WHERE tenant_id = :tenant_id
+              AND (
+                entity_id = CAST(:review_id AS uuid)
+                OR metadata->>'contract_id' = :review_id2
+              )
+            ORDER BY created_at DESC
+            LIMIT 20
+        """), {"tenant_id": tenant_id, "review_id": review_id, "review_id2": review_id}
+    )
+    for row in gov_result.fetchall():
+        meta = row.metadata or {}
+        if not isinstance(meta, dict):
+            meta = {}
+        description = row.change_summary or meta.get("description") or f"{row.event_type} event"
+        recent_activity.append({
+            "activity_id": f"gov-{str(row.event_id)[:8]}",
+            "from_status": None,
+            "to_status": None,
+            "changed_by": row.actor_id,
+            "reason": description,
+            "created_at": row.created_at,
+        })
+
+    # 6c. Sort combined activity by created_at descending, take top 15
+    recent_activity.sort(key=lambda a: a["created_at"], reverse=True)
+    recent_activity = recent_activity[:15]
 
     # ── 7. Get unread notifications ──────────────────────────────
     notif_result = await db.execute(
@@ -709,12 +744,14 @@ async def get_review_status(
         ai_error = None
 
     # Compute overall progress and current step
-    progress, current_step, overall_status, error, error_code, can_retry = _compute_review_status(
+    progress, current_step, overall_status, error, error_code, can_retry, pipeline_phase, eta_seconds, eta_label = _compute_review_status(
         review_status=_enum_value(review.status),
         ingestion_state=ingestion_state,
         ai_status=ai_status,
         ingestion_error=ingestion_error,
         ai_error=ai_error,
+        finding_count=review.finding_count or 0,
+        redline_count=review.redline_count or 0,
     )
 
     # ── Compute authoritative status (Phase 1: OVERDUE supersedes all) ──
@@ -770,6 +807,9 @@ async def get_review_status(
     # ── Assignment status ──
     assignment_status = "assigned" if review.assigned_to else "unassigned"
 
+    metadata = review.document_metadata if isinstance(review.document_metadata, dict) else {}
+    analysis_source = metadata.get("source")
+
     return ReviewStatusResponse(
         review_id=str(review.review_id),
         upload_id=str(review.upload_id),
@@ -790,7 +830,24 @@ async def get_review_status(
         sla_remaining_hours=sla_remaining,
         age_hours=age_hours,
         assignment_status=assignment_status,
+        pipeline_phase=pipeline_phase,
+        estimated_seconds_remaining=eta_seconds,
+        eta_label=eta_label,
+        finding_count=review.finding_count or 0,
+        redline_count=review.redline_count or 0,
+        analysis_source=analysis_source,
     )
+
+
+def _format_eta_label(seconds: Optional[int]) -> Optional[str]:
+    if seconds is None:
+        return None
+    if seconds <= 0:
+        return "Now"
+    if seconds < 60:
+        return f"~{seconds}s"
+    minutes = max(1, round(seconds / 60))
+    return f"~{minutes} min"
 
 
 def _compute_review_status(
@@ -799,51 +856,89 @@ def _compute_review_status(
     ai_status: Optional[str] = None,
     ingestion_error: Optional[str] = None,
     ai_error: Optional[str] = None,
+    finding_count: int = 0,
+    redline_count: int = 0,
 ) -> tuple:
-    """Compute overall progress, current step, and status from pipeline states.
+    """Compute pipeline progress for frontend polling.
 
-    Returns (progress: int, current_step: str, status: str, error: Optional[str],
-             error_code: Optional[str], can_retry: bool).
+    Returns (progress, current_step, status, error, error_code, can_retry,
+             pipeline_phase, estimated_seconds_remaining, eta_label).
     """
-    # Ingestion pipeline stages (0-40%)
+    # Ingestion pipeline stages (0-45%)
     ingestion_progress_map = {
-        "uploaded": (5, "Uploading file"),
-        "validating": (10, "Validating file"),
-        "validated": (15, "File validated"),
-        "storage_confirmed": (20, "Storing file"),
-        "ocr_pending": (22, "OCR pending"),
-        "ocr_processing": (25, "Running OCR extraction"),
-        "ocr_complete": (30, "OCR complete"),
-        "chunking_pending": (32, "Chunking pending"),
-        "embedding_pending": (35, "Generating embeddings"),
-        "analysis_pending": (38, "AI analysis pending"),
+        "uploaded": (8, "Queued for ingestion", 150, "ingesting"),
+        "validating": (12, "Validating document", 140, "ingesting"),
+        "validated": (16, "Document validated", 130, "ingesting"),
+        "storage_confirmed": (20, "Confirming storage", 120, "ingesting"),
+        "ocr_pending": (22, "OCR queued", 110, "ingesting"),
+        "ocr_processing": (26, "Extracting text (OCR)", 100, "ingesting"),
+        "ocr_complete": (30, "Text extraction complete", 90, "ingesting"),
+        "chunking_pending": (32, "Chunking queued", 80, "ingesting"),
+        "chunking_processing": (36, "Splitting into clauses", 70, "ingesting"),
+        "embedding_pending": (38, "Embedding queued", 60, "ingesting"),
+        "embedding_processing": (42, "Generating embeddings", 50, "ingesting"),
+        "analysis_pending": (45, "Queued for AI analysis", 45, "queued"),
+        "review_ready": (48, "Document ready — starting AI review", 40, "queued"),
     }
 
-    # AI analysis stages (40-70%)
+    # AI analysis stages (48-85%)
     ai_progress_map = {
-        "pending": (42, "AI analysis pending"),
-        "processing": (50, "Running AI analysis"),
-        "completed": (70, "AI analysis complete"),
+        "pending": (52, "AI review queued", 35, "analyzing"),
+        "processing": (65, "AI generating findings and redlines", 90, "analyzing"),
+        "completed": (82, "AI analysis complete", 5, "ready"),
     }
 
     # Check for failures first
     if ingestion_state == "failed":
-        return (40, "Ingestion failed", "failed", ingestion_error or "Ingestion pipeline failed", "INGESTION_FAILURE", True)
+        return (
+            40, "Ingestion failed", "failed", ingestion_error or "Ingestion pipeline failed",
+            "INGESTION_FAILURE", True, "failed", None, None,
+        )
     if ai_status == "failed":
-        return (65, "AI analysis failed", "failed", ai_error or "AI analysis failed", "ANALYSIS_FAILURE", True)
+        return (
+            65, "AI analysis failed", "failed", ai_error or "AI analysis failed",
+            "ANALYSIS_FAILURE", True, "failed", None, None,
+        )
+
+    # AI analysis in flight or complete
+    if ai_status and ai_status in ai_progress_map:
+        progress, step, eta, phase = ai_progress_map[ai_status]
+        if ai_status == "completed":
+            if review_status in ("ai_analyzed", "in_review", "review_ready", "under_review",
+                                 "legal_review", "pending_approval", "approved", "rejected",
+                                 "escalated", "closed", "completed"):
+                return (
+                    100, "Findings and redlines ready for review", "review_ready",
+                    None, None, False, "ready", 0, "Now",
+                )
+            if finding_count > 0 or redline_count > 0:
+                return (
+                    95, "Finalizing review workspace", "processing",
+                    None, None, False, "analyzing", eta, _format_eta_label(eta),
+                )
+        return (
+            progress, step, "analyzing" if ai_status == "processing" else "processing",
+            None, None, False, phase, eta, _format_eta_label(eta),
+        )
 
     if ingestion_state and ingestion_state in ingestion_progress_map:
-        progress, step = ingestion_progress_map[ingestion_state]
-        return (progress, step, "processing", None, None, False)
+        progress, step, eta, phase = ingestion_progress_map[ingestion_state]
+        return (
+            progress, step, "processing", None, None, False, phase, eta, _format_eta_label(eta),
+        )
 
-    if ai_status and ai_status in ai_progress_map:
-        progress, step = ai_progress_map[ai_status]
-        return (progress, step, "analyzing" if ai_status == "processing" else "processing", None, None, False)
+    # Ingestion finished but AI not started yet
+    if ingestion_state in ("review_ready", "analysis_pending"):
+        return (
+            48, "Starting AI review", "processing", None, None, False,
+            "queued", 40, "~1 min",
+        )
 
-    # Review lifecycle stages (70-100%)
+    # Review lifecycle — post-analysis
     review_progress_map = {
         "draft": (70, "Preparing review"),
-        "ai_analyzed": (75, "AI analysis ready for review"),
+        "ai_analyzed": (100, "Findings and redlines ready for review"),
+        "review_ready": (100, "Findings and redlines ready for review"),
         "in_review": (85, "Under review"),
         "pending_approval": (90, "Pending approval"),
         "approved": (100, "Review completed — approved"),
@@ -854,10 +949,24 @@ def _compute_review_status(
 
     if review_status in review_progress_map:
         progress, step = review_progress_map[review_status]
+        if review_status in ("ai_analyzed", "review_ready") or (finding_count > 0 and progress >= 70):
+            return (
+                100, step, "review_ready", None, None, False, "ready", 0, "Now",
+            )
         overall = "completed" if progress == 100 else "in_review" if progress >= 85 else "review_ready"
-        return (progress, step, overall, None, None, False)
+        return (
+            progress, step, overall, None, None, False,
+            "ready" if progress == 100 else "queued", None, None,
+        )
 
-    return (0, "Unknown", "unknown", None, None, False)
+    # Early contract — ingestion not reported yet (template just created)
+    if review_status == "draft" and not ingestion_state:
+        return (
+            5, "Queued for ingestion", "processing", None, None, False,
+            "queued", 180, "~3 min",
+        )
+
+    return (0, "Waiting to start", "processing", None, None, False, "queued", 120, "~2 min")
 
 
 # ── Re-analysis ────────────────────────────────────────────────────

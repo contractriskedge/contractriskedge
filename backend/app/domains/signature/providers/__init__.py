@@ -3,6 +3,7 @@ from .base import SignatureProvider, ProviderResponse, ProviderStatus, WebhookEv
 from .docusign import DocuSignProvider
 from .adobe import AdobeSignProvider
 from .dropbox import DropboxSignProvider
+from .dev_auto_sign import DevAutoSignProvider
 
 __all__ = [
     "SignatureProvider",
@@ -14,4 +15,5 @@ __all__ = [
     "DocuSignProvider",
     "AdobeSignProvider",
     "DropboxSignProvider",
+    "DevAutoSignProvider",
 ]

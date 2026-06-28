@@ -23,5 +23,7 @@ export default function ContractDetailPage({
 }: {
   params: { contractId: string };
 }) {
-  return <ContractDetailWorkspace contractId={params.contractId} />;
+  // Use key={contractId} to force a full remount when navigating between contracts.
+  // This ensures all React Query hooks re-fire with clean state for the new contract.
+  return <ContractDetailWorkspace key={params.contractId} contractId={params.contractId} />;
 }

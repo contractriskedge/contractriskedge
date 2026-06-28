@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.kernel.repository.base import BaseRepository
 from app.domains.ingestion.models import UploadSession, IngestionState, coerce_ingestion_state
+from app.domains.review.models import ContractReview
 
 
 @dataclass
@@ -87,6 +88,29 @@ class IngestionRepository(BaseRepository):
         )
         await self.session.execute(stmt)
         await self.session.flush()
+
+        # When ingestion fails, also update the associated review so the
+        # frontend shows an error state instead of being stuck in "draft" forever.
+        if new_state == IngestionState.FAILED and error:
+            from sqlalchemy import text as sa_text
+            import json as json_mod
+            safe_error = error.replace('"', "'").replace("\\", "/")
+            error_meta = json_mod.dumps({"ingestion_error": safe_error})
+            await self.session.execute(
+                sa_text("""
+                    UPDATE contract_reviews
+                    SET status = 'ingestion_failed',
+                        metadata = metadata || CAST(:error_meta AS jsonb)
+                    WHERE upload_id = CAST(:upload_id AS uuid)
+                      AND tenant_id = CAST(:tenant_id AS uuid)
+                """),
+                {
+                    "upload_id": upload_id,
+                    "tenant_id": tenant_id,
+                    "error_meta": error_meta,
+                },
+            )
+            await self.session.flush()
 
         upload.ingestion_state = new_state
         return upload

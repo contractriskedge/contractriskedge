@@ -182,13 +182,22 @@ def validate_redline_finding_mapping(
                 f"finding category ({_category_label(finding_category)})."
             )
 
+        # Proposed text inference is a secondary check — only flag it when the
+        # redline's explicit clause_type already matches the finding. The text
+        # inference is unreliable (e.g. "Data Breach Notification" text may infer
+        # "data_protection" while the finding is "compliance"), so it should not
+        # override an explicit match.
         if proposed_cat and finding_category and not categories_compatible(
             proposed_cat, finding_category
         ):
-            warnings.append(
-                f"Proposed redline text ({_category_label(proposed_cat)}) does not match "
-                f"finding category ({_category_label(finding_category)})."
-            )
+            # Only add as a warning if the explicit categories also don't match
+            if not (redline_category and finding_category and categories_compatible(
+                redline_category, finding_category
+            )):
+                warnings.append(
+                    f"Proposed redline text ({_category_label(proposed_cat)}) does not match "
+                    f"finding category ({_category_label(finding_category)})."
+                )
 
     category = finding_category or redline_category or proposed_cat
     valid = len(warnings) == 0

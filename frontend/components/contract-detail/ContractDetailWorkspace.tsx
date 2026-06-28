@@ -58,13 +58,13 @@ import { reviewService } from "@/services/api/reviews";
 import { api } from "@/services";
 import { useCloseReview } from "@/services/hooks/useReviews";
 import type { GovernanceTraceability } from "@/services/api/client";
-import { RelatedReviewsPanel } from "./RelatedReviewsPanel";
 import { LifecycleHistoryPanel } from "./LifecycleHistoryPanel";
 import { WorkflowTimelinePanel, type TimelineEvent } from "./WorkflowTimelinePanel";
 import { AuditTrailPanel } from "./AuditTrailPanel";
 import { IntelligenceHub } from "./IntelligenceHub";
 import { formatDate } from "@/lib/date-utils";
 import { ApprovalModal } from "@/components/review/ApprovalModal";
+import { AnalysisPipelineBanner } from "@/components/review/AnalysisPipelineBanner";
 import { CollapsibleSection } from "@/components/shared/CollapsibleSection";
 
 // ── Props ───────────────────────────────────────────────────────────────────
@@ -78,7 +78,7 @@ interface ContractDetailWorkspaceProps {
 export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<"overview" | "insights" | "clauses" | "activity" | "versions" | "reviews" | "lifecycle" | "workflow" | "signatures">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "insights" | "clauses" | "activity" | "versions" | "lifecycle" | "workflow" | "signatures">("overview");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [approvalModalOpen, setApprovalModalOpen] = useState(false);
   const [closeModalOpen, setCloseModalOpen] = useState(false);
@@ -183,34 +183,43 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
   const openRedline = () => router.push(`/reviews/ai-workspace?contractId=${contractId}&tab=redline`);
   const openNegotiation = () => router.push(`/negotiation?contractId=${contractId}`);
 
-  // Download the contract document via the API and trigger a browser
-  // "save as" dialog. Falls back to opening in a new tab if the backend
-  // doesn't expose a download URL.
+  // Download the current contract document (latest version) with auth headers.
   const handleDownload = async () => {
     if (!contract) return;
     try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "/api/v1"}/contracts/${contractId}/document`,
-        { credentials: "include" },
-      );
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = contract.filename || `${contract.name}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+      const versionList = versions.length > 0
+        ? versions
+        : (await reviewService.listVersions(contractId)).map((v) => ({
+            id: v.version_id,
+            version_number: v.version_number,
+            label: v.label ?? "",
+          }));
+      const latest = versionList[versionList.length - 1];
+      if (latest?.id) {
+        await reviewService.downloadVersion(
+          contractId,
+          latest.id,
+          contract.filename || `${contract.name}_v${latest.version_number}.docx`,
+        );
         return;
       }
     } catch {
-      // fall through to the no-API fallback
+      // fall through
     }
-    // Fallback: open the workspace document URL in a new tab.
     if (contract.document_url) {
       window.open(contract.document_url, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  const handleVersionDownload = async (versionId: string, versionNumber: number) => {
+    try {
+      await reviewService.downloadVersion(
+        contractId,
+        versionId,
+        contract?.filename || `${contract?.name || "contract"}_v${versionNumber}.docx`,
+      );
+    } catch {
+      // downloadFile surfaces error via thrown NetworkError
     }
   };
 
@@ -332,7 +341,7 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
           <div className="w-px h-5 bg-gray-200 dark:bg-navy-700 mx-1" />
           {/* Approve / Reject / Finalize actions — only show when review status allows */}
           {contract.status && ["in_review", "legal_review", "security_review", "procurement_review", "negotiation", "escalated", "exec_approval"].includes(contract.status) && (
-            <>
+            <React.Fragment key="approve-reject-buttons">
               <button
                 onClick={() => { setActionLoading("approve"); setApprovalModalOpen(true); }}
                 disabled={actionLoading === "approve" || approveMut.isPending}
@@ -351,7 +360,7 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                 {rejectMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
                 Reject
               </button>
-            </>
+            </React.Fragment>
           )}
           {contract.status === "approved" && (
             <button
@@ -471,6 +480,10 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
         </div>
       </div>
 
+      <div className="px-4 py-2 border-b border-gray-100 dark:border-navy-700 bg-white dark:bg-navy-800">
+        <AnalysisPipelineBanner reviewId={contractId} />
+      </div>
+
       {/* ── Main 2-Panel Layout ────────────────────────────────────────── */}
       <div className="flex flex-1 overflow-hidden">
         {/* ── LEFT: Document Preview ───────────────────────────────────── */}
@@ -557,7 +570,7 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
               { id: "insights" as const, label: "AI Insights", icon: Brain, badge: findings.length },
               { id: "clauses" as const, label: "Clauses", icon: BookOpen, badge: clauses.length },
               { id: "workflow" as const, label: "Workflow", icon: GitBranch, badge: workflowTimeline.length },
-              { id: "reviews" as const, label: "Related Reviews", icon: GitBranch },
+              // reviews tab removed — was using name-based heuristic that showed misleading "loose relationships"
               { id: "lifecycle" as const, label: "Lifecycle", icon: Clock },
               { id: "activity" as const, label: "Activity", icon: Activity, badge: activityEvents.length },
               { id: "versions" as const, label: "Versions", icon: Clock, badge: versions.length },
@@ -611,10 +624,10 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                       <span className="text-gray-300">·</span>
                       <span className="text-amber-600 font-medium">{obligationsData?.open ?? openObligations} open</span>
                       {(obligationsData?.overdue ?? 0) > 0 && (
-                        <>
+                        <React.Fragment key="obligation-overdue">
                           <span className="text-gray-300">·</span>
                           <span className="text-red-600 font-medium">{obligationsData?.overdue ?? 0} overdue</span>
-                        </>
+                        </React.Fragment>
                       )}
                     </div>
                   </div>
@@ -878,19 +891,17 @@ export function ContractDetailWorkspace({ contractId }: ContractDetailWorkspaceP
                           <p className="text-[9px] text-gray-400">{v.uploaded_by} · {formatDate(v.uploaded_at)} · {v.page_count} pages</p>
                         </div>
                       </div>
-                      <button className="p-1 rounded hover:bg-gray-100 dark:hover:bg-navy-700 text-gray-400"><Download className="w-3.5 h-3.5" /></button>
+                      <button
+                        onClick={() => handleVersionDownload(v.id, v.version_number)}
+                        className="p-1 rounded hover:bg-gray-100 dark:hover:bg-navy-700 text-gray-400"
+                        aria-label={`Download version ${v.version_number}`}
+                        title={`Download v${v.version_number}`}
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   ))
                 )}
-              </div>
-            )}
-
-            {activeTab === "reviews" && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[9px] font-semibold text-gray-500 uppercase">Related Reviews</span>
-                </div>
-                <RelatedReviewsPanel contractId={contractId} />
               </div>
             )}
 
@@ -1116,7 +1127,7 @@ function GovernanceTraceabilityCard({ contractId }: { contractId: string }) {
       </div>
 
       {traceability.linked_policies.length > 0 && (
-        <>
+        <React.Fragment key="governance-policies">
           <button
             type="button"
             onClick={() => setExpanded(!expanded)}
@@ -1146,7 +1157,7 @@ function GovernanceTraceabilityCard({ contractId }: { contractId: string }) {
               ))}
             </div>
           )}
-        </>
+        </React.Fragment>
       )}
 
       {/* Traceability chain summary */}

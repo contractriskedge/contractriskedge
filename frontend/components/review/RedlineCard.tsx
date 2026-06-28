@@ -34,13 +34,14 @@ interface RedlineCardProps {
   onLocate?: (redline: RedlineItem) => void;
   onAccept?: (id: string) => void;
   onReject?: (id: string) => void;
+  onReopen?: (id: string) => void;
   onEdit?: (redline: RedlineItem) => void;
   onRegenerate?: (redline: RedlineItem) => void;
   immutable?: boolean;
   defaultExpanded?: boolean;
 }
 
-export function RedlineCard({ redline, onLocate, onAccept, onReject, onEdit, onRegenerate, immutable = false, defaultExpanded = false }: RedlineCardProps) {
+export function RedlineCard({ redline, onLocate, onAccept, onReject, onReopen, onEdit, onRegenerate, immutable = false, defaultExpanded = false }: RedlineCardProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const loc = redline.locator;
   const actionLabel = loc?.action_label || (redline.operation === "insert" ? "INSERT" : "MODIFY");
@@ -336,14 +337,26 @@ export function RedlineCard({ redline, onLocate, onAccept, onReject, onEdit, onR
               <p className="text-xs text-gray-600 dark:text-gray-300">{redline.rationale}</p>
             </div>
           )}
-          {redline.status === "proposed" && !immutable && (
+          {/* Show actions for proposed and invalid_mapping redlines.
+              For invalid_mapping: Accept is now allowed (backend bypasses mapping validation),
+              Reopen resets to proposed, and Regenerate re-links to the correct finding. */}
+          {(redline.status === "proposed" || redline.status === "invalid_mapping") && !immutable && (
             <RedlineActions
               redline={redline}
               findingCategoryMismatch={findingCategoryMismatch}
               onAccept={onAccept}
               onReject={onReject}
+              onReopen={onReopen}
               onEdit={onEdit}
               onRegenerate={onRegenerate}
+            />
+          )}
+          {/* Show only Reopen for rejected redlines */}
+          {redline.status === "rejected" && !immutable && (
+            <RedlineActions
+              redline={redline}
+              findingCategoryMismatch={findingCategoryMismatch}
+              onReopen={onReopen}
             />
           )}
           {redline.status === "proposed" && immutable && (

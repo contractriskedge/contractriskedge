@@ -447,7 +447,17 @@ class ReviewStatusResponse(BaseModel):
     sla_status: str = Field(default="on_track", description="green|amber|red")
     sla_remaining_hours: Optional[float] = None
     age_hours: Optional[float] = Field(None, description="Hours since review creation")
-    assignment_status: Optional[str] = Field(None, description="assigned|unassigned|self_assigned")
+    pipeline_phase: Optional[str] = None
+    """Pipeline phase: queued | ingesting | analyzing | ready | failed"""
+    estimated_seconds_remaining: Optional[int] = Field(
+        None, description="Rough ETA in seconds until findings/redlines are ready",
+    )
+    eta_label: Optional[str] = Field(None, description="Human-readable ETA, e.g. ~2 min")
+    finding_count: int = 0
+    redline_count: int = 0
+    analysis_source: Optional[str] = Field(
+        None, description="template_generation | upload | etc. from review metadata",
+    )
 
 
 # ── Re-analysis ────────────────────────────────────────────────────

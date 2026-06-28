@@ -73,7 +73,7 @@ class AuditRecorder:
                     "tenant_id": uuid.UUID(str(self.tenant_id)),
                     "event_type": event_type,
                     "entity_type": entity_type,
-                    "entity_id": uuid.UUID(SYSTEM_ENTITY_ID),
+                    "entity_id": uuid.UUID(str(entity_id)),
                     "actor_id": actor_id or "system",
                     "actor_role": actor_role,
                     "previous_state": json.dumps(before_state) if before_state else None,

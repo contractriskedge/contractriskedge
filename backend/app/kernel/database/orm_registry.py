@@ -30,6 +30,8 @@ _MODEL_MODULES = (
     "app.domains.negotiation.models",
     "app.domains.redline_templates.models",
     "app.domains.signature.models",
+    "app.domains.templates.models",
+    "app.domains.templates.recommendation_models",
 )
 
 

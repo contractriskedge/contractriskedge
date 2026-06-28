@@ -7,9 +7,10 @@
 
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { FileText, Calendar, User, Hash, Activity, Cpu, Clock, Lock, ShieldCheck, Download, Fingerprint, AlertTriangle } from "lucide-react";
 import type { ReviewDetail, ReviewStatusResponse, AnalysisRunResponse, DocumentVersionItem } from "@/services/api/client";
+import { reviewService } from "@/services/api/reviews";
 import { useRiskBreakdown } from "@/services/hooks";
 import { isImmutable, getStatusLabel, getStatusColor } from "@/lib/workflow";
 
@@ -37,6 +38,7 @@ export function ContractSummary({
   documentVersionLabel,
   finalizedVersion,
 }: ContractSummaryProps) {
+  const [downloadingFinal, setDownloadingFinal] = useState(false);
   const { data: riskData } = useRiskBreakdown(review.review_id);
   const isRemainingMode = riskData?.exposure_mode === "remaining" || riskData?.review_started;
   const currentRisk = riskData?.current_contract_risk ?? riskData?.remaining_exposure;
@@ -50,7 +52,22 @@ export function ContractSummary({
   };
 
   const immutable = isImmutable(review.status);
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api/v1";
+
+  const handleDownloadFinal = async () => {
+    if (!finalizedVersion?.version_id) return;
+    setDownloadingFinal(true);
+    try {
+      await reviewService.downloadVersion(
+        review.review_id,
+        finalizedVersion.version_id,
+        `contract_final_v${finalizedVersion.version_number}.docx`,
+      );
+    } catch {
+      // User sees browser/network error from downloadFile
+    } finally {
+      setDownloadingFinal(false);
+    }
+  };
 
   const statusColor = (s: string) => {
     const colors: Record<string, string> = {
@@ -261,15 +278,15 @@ export function ContractSummary({
                     )}
                   </div>
                 </div>
-                <a
-                  href={`${API_BASE}/reviews/${review.review_id}/versions/${finalizedVersion.version_id}/download`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-medium text-white hover:bg-emerald-700 transition-colors"
+                <button
+                  type="button"
+                  onClick={handleDownloadFinal}
+                  disabled={downloadingFinal || !finalizedVersion?.storage_key}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-medium text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
                 >
                   <Download className="h-4 w-4" />
-                  Download Final
-                </a>
+                  {downloadingFinal ? "Downloading…" : "Download Final"}
+                </button>
               </div>
             </div>
           )}

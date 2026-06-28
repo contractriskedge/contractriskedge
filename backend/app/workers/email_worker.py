@@ -69,19 +69,11 @@ async def process_email_queue(
     processed = 0
 
     owns_session = session is None
-    engine = None
-    if owns_session:
-        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-        from sqlalchemy.orm import sessionmaker
 
-        db_url = settings.database_url
-        engine = create_async_engine(db_url)
-        async_session_factory = sessionmaker(engine, class_=AsyncSession)
-        session = async_session_factory()
+    async def _process(sess) -> int:
+        nonlocal processed
+        repo = NotificationRepository(sess, tenant_id=settings.dev_tenant_id)
 
-    repo = NotificationRepository(session, tenant_id=settings.dev_tenant_id)
-
-    try:
         pending = await repo.get_pending_emails(limit=batch_size)
 
         for entry in pending:
@@ -98,7 +90,6 @@ async def process_email_queue(
                     await repo.mark_email_sent(entry.email_id, provider_id)
                     logger.info("Email sent: %s -> %s (%s)", entry.template_name, entry.recipient_email, provider_id)
                 else:
-                    # Mark as failed permanently if no provider_id returned
                     await repo.mark_email_failed(entry.email_id, "No provider message ID returned")
                     logger.warning("Email failed (no ID): %s -> %s", entry.template_name, entry.recipient_email)
 
@@ -115,29 +106,30 @@ async def process_email_queue(
             processed += 1
 
         if owns_session:
-            await session.commit()
+            await sess.commit()
         logger.info("Email queue processing complete: %d emails processed", processed)
+        return processed
 
-    finally:
-        if owns_session:
-            await session.close()
-            if engine is not None:
-                await engine.dispose()
+    if owns_session:
+        from workers.worker_loop import worker_loop
 
-    return processed
+        sess = await worker_loop.create_session(
+            settings.dev_tenant_id or "system",
+            "system",
+            "admin",
+        )
+        async with worker_loop.session_scope(sess):
+            return await _process(sess)
+
+    return await _process(session)
 
 
 if celery_app:
     @celery_app.task(name=TASK_NAME, queue="email", bind=True, max_retries=0)
     def send_email_task(self) -> int:
         """Celery task: process pending email queue."""
-        import asyncio
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(process_email_queue())
-            return result
-        finally:
-            loop.close()
+        from workers.worker_loop import worker_loop
+
+        return worker_loop.run(process_email_queue())
 else:
     logger.warning("Celery not available — email worker task not registered")

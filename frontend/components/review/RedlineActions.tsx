@@ -13,7 +13,7 @@
 
 import React from "react";
 import {
-  CheckCircle2, XCircle, Edit3, RefreshCw,
+  CheckCircle2, XCircle, Edit3, RefreshCw, RotateCcw,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import type { RedlineItem } from "@/services/api/client";
@@ -23,6 +23,7 @@ interface RedlineActionsProps {
   findingCategoryMismatch: boolean;
   onAccept?: (redlineId: string) => void;
   onReject?: (redlineId: string) => void;
+  onReopen?: (redlineId: string) => void;
   onEdit?: (redline: RedlineItem) => void;
   onRegenerate?: (redline: RedlineItem) => void;
 }
@@ -34,6 +35,7 @@ export function RedlineActions({
   onReject,
   onEdit,
   onRegenerate,
+  onReopen,
 }: RedlineActionsProps) {
   const { hasPermission } = useAuth();
 
@@ -53,8 +55,9 @@ export function RedlineActions({
 
   return (
     <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3 dark:border-gray-700">
-      {/* Accept is hidden when finding-to-redline mapping is invalid */}
-      {!findingCategoryMismatch && onAccept && (
+      {/* Accept — shown for proposed and invalid_mapping redlines.
+          For invalid_mapping, the backend now allows force-accept. */}
+      {(redline.status === "proposed" || redline.status === "invalid_mapping") && onAccept && (
         <button
           onClick={() => onAccept(redline.redline_id)}
           className="inline-flex items-center gap-1.5 rounded-md bg-green-100 px-3 py-1.5 text-xs font-medium text-green-700 transition-colors hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-800"
@@ -63,12 +66,21 @@ export function RedlineActions({
         </button>
       )}
       {/* Reject is hidden when mapping is invalid — use Regenerate instead */}
-      {!findingCategoryMismatch && onReject && (
+      {!findingCategoryMismatch && onReject && redline.status === "proposed" && (
         <button
           onClick={() => onReject(redline.redline_id)}
           className="inline-flex items-center gap-1.5 rounded-md bg-red-100 px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-800"
         >
           <XCircle className="h-3.5 w-3.5" /> Reject
+        </button>
+      )}
+      {/* Reopen button for rejected or invalid_mapping redlines */}
+      {(redline.status === "rejected" || redline.status === "invalid_mapping") && onReopen && (
+        <button
+          onClick={() => onReopen(redline.redline_id)}
+          className="inline-flex items-center gap-1.5 rounded-md bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-800"
+        >
+          <RotateCcw className="h-3.5 w-3.5" /> Reopen
         </button>
       )}
       {!findingCategoryMismatch && onEdit && (

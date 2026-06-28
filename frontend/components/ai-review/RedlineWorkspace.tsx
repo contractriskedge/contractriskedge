@@ -30,12 +30,13 @@ import {
   Lightbulb, ArrowRight, ArrowLeft, Plus, Search, Loader2,
   AlertTriangle, User, Clock, ThumbsUp, ThumbsDown, ExternalLink,
   Target, CheckSquare, Square, Download, Shield, Scale,
-  Briefcase, TrendingUp, Eye, FileWarning,
+  Briefcase, TrendingUp, Eye, FileWarning, RefreshCw,
 } from "lucide-react";
 import { useReviewContext } from "./ReviewContext";
 import { useReviewRedlinesData } from "./hooks";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/services/api/client";
+import { reviewService } from "@/services/api/reviews";
 import {
   locateClause,
   requestShowDocumentPanel,
@@ -326,6 +327,10 @@ export function RedlineWorkspace() {
   const [counterTarget, setCounterTarget] = useState<RedlineItem | null>(null);
   const [counterText, setCounterText] = useState("");
 
+  // Reopen rejected redline
+  const [reopenTarget, setReopenTarget] = useState<RedlineItem | null>(null);
+  const [reopenNotes, setReopenNotes] = useState("");
+
   // Audit trail toggle
   const [showAuditTrail, setShowAuditTrail] = useState<string | null>(null);
 
@@ -342,9 +347,32 @@ export function RedlineWorkspace() {
         modified_text: modifiedText,
         review_notes: notes,
       }),
-    onSuccess: () => {
+    onSuccess: (data: { document_version?: { version_number?: number; label?: string } }) => {
       queryClient.invalidateQueries({ queryKey: ["ai-platform", "redlines", selectedReviewId] });
       queryClient.invalidateQueries({ queryKey: ["ai-platform", "versions", selectedReviewId] });
+      if (data?.document_version?.version_number) {
+        setVersionNotice(
+          `Document updated to v${data.document_version.version_number}` +
+          (data.document_version.label ? `: ${data.document_version.label}` : ""),
+        );
+        setTimeout(() => setVersionNotice(null), 5000);
+      }
+    },
+  });
+
+  const createVersionMutation = useMutation({
+    mutationFn: () =>
+      reviewService.createVersion(selectedReviewId!, {
+        label: "Redlines Applied",
+        change_summary: "Document version created after addressing accepted redlines",
+        accepted_redline_ids: redlines
+          .filter((r) => r.status === "accepted" || r.status === "modified")
+          .map((r) => r.redline_id || r.id),
+      }),
+    onSuccess: (version) => {
+      setVersionNotice(`✓ Version v${version.version_number} created: ${version.label || "Redlines Applied"}`);
+      queryClient.invalidateQueries({ queryKey: ["ai-platform", "versions", selectedReviewId] });
+      setTimeout(() => setVersionNotice(null), 5000);
     },
   });
 
@@ -516,6 +544,21 @@ export function RedlineWorkspace() {
       r.id === id ? { ...r, status: "rejected" as RedlineStatus, review_notes: notes || r.review_notes } : r
     ));
     updateStatusMutation.mutate({ redlineId: id, status: "rejected", reviewNotes: notes });
+  };
+
+  const handleReopen = (id: string, notes?: string) => {
+    setRedlines(prev => prev.map(r =>
+      r.id === id ? { ...r, status: "proposed" as RedlineStatus, review_notes: notes || "Reopened for review" } : r
+    ));
+    updateStatusMutation.mutate({
+      redlineId: id,
+      status: "proposed",
+      reviewNotes: notes?.trim() || "Reopened for review",
+    });
+    setReopenTarget(null);
+    setReopenNotes("");
+    setVersionNotice("Redline reopened for review.");
+    setTimeout(() => setVersionNotice(null), 4000);
   };
 
   const handleModify = (id: string, modifiedText: string, notes?: string) => {
@@ -1216,24 +1259,30 @@ export function RedlineWorkspace() {
                         )}
 
                         {!isActionable && (
-                          <div className="flex items-center gap-2 w-full">
+                          <div className="flex items-center gap-2 w-full flex-wrap">
                             <span className="text-sm text-gray-500 italic">
                               {rl.status === "accepted" ? "✓ Accepted" :
                                rl.status === "modified" ? "✎ Modified" : "✕ Rejected"}
                               {rl.review_notes && ` — ${rl.review_notes}`}
                             </span>
-                            {(rl.status === "accepted" || rl.status === "modified") && (
+                            {rl.status === "rejected" && (
                               <button
-                                onClick={() => {
-                                  setVersionNotice("Creating new document version from accepted redlines…");
-                                  setTimeout(() => {
-                                    setVersionNotice("✓ New version created successfully");
-                                    setTimeout(() => setVersionNotice(null), 3000);
-                                  }, 1500);
-                                }}
-                                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm ml-auto"
+                                onClick={() => { setReopenTarget(rl); setReopenNotes(rl.review_notes || ""); }}
+                                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm"
                               >
-                                <FileText className="w-3.5 h-3.5" /> Create New Version
+                                <RefreshCw className="w-3.5 h-3.5" /> Reopen with Comments
+                              </button>
+                            )}
+                            {(rl.status === "accepted" || rl.status === "modified") && reviewed === stats.total && stats.total > 0 && (
+                              <button
+                                onClick={() => createVersionMutation.mutate()}
+                                disabled={createVersionMutation.isPending}
+                                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm ml-auto disabled:opacity-60"
+                              >
+                                {createVersionMutation.isPending
+                                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  : <FileText className="w-3.5 h-3.5" />}
+                                Finalize Document Version
                               </button>
                             )}
                           </div>
@@ -1512,6 +1561,40 @@ export function RedlineWorkspace() {
                 className="px-3 py-1.5 text-[9px] font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 transition-colors disabled:opacity-50"
               >
                 Submit Counter Proposal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reopen rejected redline modal */}
+      {reopenTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white dark:bg-navy-800 rounded-xl shadow-xl max-w-md w-full p-5 space-y-4">
+            <h3 className="text-sm font-semibold text-navy-900 dark:text-white">Reopen Redline for Review</h3>
+            <p className="text-xs text-gray-500">
+              Add comments explaining why this rejected redline should be reconsidered.
+            </p>
+            <textarea
+              value={reopenNotes}
+              onChange={(e) => setReopenNotes(e.target.value)}
+              rows={4}
+              placeholder="e.g. Counterparty agreed to revised language in follow-up call..."
+              className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-900 focus:ring-1 focus:ring-navy-400"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setReopenTarget(null); setReopenNotes(""); }}
+                className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleReopen(reopenTarget.id, reopenNotes)}
+                disabled={!reopenNotes.trim() || updateStatusMutation.isPending}
+                className="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                Reopen Redline
               </button>
             </div>
           </div>

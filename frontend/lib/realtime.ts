@@ -291,18 +291,25 @@ export class RealtimeClient {
         }
       };
 
-      this.ws.onclose = () => {
+      this.ws.onclose = (event) => {
         this.stopHeartbeat();
-        if (!this.intentionalClose && !this.pausedForVisibility) {
+        // If the close was clean (code 1000) or the endpoint doesn't exist
+        // (code 1006 with no prior open), don't reconnect.
+        const neverOpened = event.code === 1006 && this.reconnectAttempts === 0;
+        if (!this.intentionalClose && !this.pausedForVisibility && !neverOpened) {
           metrics.totalReconnects++;
           this.scheduleReconnect();
         } else {
+          if (neverOpened) {
+            console.warn("[Realtime] WebSocket endpoint not available — realtime features disabled");
+          }
           this.setState("disconnected");
         }
       };
 
-      this.ws.onerror = (err) => {
-        console.error("[Realtime] WebSocket error:", err);
+      this.ws.onerror = () => {
+        // Error is followed by onclose — don't log or reconnect here,
+        // let onclose handle the decision.
       };
     } catch (err) {
       console.error("[Realtime] Failed to connect:", err);

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import traceback
 import uuid
@@ -103,6 +104,25 @@ class ReviewService:
 
         # Fallback: create review and import from latest completed AI run
         review = await self.review_repo.create_review(upload_id, self.tenant_id, self.user.id)
+
+        # Create shadow workflow instance for the new review
+        try:
+            from app.domains.workflow.consolidator import WorkflowConsolidator
+            consolidator = WorkflowConsolidator(
+                self.review_repo.session, self.tenant_id,
+            )
+            await consolidator.ensure_workflow_instance(
+                review_id=str(review.review_id),
+                upload_id=upload_id,
+                workflow_type="contract_review",
+                created_by=self.user.id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to create workflow instance for review %s: %s",
+                review.review_id, exc,
+            )
+
         ai_run = await self._get_latest_ai_run(upload_id)
 
         if ai_run:
@@ -333,6 +353,27 @@ class ReviewService:
             "[DEBUG-LIFECYCLE] Transition complete: %s -> %s (db_status=%s) audit recorded",
             current_status, new_status, db_status,
         )
+
+        # ── Shadow workflow instance ─────────────────────────────
+        # Record this transition in the consolidated workflow instance.
+        # This is non-blocking — failures are logged but not raised.
+        try:
+            from app.domains.workflow.consolidator import WorkflowConsolidator
+            consolidator = WorkflowConsolidator(
+                self.review_repo.session, self.tenant_id,
+            )
+            await consolidator.record_transition(
+                review_id=review_id,
+                from_state=current_state,
+                to_state=target_state,
+                actor_id=self.user.id,
+                reason=reason,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to shadow workflow transition for review %s: %s",
+                review_id, exc,
+            )
 
         return self._review_to_detail(review) if review else None
 
@@ -565,6 +606,19 @@ class ReviewService:
                 "mitigation_type": mitigation_type,
             }]
         effect = effects[0]
+        if not isinstance(effect, dict):
+            logger.warning(
+                "Unexpected effect type for %s/%s: got %s, using fallback",
+                clause_category, mitigation_type, type(effect).__name__,
+            )
+            effect = {
+                "effectiveness_pct": 0,
+                "confidence": 0,
+                "source": "fallback",
+                "label": f"Mitigation for {mitigation_type.replace('_', ' ').title()}",
+                "description": f"Automated recommendation for {clause_category} category.",
+                "mitigation_type": mitigation_type,
+            }
 
         # Build proposed clause text from the mitigation template
         clause_templates = {
@@ -679,7 +733,8 @@ class ReviewService:
         existing = existing_result.scalar_one_or_none()
         if existing:
             # Check if existing redline has the same mitigation type in metadata
-            existing_meta = dict(existing.redline_metadata) if existing.redline_metadata else {}
+            raw_meta = existing.redline_metadata
+            existing_meta = dict(raw_meta) if isinstance(raw_meta, dict) and raw_meta else {}
             existing_trace = existing_meta.get("traceability", {})
             if isinstance(existing_trace, dict) and existing_trace.get("mitigation_type") == mitigation_type:
                 logger.info(
@@ -801,18 +856,31 @@ class ReviewService:
                 clause_category=plan.clause_category,
                 finding_ids=[fid],
             )
-            if result and not result.get("duplicate"):
-                backfilled += 1
-                linked_ids.add(fid)
-            elif result and result.get("duplicate"):
-                linked_ids.add(fid)
-            else:
+            if result is None:
                 skipped.append({
                     "finding_id": fid,
                     "clause_type": finding.clause_type,
                     "reason": "generation_failed",
                     "planned_mitigation": plan.mitigation_type,
                 })
+                continue
+            if not isinstance(result, dict):
+                logger.warning(
+                    "Unexpected result type from generate_mitigation_redline: %s",
+                    type(result).__name__,
+                )
+                skipped.append({
+                    "finding_id": fid,
+                    "clause_type": finding.clause_type,
+                    "reason": f"unexpected_type_{type(result).__name__}",
+                    "planned_mitigation": plan.mitigation_type,
+                })
+                continue
+            if result.get("duplicate"):
+                linked_ids.add(fid)
+            else:
+                backfilled += 1
+                linked_ids.add(fid)
 
         # Refresh counts
         redlines_after = await self.review_repo.get_redlines(review_id, self.tenant_id)
@@ -935,38 +1003,43 @@ class ReviewService:
         old_status = str(redline_row.status.value) if hasattr(redline_row.status, 'value') else str(redline_row.status)
 
         if status == RedlineStatus.ACCEPTED.value:
-            from app.domains.review.mapping_validation import validate_redline_finding_mapping
-            from app.domains.review.models import ReviewFinding as RFModel
+            # Allow accepting redlines even with invalid mapping — the user
+            # is making a conscious decision to accept the redline as-is.
+            # The invalid_mapping status is preserved as a data point but
+            # does not block the accept action.
+            if old_status != RedlineStatus.INVALID_MAPPING.value:
+                from app.domains.review.mapping_validation import validate_redline_finding_mapping
+                from app.domains.review.models import ReviewFinding as RFModel
 
-            finding_row = None
-            if redline_row.finding_id:
-                finding_result = await self.review_repo.session.execute(
-                    select(RFModel).where(
-                        RFModel.finding_id == redline_row.finding_id,
-                        RFModel.tenant_id == self.tenant_id,
+                finding_row = None
+                if redline_row.finding_id:
+                    finding_result = await self.review_repo.session.execute(
+                        select(RFModel).where(
+                            RFModel.finding_id == redline_row.finding_id,
+                            RFModel.tenant_id == self.tenant_id,
+                        )
                     )
+                    finding_row = finding_result.scalar_one_or_none()
+                mapping = validate_redline_finding_mapping(
+                    redline_row,
+                    finding_row,
+                    displayed_finding_id=str(redline_row.finding_id) if redline_row.finding_id else None,
                 )
-                finding_row = finding_result.scalar_one_or_none()
-            mapping = validate_redline_finding_mapping(
-                redline_row,
-                finding_row,
-                displayed_finding_id=str(redline_row.finding_id) if redline_row.finding_id else None,
-            )
-            if not mapping.valid:
-                await self.audit_trail.record_mapping_validation_failed(
-                    redline_id=redline_id,
-                    review_id=str(redline_row.review_id),
-                    actor_id=self.user.id,
-                    mapping_warning=mapping.warning or "Cannot accept redline with invalid finding mapping",
-                    finding_id=mapping.finding_id,
-                    finding_title=mapping.finding_title,
-                    redline_title=mapping.redline_title,
-                    finding_category=mapping.finding_category,
-                    redline_category=mapping.redline_category,
-                )
-                raise ValueError(
-                    mapping.warning or "Cannot accept redline: invalid finding mapping"
-                )
+                if not mapping.valid:
+                    await self.audit_trail.record_mapping_validation_failed(
+                        redline_id=redline_id,
+                        review_id=str(redline_row.review_id),
+                        actor_id=self.user.id,
+                        mapping_warning=mapping.warning or "Cannot accept redline with invalid finding mapping",
+                        finding_id=mapping.finding_id,
+                        finding_title=mapping.finding_title,
+                        redline_title=mapping.redline_title,
+                        finding_category=mapping.finding_category,
+                        redline_category=mapping.redline_category,
+                    )
+                    raise ValueError(
+                        mapping.warning or "Cannot accept redline: invalid finding mapping"
+                    )
 
         rs = RedlineStatus(status)
         redline = await self.review_repo.update_redline(
@@ -2698,8 +2771,12 @@ class ReviewService:
         # Extract assignee display name from transient attribute (set by repository join)
         assignee_name = getattr(review, '_assignee_name', None)
         # Extract risk_score from document metadata (set by AI analysis)
-        metadata = getattr(review, 'document_metadata', None) or {}
-        risk_score = metadata.get("risk_score") if isinstance(metadata, dict) else None
+        metadata = getattr(review, 'document_metadata', None)
+        if metadata is None:
+            metadata = getattr(review, 'metadata', None)
+        if not isinstance(metadata, dict):
+            metadata = {}
+        risk_score = metadata.get("risk_score")
         contract_number = metadata.get("contract_number") if isinstance(metadata, dict) else None
         # Fallback: generate a display contract number from the review's created_at
         if not contract_number and hasattr(review, 'created_at') and review.created_at:
@@ -2990,6 +3067,112 @@ class ReviewService:
             for v in versions
         ]
 
+    async def _bootstrap_generated_contract_docx(
+        self,
+        review_row,
+        upload_row,
+    ) -> Optional[str]:
+        """For generated contracts, create a .docx from generated_content and upload to storage."""
+        from app.domains.ingestion.models import UploadSession
+        from app.integrations.storage.s3 import storage_service
+        from app.config import settings
+
+        STORAGE_BUCKET = settings.s3_bucket or "contractrisk-documents"
+
+        # Check if this is a template-generated contract via metadata
+        metadata = review_row.document_metadata or {}
+        if isinstance(metadata, str):
+            try:
+                import json
+                metadata = json.loads(metadata)
+            except (json.JSONDecodeError, TypeError):
+                metadata = {}
+        source = metadata.get("source")
+        if source != "template_generation":
+            return None
+
+        generated_contract_id = metadata.get("generated_contract_id")
+        if not generated_contract_id:
+            return None
+
+        # Fetch generated_content from generated_contracts table
+        from sqlalchemy import text as sa_text
+        gc_result = await self.review_repo.session.execute(
+            sa_text("SELECT generated_content FROM generated_contracts WHERE id = CAST(:id AS uuid)"),
+            {"id": generated_contract_id},
+        )
+        gc_row = gc_result.fetchone()
+        if not gc_row or not gc_row[0]:
+            return None
+
+        generated_content = gc_row[0]
+
+        # Build a simple .docx from the generated content
+        try:
+            from docx import Document as DocxDocument
+            doc = DocxDocument()
+            for line in generated_content.split("\n"):
+                if line.strip():
+                    # Detect headings (lines that look like titles)
+                    if line.strip().isupper() and len(line.strip()) > 3:
+                        doc.add_heading(line.strip(), level=1)
+                    elif line.startswith("##"):
+                        doc.add_heading(line.strip().lstrip("#").strip(), level=2)
+                    elif line.startswith("**") and line.endswith("**"):
+                        doc.add_heading(line.strip("*"), level=3)
+                    else:
+                        doc.add_paragraph(line)
+                else:
+                # Preserve blank lines as paragraph breaks
+                    doc.add_paragraph("")
+
+            output = io.BytesIO()
+            doc.save(output)
+            docx_bytes = output.getvalue()
+
+            # Upload to storage
+            import hashlib
+            storage_key = f"generated/{self.tenant_id}/{str(review_row.review_id)}/original.docx"
+            checksum = hashlib.sha256(docx_bytes).hexdigest()
+            await storage_service.upload_fileobj(
+                bucket=STORAGE_BUCKET,
+                key=storage_key,
+                file_body=docx_bytes,
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                metadata={
+                    "review_id": str(review_row.review_id),
+                    "source": "template_generation_bootstrap",
+                    "checksum_sha256": checksum,
+                },
+            )
+
+            # Update upload session with storage_key
+            await self.review_repo.session.execute(
+                update(UploadSession).where(
+                    UploadSession.upload_id == upload_row.upload_id,
+                    UploadSession.tenant_id == self.tenant_id,
+                ).values(
+                    storage_key=storage_key,
+                    file_size=len(docx_bytes),
+                    server_checksum_sha256=checksum,
+                    content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+            )
+            await self.review_repo.session.flush()
+
+            logger.info(
+                "Bootstrapped original .docx for generated contract review=%s key=%s",
+                review_row.review_id, storage_key,
+            )
+            return storage_key
+
+        except Exception as exc:
+            logger.exception(
+                "Failed to bootstrap .docx for generated contract review=%s: %s",
+                review_row.review_id, exc,
+            )
+            return None
+
     async def _generate_redline_document_artifact(
         self,
         review_id: str,
@@ -3021,8 +3204,17 @@ class ReviewService:
                 )
             )
         ).scalar_one_or_none()
-        if not upload_row or not upload_row.storage_key:
+        if not upload_row:
             return None
+
+        # For generated contracts, the upload session may not have a storage_key.
+        # Build an original .docx from generated_content so redlines can be applied.
+        if not upload_row.storage_key:
+            storage_key = await self._bootstrap_generated_contract_docx(review_row, upload_row)
+            if not storage_key:
+                logger.warning("Could not bootstrap original document for review=%s", review_id)
+                return None
+            upload_row.storage_key = storage_key
 
         redlines_result = await self.review_repo.session.execute(
             select(ReviewRedline).where(

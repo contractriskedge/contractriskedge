@@ -563,6 +563,15 @@ export const reviewService = {
       "application/zip",
     ),
 
+  /** Download a document version (.docx) with auth headers */
+  downloadVersion: (reviewId: string, versionId: string, filename?: string) =>
+    api.downloadFile(
+      `/reviews/${reviewId}/versions/${versionId}/download`,
+      filename ||
+        `contract_${reviewId.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.docx`,
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ),
+
   /** Export tracked-changes DOCX with redlines as visual markup */
   exportTrackedChanges: (reviewId: string, versionId: string) =>
     api.downloadFile(

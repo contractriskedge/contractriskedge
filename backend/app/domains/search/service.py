@@ -23,6 +23,21 @@ logger = logging.getLogger(__name__)
 
 _ENTITY_ID_PREFIX_RE = re.compile(r"^(ilike-|finding-|obligation-)")
 
+# Match findings by their text OR by parent contract identity (filename, number, vendor).
+_FINDING_SEARCH_JOIN = """
+    FROM review_findings f
+    JOIN contract_reviews cr ON cr.review_id = f.review_id AND cr.tenant_id = f.tenant_id
+    LEFT JOIN upload_sessions us ON us.upload_id = cr.upload_id
+"""
+_FINDING_SEARCH_MATCH = """
+    (f.title ILIKE :query OR f.description ILIKE :query OR f.recommendation ILIKE :query
+     OR cr.metadata->>'name' ILIKE :query
+     OR cr.metadata->>'contract_number' ILIKE :query
+     OR cr.metadata->>'vendor' ILIKE :query
+     OR cr.review_number ILIKE :query
+     OR us.filename ILIKE :query)
+"""
+
 
 def _normalize_entity_id(raw: str) -> str:
     """Strip synthetic search result prefixes before persisting click IDs."""
@@ -148,10 +163,9 @@ class SearchService:
                        f.resolution, f.page_numbers, f.created_at,
                        cr.metadata->>'name' as contract_name,
                        cr.metadata->>'contract_number' as contract_number
-                FROM review_findings f
-                JOIN contract_reviews cr ON cr.review_id = f.review_id AND cr.tenant_id = f.tenant_id
+                {_FINDING_SEARCH_JOIN}
                 WHERE {where}
-                  AND (f.title ILIKE :query OR f.description ILIKE :query OR f.recommendation ILIKE :query)
+                  AND {_FINDING_SEARCH_MATCH}
                 ORDER BY
                     CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
                     f.created_at DESC
@@ -163,9 +177,10 @@ class SearchService:
 
             # Count
             count_sql = sa_text(f"""
-                SELECT COUNT(*)::int FROM review_findings f
+                SELECT COUNT(*)::int
+                {_FINDING_SEARCH_JOIN}
                 WHERE {where}
-                  AND (f.title ILIKE :query OR f.description ILIKE :query OR f.recommendation ILIKE :query)
+                  AND {_FINDING_SEARCH_MATCH}
             """)
             count_result = await self.session.execute(count_sql, {k: v for k, v in bind.items() if k != "limit" and k != "offset"})
             finding_total = count_result.scalar() or 0
@@ -504,9 +519,10 @@ class SearchService:
 
         # Count
         count_sql = sa_text(f"""
-            SELECT COUNT(*)::int FROM review_findings f
+            SELECT COUNT(*)::int
+            {_FINDING_SEARCH_JOIN}
             WHERE {where}
-              AND (f.title ILIKE :query OR f.description ILIKE :query OR f.recommendation ILIKE :query)
+              AND {_FINDING_SEARCH_MATCH}
         """)
         result = await self.session.execute(count_sql, bind)
         total = result.scalar() or 0
@@ -517,9 +533,9 @@ class SearchService:
             SELECT f.finding_id, f.review_id, f.severity, f.clause_type,
                    f.title, f.description, f.recommendation, f.confidence,
                    f.resolution, f.page_numbers, f.created_at
-            FROM review_findings f
+            {_FINDING_SEARCH_JOIN}
             WHERE {where}
-              AND (f.title ILIKE :query OR f.description ILIKE :query OR f.recommendation ILIKE :query)
+              AND {_FINDING_SEARCH_MATCH}
             ORDER BY
                 CASE f.severity
                     WHEN 'critical' THEN 1 WHEN 'high' THEN 2

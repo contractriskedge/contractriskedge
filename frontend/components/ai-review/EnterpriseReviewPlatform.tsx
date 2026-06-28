@@ -46,6 +46,7 @@ import { VersionsSection } from "./VersionsSection";
 import { RiskReductionSection } from "./RiskReductionSection";
 import { ObligationsSection } from "./ObligationsSection";
 import { ReviewMoreActionsMenu } from "./ReviewMoreActionsMenu";
+import { AnalysisPipelineBanner } from "@/components/review/AnalysisPipelineBanner";
 import { useReviewRedlinesData, useVersions, useAuditTrailEvents, useSubmitReviewDecision } from "./hooks";
 import { reviewService } from "@/services/api/reviews";
 import { obligationsService } from "@/services/api/obligations";
@@ -553,6 +554,12 @@ function EnterpriseReviewPlatformInner() {
       {locateToast && (
         <div className="mx-4 mt-1 px-3 py-1.5 rounded-lg border border-navy-200 bg-navy-50 text-[10px] font-medium text-navy-800 dark:border-navy-600 dark:bg-navy-800 dark:text-navy-100 shadow-sm z-30">
           {locateToast}
+        </div>
+      )}
+
+      {selectedReviewId && (
+        <div className="mx-4 mt-2">
+          <AnalysisPipelineBanner reviewId={selectedReviewId} />
         </div>
       )}
 
