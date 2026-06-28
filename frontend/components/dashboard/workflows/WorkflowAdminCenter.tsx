@@ -12,6 +12,7 @@ import { WorkflowPackDetailDrawer } from "./WorkflowPackDetailDrawer";
 import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
 import { WorkflowDesigner } from "./WorkflowDesigner";
 import { RuleBuilder } from "./RuleBuilder";
+import { WorkflowSimulator } from "./WorkflowSimulator";
 
 export function WorkflowAdminCenter() {
   const [search, setSearch] = useState("");
@@ -21,6 +22,7 @@ export function WorkflowAdminCenter() {
   const [selectedPackId, setSelectedPackId] = useState<string | null>(null);
   const [designerPackId, setDesignerPackId] = useState<string | null>(null);
   const [ruleBuilderOpen, setRuleBuilderOpen] = useState(false);
+  const [simulatorOpen, setSimulatorOpen] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
 
   const { data, isLoading, error, refetch } = useWorkflowPacks({
@@ -73,6 +75,22 @@ export function WorkflowAdminCenter() {
           }}
           onBack={() => setRuleBuilderOpen(false)}
         />
+      </div>
+    );
+  }
+
+  // If Simulator is open, show it
+  if (simulatorOpen) {
+    return (
+      <div className="space-y-4">
+        <button
+          onClick={() => setSimulatorOpen(false)}
+          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Workflow Packs
+        </button>
+        <WorkflowSimulator onBack={() => setSimulatorOpen(false)} />
       </div>
     );
   }
