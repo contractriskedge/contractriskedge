@@ -9,9 +9,25 @@
 
 ## Design Principle
 
-Administrators should never have to edit JSON or think about database tables. Every workflow operation — create, edit, simulate, validate, publish, version, compare, archive, and monitor — should be achievable through the UI.
+Administrators should never have to edit JSON or think about database tables. Every workflow operation — create, edit, simulate, validate, publish, version, compare, import, export, archive, and monitor — should be achievable through the UI.
 
 **No drag-and-drop canvas, no BPMN editor, no fancy animations.** Large enterprise products use structured form-based designers because they're easier to validate, version, diff, and maintain.
+
+---
+
+## Definition of Done
+
+Sprint 33.2 is complete only if:
+
+- [ ] An administrator can create a workflow without editing JSON.
+- [ ] A workflow can be validated before publishing.
+- [ ] A workflow can be simulated with sample contract data.
+- [ ] A workflow can be versioned, compared, and published.
+- [ ] Publishing performs validation and impact analysis.
+- [ ] Workflow usage metrics are visible on the dashboard.
+- [ ] Workflow execution data is available through the dashboard.
+- [ ] All features respect tenant isolation and RBAC.
+- [ ] End-to-end integration test passes using a real contract.
 
 ---
 
@@ -66,7 +82,7 @@ Browse, search, filter, clone, and manage workflow packs.
 - Clone (create tenant copy of built-in or existing pack)
 - Duplicate (copy within same tenant)
 - Export (JSON/YAML for cross-environment migration)
-- Import (validate before importing)
+- Import (validate before importing — rejects broken packs)
 - Archive / Restore
 - Favorite (⭐)
 
@@ -125,6 +141,14 @@ A summary page for each workflow pack, similar to Contract Details. Becomes the 
 │  • Standard NDA (v2)                                        │
 │  • International NDA (v3)                                    │
 │  • Employee NDA (v1)                                        │
+│                                                             │
+│  ── Dependencies ─────────────────────────────────────────  │
+│  Templates using this workflow:  12                          │
+│  Contracts currently running:    47                          │
+│  Contract types:                  NDA, MSA, SOW              │
+│  Default for template:           Standard NDA               │
+│  Referenced rules:               8 (4 routing, 2 escalation) │
+│  Referenced actions:             3 (approve, notify, email)  │
 │                                                             │
 │  ── Timeline ─────────────────────────────────────────────  │
 │  06-28  JSmith  Published v3                                │
@@ -281,6 +305,14 @@ Visual condition builder that generates JSON Logic automatically. Supports neste
 - AI: Findings Count, Top Risk
 - User: Role, Department
 
+**Available functions:**
+- `TODAY()` — current date
+- `BUSINESS_DAYS(start, end)` — business day count between dates
+- `IS_EMPTY(value)` — true if null or empty string
+- `LENGTH(value)` — string length
+- `LOWER(value)` / `UPPER(value)` — case conversion
+- `EXISTS(path)` — true if a nested field exists in context
+
 ---
 
 ## Week 2 Deliverables
@@ -322,6 +354,14 @@ One of the flagship features. Input contract metadata → see exact approval pat
 │  Stage 4: Finalize                 Auto    0.1s             │
 │                                                             │
 │  ⏱ Estimated: 50 business hours (US Calendar)               │
+│                                                             │
+│  ── Execution Timeline ───────────────────────────────────  │
+│  Stage 1: Intake                    Auto    ~0.1s           │
+│  Stage 2: AI Analysis               Auto    ~2m             │
+│  Stage 3: Legal Review              ⚡ 48h  Jun 29 - Jul 1  │
+│  Stage 4: Finalize                  Auto    ~0.1s           │
+│  ────────────────────────────────────────────────────────   │
+│  Expected completion:  Jul 1 (50 business hours)            │
 │                                                             │
 │  ── Why this route? ─────────────────────────────────────  │
 │  ✅ Rule 1: Risk 92 > 80 AND Country = Germany → VP Legal   │
@@ -429,12 +469,21 @@ Actionable operational metrics, not just charts.
 │  2. Legal Review    (avg 28.4h · 8.2% breach rate)          │
 │  3. Security Review (avg 6.1h  · 3.1% breach rate)          │
 │                                                             │
-│  📈 Most Used Workflows                                     │
-│  1. NDA Review             1,234 runs   48h avg             │
-│  2. Procurement            892 runs     72h avg             │
-│  3. Legal Review           567 runs     96h avg             │
-│                                                             │
-│  📉 Trends (7-day rolling)                                  │
+│  📈 Most Used Workflows
+│  1. NDA Review             1,234 runs   48h avg
+│  2. Procurement            892 runs     72h avg
+│  3. Legal Review           567 runs     96h avg
+│
+│  📋 Workflow Comparison
+│  ┌──────────┬─────────┬──────────┬─────────────┬──────────┐
+│  │ Workflow │ Running │ Avg Time │ SLA Breaches│ Rejected │
+│  ├──────────┼─────────┼──────────┼─────────────┼──────────┤
+│  │ NDA      │ 22      │ 48h      │ 3.2%        │ 8.1%     │
+│  │ Procure  │ 15      │ 72h      │ 5.1%        │ 12.3%    │
+│  │ Legal    │ 10      │ 96h      │ 8.2%        │ 15.7%    │
+│  └──────────┴─────────┴──────────┴─────────────┴──────────┘
+│
+│  📉 Trends (7-day rolling)
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │  Completion Time                                     │   │
 │  │  ▁▃▄▆▇▆▅▄▃▂▁▁▂▃▄▅▆▇▆▅▄▃▂▁   Current: 52.3h         │   │
