@@ -14,6 +14,8 @@ import { WorkflowDesigner } from "./WorkflowDesigner";
 import { RuleBuilder } from "./RuleBuilder";
 import { WorkflowSimulator } from "./WorkflowSimulator";
 import { PublishingFlow } from "./PublishingFlow";
+import { VersionComparison } from "./VersionComparison";
+import { UsageDashboard } from "./UsageDashboard";
 
 export function WorkflowAdminCenter() {
   const [search, setSearch] = useState("");
@@ -25,6 +27,8 @@ export function WorkflowAdminCenter() {
   const [ruleBuilderOpen, setRuleBuilderOpen] = useState(false);
   const [simulatorOpen, setSimulatorOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [dashboardOpen, setDashboardOpen] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
 
   const { data, isLoading, error, refetch } = useWorkflowPacks({
@@ -121,6 +125,38 @@ export function WorkflowAdminCenter() {
           }}
           onBack={() => setPublishOpen(false)}
         />
+      </div>
+    );
+  }
+
+  // If Version Comparison is open, show it
+  if (compareOpen) {
+    return (
+      <div className="space-y-4">
+        <button
+          onClick={() => setCompareOpen(false)}
+          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Workflow Packs
+        </button>
+        <VersionComparison onBack={() => setCompareOpen(false)} />
+      </div>
+    );
+  }
+
+  // If Usage Dashboard is open, show it
+  if (dashboardOpen) {
+    return (
+      <div className="space-y-4">
+        <button
+          onClick={() => setDashboardOpen(false)}
+          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Workflow Packs
+        </button>
+        <UsageDashboard onBack={() => setDashboardOpen(false)} />
       </div>
     );
   }
