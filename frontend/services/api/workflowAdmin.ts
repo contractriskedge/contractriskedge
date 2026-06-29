@@ -21,11 +21,13 @@ export interface WorkflowPackSummary {
   health_score: number;
   usage_count: number;
   running_instances: number;
+  stage_count: number;
+  warning_count: number;
   last_published: string | null;
   last_published_by: string | null;
+  owner: string | null;
   created_at: string;
   updated_at: string;
-  warning_count: number;
 }
 
 export interface WorkflowVersionSummary {

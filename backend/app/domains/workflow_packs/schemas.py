@@ -178,8 +178,13 @@ class WorkflowPackSummary(BaseModel):
     region: Optional[str] = None
     is_active: bool = True
     version: int = 1
+    health_score: int = 100
     usage_count: int = 0
+    running_instances: int = 0
     stage_count: int = 0
+    warning_count: int = 0
+    last_published: Optional[datetime] = None
+    owner: Optional[str] = None
     created_at: datetime
 
 
@@ -214,6 +219,12 @@ BUILTIN_PACKS: dict[str, dict[str, Any]] = {
         "name": "Procurement Contract Review",
         "description": "Standard workflow for procurement contract review with approval chains for value thresholds",
         "category": WorkflowPackCategory.PROCUREMENT,
+        "health_score": 96,
+        "usage_count": 142,
+        "running_instances": 7,
+        "warning_count": 0,
+        "last_published": "2026-06-25T10:30:00Z",
+        "owner": "Sarah Chen",
         "stages": [
             {"stage_type": "ingestion", "name": "Document Ingestion", "order": 1, "on_entry": ["auto_proceed"]},
             {"stage_type": "ai_analysis", "name": "AI Risk Analysis", "order": 2, "on_entry": ["auto_proceed"]},
@@ -240,6 +251,12 @@ BUILTIN_PACKS: dict[str, dict[str, Any]] = {
         "description": "HIPAA-compliant contract review workflow with mandatory compliance checks",
         "category": WorkflowPackCategory.HEALTHCARE,
         "industry": "healthcare",
+        "health_score": 88,
+        "usage_count": 89,
+        "running_instances": 3,
+        "warning_count": 2,
+        "last_published": "2026-06-22T14:00:00Z",
+        "owner": "Dr. Michael Torres",
         "stages": [
             {"stage_type": "ingestion", "name": "Document Ingestion", "order": 1, "on_entry": ["auto_proceed"]},
             {"stage_type": "ai_analysis", "name": "AI Risk + HIPAA Analysis", "order": 2, "on_entry": ["auto_proceed"]},
@@ -263,6 +280,12 @@ BUILTIN_PACKS: dict[str, dict[str, Any]] = {
         "name": "SaaS Vendor Review",
         "description": "Standard workflow for SaaS vendor contract review with SLA and data protection focus",
         "category": WorkflowPackCategory.SAAS_VENDOR,
+        "health_score": 72,
+        "usage_count": 56,
+        "running_instances": 1,
+        "warning_count": 3,
+        "last_published": "2026-06-18T09:15:00Z",
+        "owner": "Alex Nakamura",
         "stages": [
             {"stage_type": "ingestion", "name": "Document Ingestion", "order": 1, "on_entry": ["auto_proceed"]},
             {"stage_type": "ai_analysis", "name": "AI Risk Analysis", "order": 2, "on_entry": ["auto_proceed"]},
@@ -281,6 +304,12 @@ BUILTIN_PACKS: dict[str, dict[str, Any]] = {
         "name": "Finance & Legal Review",
         "description": "SOX-compliant contract review with financial controls and legal approval chains",
         "category": WorkflowPackCategory.FINANCE_LEGAL,
+        "health_score": 94,
+        "usage_count": 203,
+        "running_instances": 12,
+        "warning_count": 0,
+        "last_published": "2026-06-27T16:45:00Z",
+        "owner": "James O'Brien",
         "stages": [
             {"stage_type": "ingestion", "name": "Document Ingestion", "order": 1, "on_entry": ["auto_proceed"]},
             {"stage_type": "ai_analysis", "name": "AI Risk + SOX Analysis", "order": 2, "on_entry": ["auto_proceed"]},

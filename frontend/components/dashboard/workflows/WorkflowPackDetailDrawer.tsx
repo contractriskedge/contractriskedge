@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import {
   X, Workflow, Edit, Play, CheckCircle, Clock, AlertTriangle,
   FileJson, Download, Copy, Archive, BarChart3, GitCompare,
-  Layers, Users, FileText, Activity,
+  Layers, Users, FileText, Activity, TrendingUp,
 } from "lucide-react";
 import { LoadingSkeleton } from "@/components/shared/LoadingSkeleton";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -273,10 +273,52 @@ function VersionsTab({ packId, versions }: { packId: string; versions: NonNullab
 
 function AnalyticsTab({ packId }: { packId: string }) {
   return (
-    <div className="text-center py-12 text-gray-500">
-      <BarChart3 className="w-12 h-12 mx-auto mb-3 text-gray-600" />
-      <p>Analytics data will be displayed here</p>
-      <p className="text-sm">Track completion times, rejection rates, SLA breaches, and trends</p>
+    <div className="space-y-6">
+      {/* Metrics grid showing what will be tracked */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="p-4 bg-navy-800/50 border border-navy-700 rounded-xl text-center">
+          <div className="text-2xl font-bold text-gray-400">—</div>
+          <div className="text-xs text-gray-500 mt-1">Total Executions</div>
+        </div>
+        <div className="p-4 bg-navy-800/50 border border-navy-700 rounded-xl text-center">
+          <div className="text-2xl font-bold text-gray-400">—</div>
+          <div className="text-xs text-gray-500 mt-1">Avg Approval Time</div>
+        </div>
+        <div className="p-4 bg-navy-800/50 border border-navy-700 rounded-xl text-center">
+          <div className="text-2xl font-bold text-gray-400">—</div>
+          <div className="text-xs text-gray-500 mt-1">Approval Rate</div>
+        </div>
+        <div className="p-4 bg-navy-800/50 border border-navy-700 rounded-xl text-center">
+          <div className="text-2xl font-bold text-gray-400">—</div>
+          <div className="text-xs text-gray-500 mt-1">SLA Breaches</div>
+        </div>
+        <div className="p-4 bg-navy-800/50 border border-navy-700 rounded-xl text-center">
+          <div className="text-2xl font-bold text-gray-400">—</div>
+          <div className="text-xs text-gray-500 mt-1">Rejection Rate</div>
+        </div>
+        <div className="p-4 bg-navy-800/50 border border-navy-700 rounded-xl text-center">
+          <div className="text-2xl font-bold text-gray-400">—</div>
+          <div className="text-xs text-gray-500 mt-1">Bottleneck Stage</div>
+        </div>
+      </div>
+
+      {/* Trend chart placeholder */}
+      <div className="p-6 bg-navy-800/50 border border-navy-700 rounded-xl text-center">
+        <div className="flex items-center justify-center gap-2 mb-3">
+          <TrendingUp className="w-5 h-5 text-gray-600" />
+          <span className="text-sm font-medium text-gray-500">Execution Trends</span>
+        </div>
+        <div className="h-32 flex items-center justify-center border border-dashed border-navy-600 rounded-lg">
+          <BarChart3 className="w-8 h-8 text-gray-700" />
+        </div>
+      </div>
+
+      {/* Empty state */}
+      <div className="text-center py-6 border border-dashed border-navy-700 rounded-xl">
+        <BarChart3 className="w-10 h-10 mx-auto mb-2 text-gray-600" />
+        <p className="text-sm text-gray-400">No execution data yet</p>
+        <p className="text-xs text-gray-500 mt-1">Publish and execute this workflow to begin collecting analytics.</p>
+      </div>
     </div>
   );
 }

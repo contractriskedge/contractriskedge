@@ -46,6 +46,13 @@ class WorkflowPackService:
                 if category and cat != category:
                     continue
                 stages = pack_def.get("stages", [])
+                last_published_str = pack_def.get("last_published")
+                last_published = None
+                if last_published_str:
+                    try:
+                        last_published = datetime.fromisoformat(last_published_str.replace("Z", "+00:00"))
+                    except (ValueError, TypeError):
+                        pass
                 packs.append(WorkflowPackSummary(
                     pack_id=pack_id,
                     name=pack_def["name"],
@@ -55,8 +62,13 @@ class WorkflowPackService:
                     region=pack_def.get("region"),
                     is_active=True,
                     version=1,
-                    usage_count=0,
+                    health_score=pack_def.get("health_score", 100),
+                    usage_count=pack_def.get("usage_count", 0),
+                    running_instances=pack_def.get("running_instances", 0),
                     stage_count=len(stages),
+                    warning_count=pack_def.get("warning_count", 0),
+                    last_published=last_published,
+                    owner=pack_def.get("owner"),
                     created_at=datetime.now(timezone.utc),
                 ))
 

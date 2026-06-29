@@ -32,6 +32,18 @@ function healthScoreColor(score: number): string {
   return "text-red-600 dark:text-red-400";
 }
 
+function healthScoreLabel(score: number): string {
+  if (score >= 90) return "Healthy";
+  if (score >= 70) return "Warning";
+  return "Critical";
+}
+
+function healthScoreBg(score: number): string {
+  if (score >= 90) return "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800";
+  if (score >= 70) return "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800";
+  return "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800";
+}
+
 function formatRelativeTime(dateStr: string): string {
   const now = Date.now();
   const date = new Date(dateStr).getTime();
@@ -130,11 +142,30 @@ export function WorkflowPackCard({ pack, viewMode, onClick }: Props) {
         </div>
       </div>
 
-      {/* Health & Status Row */}
-      <div className="flex items-center gap-2 mb-3">
-        <span className={`text-lg font-bold ${healthColor}`}>{pack.health_score}%</span>
+      {/* Health Score Card */}
+      <div className={`rounded-lg border p-2.5 mb-3 ${healthScoreBg(pack.health_score)}`}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className={`text-lg font-bold ${healthColor}`}>{pack.health_score}</span>
+            <span className="text-[10px] opacity-75">/ 100</span>
+          </div>
+          <div className="text-right">
+            <div className={`text-[10px] font-semibold ${healthColor}`}>{healthScoreLabel(pack.health_score)}</div>
+            {pack.warning_count > 0 && (
+              <div className="flex items-center gap-0.5 text-[9px] text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="w-2.5 h-2.5" />
+                {pack.warning_count} warning{pack.warning_count !== 1 ? "s" : ""}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Status + Version Row */}
+      <div className="flex items-center gap-2 mb-2.5">
         <StatusBadge variant="primary" status={pack.status} />
         <span className="text-[10px] text-gray-400">v{pack.version}</span>
+        {pack.owner && <span className="text-[10px] text-gray-400 ml-auto">{pack.owner}</span>}
       </div>
 
       {/* Stats Grid */}
@@ -145,25 +176,16 @@ export function WorkflowPackCard({ pack, viewMode, onClick }: Props) {
         </div>
         <div className="flex items-center gap-1.5 text-gray-500">
           <Layers className="w-3 h-3" />
-          <span>Used {pack.usage_count}x</span>
+          <span>{pack.stage_count || 0} stages</span>
         </div>
-      </div>
-
-      {/* Warnings */}
-      {pack.warning_count > 0 && (
-        <div className="flex items-center gap-1 mt-3 text-[10px] text-amber-600 dark:text-amber-400">
-          <AlertTriangle className="w-3 h-3" />
-          <span>{pack.warning_count} warning{pack.warning_count !== 1 ? "s" : ""}</span>
-        </div>
-      )}
-
-      {/* Running instances indicator */}
-      {pack.running_instances > 0 && (
-        <div className="mt-2 pt-2 border-t border-gray-100 dark:border-navy-700 flex items-center gap-1.5 text-[10px] text-blue-600 dark:text-blue-400">
+        <div className="flex items-center gap-1.5 text-gray-500">
           <Activity className="w-3 h-3" />
           <span>{pack.running_instances} running</span>
         </div>
-      )}
+        <div className="flex items-center gap-1.5 text-gray-500">
+          <span>Used {pack.usage_count}x</span>
+        </div>
+      </div>
 
       {/* Hover actions */}
       <div className="absolute top-12 right-2 hidden group-hover:flex flex-col gap-0.5 bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-600 rounded-lg p-1 shadow-lg z-10">
