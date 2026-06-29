@@ -301,12 +301,12 @@ export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSelectedRuleIdx(i); }}
               className={`w-full p-3 rounded-lg border text-left transition-colors cursor-pointer ${
                 i === selectedRuleIdx
-                  ? embedded ? "bg-white border-navy-400 ring-1 ring-navy-200" : "bg-navy-700 border-gold-500/50"
-                  : embedded ? "bg-gray-50 border-gray-200 hover:border-gray-300" : "bg-navy-800/50 border-navy-700 hover:border-navy-600"
+                  ? embedded ? "bg-white border-navy-400 ring-1 ring-navy-200" : "bg-white border-navy-400 shadow-sm ring-1 ring-navy-200"
+                  : embedded ? "bg-gray-50 border-gray-200 hover:border-gray-300" : "bg-white border-gray-200 hover:border-gray-300 hover:shadow-sm"
               }`}
             >
               <div className="flex items-center justify-between">
-                <span className={`text-sm font-medium ${embedded ? "text-gray-900" : "text-gray-200"}`}>{rule.name}</span>
+                <span className={`text-sm font-medium ${embedded ? "text-gray-900" : "text-gray-900"}`}>{rule.name}</span>
                 <span className="text-xs text-gray-500">#{rule.priority}</span>
               </div>
               <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
@@ -330,18 +330,16 @@ export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
           className={`w-full flex items-center justify-center gap-2 p-3 border border-dashed rounded-lg text-sm transition-colors ${
             embedded
               ? "border-gray-300 text-gray-500 hover:text-gray-700 hover:border-gray-400"
-              : "border-navy-600 text-gray-400 hover:text-gray-200 hover:border-navy-500"
+              : "border-gray-300 text-gray-500 hover:text-gray-700 hover:border-gray-400"
           }`}
         >
           <Plus className="w-4 h-4" /> Add Rule
         </button>
 
         {/* Validation Summary */}
-        <div className={`p-3 border rounded-lg space-y-1 ${
-          embedded ? "bg-gray-50 border-gray-200" : "bg-navy-800/50 border-navy-700"
-        }`}>
+        <div className="p-3 border border-gray-200 rounded-lg bg-gray-50 space-y-1">
           <div className="flex items-center justify-between text-sm">
-            <span className={embedded ? "text-gray-500" : "text-gray-400"}>Validation</span>
+            <span className="text-gray-500">Validation</span>
             <span className={errors.length === 0 ? "text-emerald-600" : "text-red-600"}>
               {errors.length === 0 ? "Valid" : `${errors.length} issue${errors.length > 1 ? "s" : ""}`}
             </span>
@@ -356,13 +354,13 @@ export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
         {/* Save / Back — hidden in embedded drawer mode */}
         {!embedded && (
         <div className="flex gap-2">
-          <button onClick={onBack} className="flex-1 px-4 py-2 bg-navy-800 text-gray-300 rounded-lg hover:bg-navy-700">
+          <button onClick={onBack} className="flex-1 px-4 py-2 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
             Back
           </button>
           <button
             onClick={() => onSave(rules)}
             disabled={errors.length > 0}
-            className="flex-1 px-4 py-2 bg-gold-500 text-navy-900 rounded-lg hover:bg-gold-400 font-medium disabled:opacity-50"
+            className="flex-1 px-4 py-2 text-xs font-medium rounded-lg bg-navy-700 text-white hover:bg-navy-800 disabled:opacity-50 transition-colors shadow-sm"
           >
             Save Rules
           </button>
@@ -380,21 +378,21 @@ export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
                 type="text"
                 value={selectedRule.name}
                 onChange={(e) => updateRule(selectedRuleIdx, { name: e.target.value })}
-                className="text-lg font-semibold bg-transparent text-gray-100 border-b border-navy-600 focus:border-gold-500 outline-none pb-1"
+                className="text-lg font-semibold bg-transparent text-gray-900 border-b border-gray-300 focus:border-navy-400 outline-none pb-1"
               />
               <span className="text-sm text-gray-500">Priority:</span>
               <input
                 type="number"
                 value={selectedRule.priority}
                 onChange={(e) => updateRule(selectedRuleIdx, { priority: parseInt(e.target.value) || 1 })}
-                className="w-16 px-2 py-1 bg-navy-800 border border-navy-600 rounded text-gray-100 text-sm text-center"
+                className="w-16 px-2 py-1 bg-white border border-gray-200 rounded text-gray-900 text-sm text-center"
                 min={1}
               />
             </div>
 
             {/* Conditions */}
-            <div className="p-4 bg-navy-800/30 border border-navy-700 rounded-xl">
-              <h3 className="text-sm font-medium text-gray-300 mb-3">IF</h3>
+            <div className="p-4 bg-white border border-gray-200 rounded-xl shadow-sm">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">IF</h3>
               <ConditionGroupEditor
                 group={selectedRule.condition}
                 depth={0}
@@ -408,15 +406,15 @@ export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
             </div>
 
             {/* THEN Actions */}
-            <div className="p-4 bg-navy-800/30 border border-navy-700 rounded-xl">
-              <h3 className="text-sm font-medium text-gray-300 mb-3">THEN</h3>
+            <div className="p-4 bg-white border border-gray-200 rounded-xl shadow-sm">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">THEN</h3>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Assign to Role</label>
                   <select
                     value={selectedRule.assignee_role}
                     onChange={(e) => updateRule(selectedRuleIdx, { assignee_role: e.target.value })}
-                    className="w-full px-3 py-2 bg-navy-800 border border-navy-600 rounded-lg text-gray-100"
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm"
                   >
                     <option value="">Select role...</option>
                     <option value="legal_reviewer">Legal Reviewer</option>
@@ -436,7 +434,7 @@ export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
                   <select
                     value={selectedRule.approval_mode}
                     onChange={(e) => updateRule(selectedRuleIdx, { approval_mode: e.target.value })}
-                    className="w-full px-3 py-2 bg-navy-800 border border-navy-600 rounded-lg text-gray-100"
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm"
                   >
                     {APPROVAL_MODES.map((m) => (
                       <option key={m} value={m}>{m.replace(/_/g, " ")}</option>
@@ -448,7 +446,7 @@ export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
                   <select
                     value={selectedRule.resolution_strategy}
                     onChange={(e) => updateRule(selectedRuleIdx, { resolution_strategy: e.target.value })}
-                    className="w-full px-3 py-2 bg-navy-800 border border-navy-600 rounded-lg text-gray-100"
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm"
                   >
                     {RESOLUTION_STRATEGIES.map((s) => (
                       <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
@@ -461,7 +459,7 @@ export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
                     type="number"
                     value={selectedRule.sla_hours}
                     onChange={(e) => updateRule(selectedRuleIdx, { sla_hours: parseInt(e.target.value) || 0 })}
-                    className="w-full px-3 py-2 bg-navy-800 border border-navy-600 rounded-lg text-gray-100"
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm"
                     min={0}
                   />
                 </div>
@@ -470,12 +468,12 @@ export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
 
             {/* Assignment Preview */}
             {selectedRule.assignee_role && (
-              <div className="p-4 bg-navy-800/30 border border-navy-700 rounded-xl">
-                <h3 className="text-sm font-medium text-gray-300 mb-3">Assignment Preview</h3>
+              <div className="p-4 bg-white border border-gray-200 rounded-xl shadow-sm">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Assignment Preview</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-gray-400">Matched Role</span>
-                    <span className="text-gray-200 capitalize">{selectedRule.assignee_role.replace(/_/g, " ")}</span>
+                    <span className="text-gray-500">Matched Role</span>
+                    <span className="text-gray-900 font-medium capitalize">{selectedRule.assignee_role.replace(/_/g, " ")}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">Resolution Strategy</span>
@@ -494,9 +492,9 @@ export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
             )}
 
             {/* Live Explanation */}
-            <div className="p-4 bg-navy-800/30 border border-navy-700 rounded-xl">
-              <h3 className="text-sm font-medium text-gray-300 mb-3">Explanation</h3>
-              <div className="text-sm text-gray-400 space-y-1">
+            <div className="p-4 bg-white border border-gray-200 rounded-xl shadow-sm">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Explanation</h3>
+              <div className="text-sm text-gray-600 space-y-1">
                 <p>This rule applies when:</p>
                 <ul className="list-disc list-inside space-y-0.5">
                   {explainGroup(selectedRule.condition, AVAILABLE_FIELDS).map((line, i) => (
@@ -544,7 +542,7 @@ export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
                   value={testValues[field.name] ?? ""}
                   onChange={(e) => setTestValues({ ...testValues, [field.name]: e.target.value })}
                   placeholder={`Enter ${field.label.toLowerCase()}...`}
-                  className="w-full px-3 py-2 bg-navy-800 border border-navy-600 rounded-lg text-gray-100 text-sm placeholder-gray-600"
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm placeholder-gray-400"
                 />
               )}
             </div>
@@ -553,7 +551,7 @@ export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
 
         <button
           onClick={evaluateTest}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gold-500 text-navy-900 rounded-lg hover:bg-gold-400 font-medium"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs font-medium rounded-lg bg-navy-700 text-white hover:bg-navy-800 shadow-sm transition-colors"
         >
           <Play className="w-4 h-4" /> Evaluate
         </button>
@@ -561,23 +559,23 @@ export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
         {testResult && (
           <div className={`p-4 rounded-lg border ${
             testResult.matched
-              ? "bg-green-500/10 border-green-500/30"
-              : "bg-navy-800/50 border-navy-700"
+              ? "bg-emerald-50 border-emerald-200"
+              : "bg-gray-50 border-gray-200"
           }`}>
             <div className="flex items-center gap-2 mb-2">
               {testResult.matched
-                ? <CheckCircle className="w-5 h-5 text-green-400" />
+                ? <CheckCircle className="w-5 h-5 text-emerald-500" />
                 : <AlertTriangle className="w-5 h-5 text-gray-400" />
               }
-              <span className={testResult.matched ? "text-green-400 font-medium" : "text-gray-400"}>
+              <span className={testResult.matched ? "text-emerald-700 font-medium text-sm" : "text-gray-500 text-sm"}>
                 {testResult.matched ? "Rule matched" : "No match"}
               </span>
             </div>
             {testResult.matched && (
-              <div className="text-sm text-gray-300 space-y-1">
-                <p>Assigned: <span className="capitalize">{selectedRule?.assignee_role.replace(/_/g, " ")}</span></p>
-                <p>Mode: <span className="capitalize">{selectedRule?.approval_mode.replace(/_/g, " ")}</span></p>
-                <p>SLA: {selectedRule?.sla_hours} hours</p>
+              <div className="text-sm text-gray-600 space-y-1">
+                <p>Assigned: <span className="font-medium capitalize text-gray-900">{selectedRule?.assignee_role.replace(/_/g, " ")}</span></p>
+                <p>Mode: <span className="font-medium capitalize text-gray-900">{selectedRule?.approval_mode.replace(/_/g, " ")}</span></p>
+                <p>SLA: <span className="font-medium text-gray-900">{selectedRule?.sla_hours} hours</span></p>
               </div>
             )}
           </div>
@@ -587,7 +585,7 @@ export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
         {selectedRule && (
           <details className="text-xs text-gray-600">
             <summary className="cursor-pointer hover:text-gray-400">Generated JSON Logic</summary>
-            <pre className="mt-1 p-2 bg-navy-900 rounded overflow-x-auto">
+            <pre className="mt-1 p-2 bg-gray-100 rounded overflow-x-auto text-gray-800">
               {JSON.stringify(generateJsonLogic(selectedRule.condition), null, 2)}
             </pre>
           </details>
@@ -619,7 +617,7 @@ function ConditionGroupEditor({
   onRemoveCondition: (groupId: string, condId: string) => void;
 }) {
   return (
-    <div className={`space-y-2 ${depth > 0 ? "ml-4 pl-4 border-l-2 border-navy-600" : ""}`}>
+    <div className={`space-y-2 ${depth > 0 ? "ml-4 pl-4 border-l-2 border-gray-200" : ""}`}>
       {/* Combinator toggle */}
       {depth > 0 && (
         <div className="flex items-center gap-2 mb-2">
@@ -627,13 +625,13 @@ function ConditionGroupEditor({
             onClick={() => onUpdate({ ...group, combinator: group.combinator === "ALL" ? "ANY" : "ALL" })}
             className={`text-xs px-2 py-0.5 rounded font-medium ${
               group.combinator === "ALL"
-                ? "bg-blue-500/20 text-blue-300"
-                : "bg-purple-500/20 text-purple-300"
+                ? "bg-blue-100 text-blue-700"
+                : "bg-purple-100 text-purple-700"
             }`}
           >
             {group.combinator}
           </button>
-          <span className="text-xs text-gray-600">conditions</span>
+          <span className="text-xs text-gray-500">conditions</span>
         </div>
       )}
 
@@ -677,7 +675,7 @@ function ConditionGroupEditor({
             <select
               value={cond.field}
               onChange={(e) => onUpdateCondition(group.id, cond.id, { field: e.target.value, operator: "", value: "" })}
-              className="flex-1 min-w-[140px] px-2 py-1.5 bg-navy-800 border border-navy-600 rounded text-gray-100 text-sm"
+              className="flex-1 min-w-[140px] px-2 py-1.5 bg-white border border-gray-200 rounded text-gray-900 text-sm"
             >
               <option value="">Select field...</option>
               {fields.map((f) => (
@@ -688,7 +686,7 @@ function ConditionGroupEditor({
               <select
                 value={cond.operator}
                 onChange={(e) => onUpdateCondition(group.id, cond.id, { operator: e.target.value, value: "" })}
-                className="w-28 px-2 py-1.5 bg-navy-800 border border-navy-600 rounded text-gray-100 text-sm"
+                className="w-28 px-2 py-1.5 bg-white border border-gray-200 rounded text-gray-900 text-sm"
               >
                 <option value="">Op...</option>
                 {getOps().map((op) => (
@@ -700,7 +698,7 @@ function ConditionGroupEditor({
               <select
                 value={cond.value}
                 onChange={(e) => onUpdateCondition(group.id, cond.id, { value: e.target.value })}
-                className="flex-1 px-2 py-1.5 bg-navy-800 border border-navy-600 rounded text-gray-100 text-sm"
+                className="flex-1 px-2 py-1.5 bg-white border border-gray-200 rounded text-gray-900 text-sm"
               >
                 <option value="">Select value...</option>
                 {fieldDef.options.map((o) => (
@@ -714,12 +712,12 @@ function ConditionGroupEditor({
                 value={cond.value}
                 onChange={(e) => onUpdateCondition(group.id, cond.id, { value: e.target.value })}
                 placeholder="Value..."
-                className="flex-1 px-2 py-1.5 bg-navy-800 border border-navy-600 rounded text-gray-100 text-sm placeholder-gray-600"
+                className="flex-1 px-2 py-1.5 bg-white border border-gray-200 rounded text-gray-900 text-sm placeholder-gray-400"
               />
             )}
             <button
               onClick={() => onRemoveCondition(group.id, cond.id)}
-              className="p-1 text-gray-500 hover:text-red-400"
+              className="p-1 text-gray-400 hover:text-red-500"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -731,19 +729,19 @@ function ConditionGroupEditor({
       <div className="flex gap-2 pt-1">
         <button
           onClick={() => onAddCondition(group.id, group.combinator)}
-          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300"
+          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
         >
           <Plus className="w-3 h-3" /> Add condition
         </button>
         <button
           onClick={() => onAddGroup(group.id, "ALL")}
-          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300"
+          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
         >
           <Plus className="w-3 h-3" /> Add ALL group
         </button>
         <button
           onClick={() => onAddGroup(group.id, "ANY")}
-          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300"
+          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
         >
           <Plus className="w-3 h-3" /> Add ANY group
         </button>
