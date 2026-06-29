@@ -61,6 +61,7 @@ class WorkflowPackService:
                     industry=pack_def.get("industry"),
                     region=pack_def.get("region"),
                     is_active=True,
+                    status="published" if last_published else "draft",
                     version=1,
                     health_score=pack_def.get("health_score", 100),
                     usage_count=pack_def.get("usage_count", 0),

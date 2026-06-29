@@ -177,6 +177,7 @@ class WorkflowPackSummary(BaseModel):
     industry: Optional[str] = None
     region: Optional[str] = None
     is_active: bool = True
+    status: str = "draft"
     version: int = 1
     health_score: int = 100
     usage_count: int = 0
