@@ -1,8 +1,14 @@
 "use client";
 
-import React, { useState } from "react";
-import { Workflow, Plus, Search, LayoutGrid, List, ArrowLeft, Activity } from "lucide-react";
+import React, { useState, useMemo } from "react";
+import {
+  Workflow, Plus, Search, LayoutGrid, List, ArrowLeft, Activity,
+  RefreshCw, Download, Upload, Layers, CheckCircle, Clock,
+  TrendingUp, BarChart3, Filter,
+} from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { KpiCard } from "@/components/shared/KpiCard";
+import { LoadingSkeleton, CardSkeleton } from "@/components/shared/LoadingSkeleton";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { useWorkflowPacks } from "@/services/hooks/useWorkflowAdmin";
@@ -41,15 +47,27 @@ export function WorkflowAdminCenter() {
   const packs = data?.items ?? [];
   const total = data?.total ?? 0;
 
+  // Derived KPI data
+  const kpis = useMemo(() => {
+    const published = packs.filter((p) => p.status === "published").length;
+    const draft = packs.filter((p) => p.status === "draft").length;
+    const running = packs.reduce((sum, p) => sum + (p.running_instances || 0), 0);
+    const avgHealth = packs.length > 0
+      ? Math.round(packs.reduce((sum, p) => sum + (p.health_score || 0), 0) / packs.length)
+      : 0;
+    const mostUsed = packs.reduce((best, p) => (p.usage_count > (best?.usage_count || 0) ? p : best), packs[0]);
+    return { published, draft, running, avgHealth, mostUsed };
+  }, [packs]);
+
   // If Designer is open, show it instead of the library
   if (designerPackId) {
     return (
       <div className="space-y-4">
         <button
           onClick={() => setDesignerPackId(null)}
-          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200"
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft className="w-3.5 h-3.5" />
           Back to Workflow Packs
         </button>
         <WorkflowDesigner
@@ -70,9 +88,9 @@ export function WorkflowAdminCenter() {
       <div className="space-y-4">
         <button
           onClick={() => setRuleBuilderOpen(false)}
-          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200"
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft className="w-3.5 h-3.5" />
           Back to Workflow Packs
         </button>
         <RuleBuilder
@@ -92,9 +110,9 @@ export function WorkflowAdminCenter() {
       <div className="space-y-4">
         <button
           onClick={() => setSimulatorOpen(false)}
-          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200"
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft className="w-3.5 h-3.5" />
           Back to Workflow Packs
         </button>
         <WorkflowSimulator onBack={() => setSimulatorOpen(false)} />
@@ -108,9 +126,9 @@ export function WorkflowAdminCenter() {
       <div className="space-y-4">
         <button
           onClick={() => setPublishOpen(false)}
-          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200"
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft className="w-3.5 h-3.5" />
           Back to Workflow Packs
         </button>
         <PublishingFlow
@@ -136,9 +154,9 @@ export function WorkflowAdminCenter() {
       <div className="space-y-4">
         <button
           onClick={() => setCompareOpen(false)}
-          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200"
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft className="w-3.5 h-3.5" />
           Back to Workflow Packs
         </button>
         <VersionComparison onBack={() => setCompareOpen(false)} />
@@ -152,9 +170,9 @@ export function WorkflowAdminCenter() {
       <div className="space-y-4">
         <button
           onClick={() => setDashboardOpen(false)}
-          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200"
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft className="w-3.5 h-3.5" />
           Back to Workflow Packs
         </button>
         <UsageDashboard onBack={() => setDashboardOpen(false)} />
@@ -168,9 +186,9 @@ export function WorkflowAdminCenter() {
       <div className="space-y-4">
         <button
           onClick={() => setOperationsOpen(false)}
-          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200"
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft className="w-3.5 h-3.5" />
           Back to Workflow Packs
         </button>
         <WorkflowOperationsCenter onBack={() => setOperationsOpen(false)} />
@@ -179,47 +197,104 @@ export function WorkflowAdminCenter() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 pb-24">
+      {/* Header */}
       <PageHeader
         title="Workflow Administration"
         description="Configure, validate, simulate, and publish workflow packs"
         actions={
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => refetch()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-navy-600 px-3 py-2 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Refresh
+            </button>
             <button
               onClick={() => setOperationsOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-navy-800 text-gray-300 rounded-lg hover:bg-navy-700 transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-navy-600 px-3 py-2 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors"
             >
-              <Activity className="w-4 h-4" />
+              <Activity className="w-3.5 h-3.5" />
               Operations
+            </button>
+            <button className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-navy-600 px-3 py-2 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors">
+              <Upload className="w-3.5 h-3.5" />
+              Import
+            </button>
+            <button className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-navy-600 px-3 py-2 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors">
+              <Download className="w-3.5 h-3.5" />
+              Export
             </button>
             <button
               onClick={() => setShowCreateDialog(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-gold-500 text-navy-900 rounded-lg hover:bg-gold-400 transition-colors font-medium"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-navy-700 dark:bg-navy-600 px-3 py-2 text-xs font-medium text-white hover:bg-navy-800 dark:hover:bg-navy-500 shadow-sm transition-colors"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-3.5 h-3.5" />
               New Workflow Pack
             </button>
           </div>
         }
       />
 
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <KpiCard
+          title="Total Workflows"
+          value={total}
+          icon={<Layers className="h-5 w-5 text-white" />}
+          color="bg-navy-500"
+        />
+        <KpiCard
+          title="Published"
+          value={kpis.published}
+          icon={<CheckCircle className="h-5 w-5 text-white" />}
+          color="bg-emerald-500"
+        />
+        <KpiCard
+          title="Draft"
+          value={kpis.draft}
+          icon={<Clock className="h-5 w-5 text-white" />}
+          color="bg-amber-500"
+        />
+        <KpiCard
+          title="Running Instances"
+          value={kpis.running}
+          icon={<Activity className="h-5 w-5 text-white" />}
+          color="bg-blue-500"
+        />
+        <KpiCard
+          title="Avg Health Score"
+          value={`${kpis.avgHealth}%`}
+          icon={<TrendingUp className="h-5 w-5 text-white" />}
+          color={kpis.avgHealth >= 80 ? "bg-emerald-500" : kpis.avgHealth >= 50 ? "bg-amber-500" : "bg-red-500"}
+        />
+        <KpiCard
+          title="Most Used"
+          value={kpis.mostUsed?.name?.split(" ").slice(0, 2).join(" ") || "—"}
+          subtitle={kpis.mostUsed ? `${kpis.mostUsed.usage_count}x used` : undefined}
+          icon={<BarChart3 className="h-5 w-5 text-white" />}
+          color="bg-purple-500"
+        />
+      </div>
+
       {/* Filter Bar */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[240px] max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+      <div className="flex flex-wrap items-center gap-2 bg-white dark:bg-navy-800 rounded-lg border border-gray-200 dark:border-navy-700 px-3 py-2">
+        <Filter className="w-3 h-3 text-gray-400" />
+        <div className="relative flex-1 min-w-[180px] max-w-sm">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
           <input
             type="text"
-            placeholder="Search packs..."
+            placeholder="Search workflows..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-navy-800/50 border border-navy-600 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gold-500/50"
+            className="w-full pl-8 pr-3 py-1.5 text-[11px] border border-gray-200 dark:border-navy-600 rounded-md bg-white dark:bg-navy-800 text-gray-700 dark:text-gray-300 placeholder-gray-400 focus:border-blue-400 focus:ring-1 focus:ring-blue-400/20 transition-colors"
           />
         </div>
-
         <select
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
-          className="px-3 py-2 bg-navy-800/50 border border-navy-600 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-gold-500/50"
+          className="text-[11px] border border-gray-200 dark:border-navy-600 rounded-md px-2 py-1.5 text-gray-600 dark:text-gray-300 bg-white dark:bg-navy-800 hover:border-gray-300 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors pr-6 appearance-none cursor-pointer min-w-[110px]"
         >
           <option value="">All Categories</option>
           <option value="legal">Legal</option>
@@ -229,50 +304,48 @@ export function WorkflowAdminCenter() {
           <option value="privacy">Privacy</option>
           <option value="custom">Custom</option>
         </select>
-
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2 bg-navy-800/50 border border-navy-600 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-gold-500/50"
+          className="text-[11px] border border-gray-200 dark:border-navy-600 rounded-md px-2 py-1.5 text-gray-600 dark:text-gray-300 bg-white dark:bg-navy-800 hover:border-gray-300 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors pr-6 appearance-none cursor-pointer min-w-[100px]"
         >
           <option value="">All Status</option>
           <option value="published">Published</option>
           <option value="draft">Draft</option>
           <option value="archived">Archived</option>
         </select>
-
-        <div className="flex items-center border border-navy-600 rounded-lg overflow-hidden">
+        <div className="flex items-center border border-gray-200 dark:border-navy-600 rounded-md overflow-hidden">
           <button
             onClick={() => setViewMode("grid")}
-            className={`p-2 ${viewMode === "grid" ? "bg-gold-500/20 text-gold-400" : "text-gray-400 hover:text-gray-200"}`}
+            className={`p-1.5 ${viewMode === "grid" ? "bg-gray-100 dark:bg-navy-700 text-navy-900 dark:text-white" : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"}`}
           >
-            <LayoutGrid className="w-4 h-4" />
+            <LayoutGrid className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setViewMode("list")}
-            className={`p-2 ${viewMode === "list" ? "bg-gold-500/20 text-gold-400" : "text-gray-400 hover:text-gray-200"}`}
+            className={`p-1.5 ${viewMode === "list" ? "bg-gray-100 dark:bg-navy-700 text-navy-900 dark:text-white" : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"}`}
           >
-            <List className="w-4 h-4" />
+            <List className="w-3.5 h-3.5" />
           </button>
         </div>
-
         {(categoryFilter || statusFilter || search) && (
           <button
             onClick={() => { setCategoryFilter(""); setStatusFilter(""); setSearch(""); }}
-            className="text-sm text-gold-400 hover:text-gold-300"
+            className="text-[10px] text-gray-400 hover:text-red-500 flex items-center gap-0.5 transition-colors"
           >
-            Reset filters
+            Reset
           </button>
+        )}
+        {!isLoading && (
+          <span className="text-[11px] text-gray-400 ml-auto tabular-nums">
+            {total} workflow{total !== 1 ? "s" : ""}
+          </span>
         )}
       </div>
 
       {/* Content */}
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-48 rounded-xl animate-pulse bg-gray-200 dark:bg-gray-700" />
-          ))}
-        </div>
+        <CardSkeleton count={6} columns={3} />
       ) : error ? (
         <ErrorState message="Failed to load workflow packs" onRetry={() => refetch()} />
       ) : packs.length === 0 ? (
@@ -283,7 +356,7 @@ export function WorkflowAdminCenter() {
           action={
             <button
               onClick={() => setShowCreateDialog(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-gold-500 text-navy-900 rounded-lg hover:bg-gold-400 transition-colors font-medium"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-navy-700 text-white rounded-lg hover:bg-navy-800 transition-colors text-sm font-medium shadow-sm"
             >
               <Plus className="w-4 h-4" />
               Create Workflow Pack
@@ -291,24 +364,19 @@ export function WorkflowAdminCenter() {
           }
         />
       ) : (
-        <>
-          <div className="text-sm text-gray-400">
-            {total} pack{total !== 1 ? "s" : ""}
-          </div>
-          <div className={viewMode === "grid"
-            ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-            : "space-y-2"
-          }>
-            {packs.map((pack) => (
-              <WorkflowPackCard
-                key={pack.pack_id}
-                pack={pack}
-                viewMode={viewMode}
-                onClick={() => setSelectedPackId(pack.pack_id)}
-              />
-            ))}
-          </div>
-        </>
+        <div className={viewMode === "grid"
+          ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+          : "space-y-2"
+        }>
+          {packs.map((pack) => (
+            <WorkflowPackCard
+              key={pack.pack_id}
+              pack={pack}
+              viewMode={viewMode}
+              onClick={() => setSelectedPackId(pack.pack_id)}
+            />
+          ))}
+        </div>
       )}
 
       {/* Detail Drawer */}
