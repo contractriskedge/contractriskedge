@@ -189,26 +189,56 @@ export function WorkflowDesigner({ initialStages, onSave, onBack, embedded = fal
   }, [state.stages, pushHistory]);
 
   // ── Validation ─────────────────────────────────────────────────
+  // Structured validation: each issue has a message, severity, and optional stageIndex
+  interface ValidationIssue {
+    message: string;
+    severity: "error" | "warning";
+    stageIndex?: number;
+  }
 
-  const errors: string[] = [];
-  const warnings: string[] = [];
+  const issues: ValidationIssue[] = [];
 
-  if (state.stages.length < 2) errors.push("Workflow must have at least a start and end stage");
-  if (state.stages[0]?.stage_type !== "start") errors.push("First stage must be a Start stage");
-  if (state.stages[state.stages.length - 1]?.stage_type !== "end") errors.push("Last stage must be an End stage");
+  if (state.stages.length < 2) issues.push({ message: "Workflow must have at least a start and end stage", severity: "error" });
+  if (state.stages[0]?.stage_type !== "start") issues.push({ message: "First stage must be a Start stage", severity: "error" });
+  if (state.stages[state.stages.length - 1]?.stage_type !== "end") issues.push({ message: "Last stage must be an End stage", severity: "error" });
 
   const names = state.stages.map((s) => s.name.toLowerCase());
   const dupes = names.filter((n, i) => n && names.indexOf(n) !== i);
-  if (dupes.length > 0) errors.push(`Duplicate stage names: ${[...new Set(dupes)].join(", ")}`);
+  if (dupes.length > 0) {
+    const dupeNames = [...new Set(dupes)];
+    dupeNames.forEach((name) => {
+      const indices = names.map((n, i) => n === name ? i : -1).filter((i) => i >= 0);
+      indices.forEach((idx) => {
+        issues.push({ message: `Duplicate stage name: "${state.stages[idx].name}"`, severity: "error", stageIndex: idx });
+      });
+    });
+  }
 
   state.stages.forEach((s, i) => {
+    if (!s.name.trim()) {
+      issues.push({ message: `Stage ${i + 1} has no name`, severity: "warning", stageIndex: i });
+    }
     if ((s.stage_type === "approval" || s.stage_type === "review") && !s.assignee_role && !s.assignee_user) {
-      warnings.push(`"${s.name || `Stage ${i + 1}`}" has no assignee`);
+      issues.push({ message: `"${s.name || `Stage ${i + 1}`}" has no assignee`, severity: "warning", stageIndex: i });
     }
     if ((s.stage_type === "approval" || s.stage_type === "review") && s.sla_hours <= 0) {
-      warnings.push(`"${s.name || `Stage ${i + 1}`}" has no SLA`);
+      issues.push({ message: `"${s.name || `Stage ${i + 1}`}" has no SLA`, severity: "warning", stageIndex: i });
     }
   });
+
+  const errors = issues.filter((i) => i.severity === "error").map((i) => i.message);
+  const warnings = issues.filter((i) => i.severity === "warning").map((i) => i.message);
+
+  // Scroll to a stage when clicking an error that references it
+  const stageListRef = React.useRef<HTMLDivElement>(null);
+  const focusStage = useCallback((index: number) => {
+    setState((prev) => ({ ...prev, selectedIndex: index }));
+    // Scroll the stage into view
+    setTimeout(() => {
+      const el = document.getElementById(`stage-item-${index}`);
+      el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 50);
+  }, []);
 
   // ── Keyboard shortcuts ─────────────────────────────────────────
 
@@ -271,14 +301,22 @@ export function WorkflowDesigner({ initialStages, onSave, onBack, embedded = fal
         </div>
 
         {/* Stage List */}
-        <div className="space-y-1">
-          {state.stages.map((stage, i) => (
-            <div key={i}>
+        <div className="space-y-1" ref={stageListRef}>
+          {state.stages.map((stage, i) => {
+            const stageIssues = issues.filter((iss) => iss.stageIndex === i);
+            const hasError = stageIssues.some((iss) => iss.severity === "error");
+            const hasWarning = stageIssues.some((iss) => iss.severity === "warning");
+            return (
+            <div key={i} id={`stage-item-${i}`}>
               <button
                 onClick={() => setState((prev) => ({ ...prev, selectedIndex: i }))}
-                className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-colors text-left ${
+                className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left ${
                   state.selectedIndex === i
-                    ? embedded ? "bg-white border-navy-400 ring-1 ring-navy-200" : "bg-navy-700 border-gold-500/50"
+                    ? embedded ? "bg-white border-navy-400 ring-1 ring-navy-200 shadow-sm" : "bg-navy-700 border-gold-500/50"
+                    : hasError
+                    ? embedded ? "bg-rose-50 border-rose-300 hover:border-rose-400" : "bg-navy-800/50 border-red-700 hover:border-red-500"
+                    : hasWarning
+                    ? embedded ? "bg-amber-50 border-amber-300 hover:border-amber-400" : "bg-navy-800/50 border-amber-700 hover:border-amber-500"
                     : embedded ? "bg-gray-50 border-gray-200 hover:border-gray-300" : "bg-navy-800/50 border-navy-700 hover:border-navy-600"
                 }`}
               >
@@ -286,15 +324,27 @@ export function WorkflowDesigner({ initialStages, onSave, onBack, embedded = fal
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className={`w-2 h-2 rounded-full ${
-                      stage.stage_type === "start" ? "bg-green-400" :
-                      stage.stage_type === "end" ? "bg-red-400" :
-                      stage.stage_type === "approval" ? "bg-gold-400" :
-                      "bg-blue-400"
+                      stage.stage_type === "start" ? "bg-emerald-500" :
+                      stage.stage_type === "end" ? "bg-red-500" :
+                      stage.stage_type === "approval" ? "bg-amber-500" :
+                      "bg-blue-500"
                     }`} />
                     <span className={`text-sm font-medium truncate ${embedded ? "text-gray-900" : "text-gray-200"}`}>
                       {stage.name || `Stage ${i + 1}`}
                     </span>
                     <span className="text-xs text-gray-500 capitalize">{stage.stage_type}</span>
+                    {hasError && (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-rose-600 bg-rose-100 dark:bg-rose-900/20 dark:text-rose-400 px-1.5 py-0.5 rounded-full">
+                        <AlertTriangle className="w-2.5 h-2.5" />
+                        Error
+                      </span>
+                    )}
+                    {hasWarning && !hasError && (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-amber-600 bg-amber-100 dark:bg-amber-900/20 dark:text-amber-400 px-1.5 py-0.5 rounded-full">
+                        <AlertTriangle className="w-2.5 h-2.5" />
+                        Warning
+                      </span>
+                    )}
                   </div>
                   {stage.sla_hours > 0 && (
                     <div className="flex items-center gap-1 mt-0.5 text-xs text-gray-500">
@@ -306,15 +356,15 @@ export function WorkflowDesigner({ initialStages, onSave, onBack, embedded = fal
                 </div>
                 <div className="flex items-center gap-0.5">
                   <div onClick={(e) => { e.stopPropagation(); moveStage(i, "up"); }}
-                    className={`p-1 cursor-pointer ${i <= 1 ? "text-gray-700 cursor-not-allowed" : "text-gray-500 hover:text-gray-200"}`}>
+                    className={`p-1 cursor-pointer ${i <= 1 ? "text-gray-300 cursor-not-allowed" : "text-gray-400 hover:text-gray-600"}`}>
                     <ArrowUp className="w-3.5 h-3.5" />
                   </div>
                   <div onClick={(e) => { e.stopPropagation(); moveStage(i, "down"); }}
-                    className={`p-1 cursor-pointer ${i >= state.stages.length - 2 ? "text-gray-700 cursor-not-allowed" : "text-gray-500 hover:text-gray-200"}`}>
+                    className={`p-1 cursor-pointer ${i >= state.stages.length - 2 ? "text-gray-300 cursor-not-allowed" : "text-gray-400 hover:text-gray-600"}`}>
                     <ArrowDown className="w-3.5 h-3.5" />
                   </div>
                   <div onClick={(e) => { e.stopPropagation(); deleteStage(i); }}
-                    className={`p-1 cursor-pointer ${state.stages.length <= 2 ? "text-gray-700 cursor-not-allowed" : "text-gray-500 hover:text-red-400"}`}>
+                    className={`p-1 cursor-pointer ${state.stages.length <= 2 ? "text-gray-300 cursor-not-allowed" : "text-gray-400 hover:text-red-500"}`}>
                     <Trash2 className="w-3.5 h-3.5" />
                   </div>
                 </div>
@@ -322,36 +372,61 @@ export function WorkflowDesigner({ initialStages, onSave, onBack, embedded = fal
               {/* Arrow between stages */}
               {i < state.stages.length - 1 && (
                 <div className="flex justify-center py-0.5">
-                  <div className="w-0.5 h-3 bg-navy-600" />
+                  <div className="w-0.5 h-3 bg-gray-300 dark:bg-navy-600" />
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Live Validation Summary */}
-        <div className={`p-3 border rounded-lg space-y-1 ${
-          embedded ? "bg-gray-50 border-gray-200" : "bg-navy-800/50 border-navy-700"
+        <div className={`p-3 border rounded-lg space-y-1.5 ${
+          embedded ? "bg-gray-50 border-gray-200" : "bg-white border-gray-200 shadow-sm"
         }`}>
-          <div className="flex items-center justify-between text-sm">
-            <span className={embedded ? "text-gray-500" : "text-gray-400"}>Workflow Health</span>
-            <span className={`font-medium ${errors.length === 0 ? "text-emerald-600" : "text-red-600"}`}>
-              {errors.length === 0 ? "Valid" : `${errors.length} error${errors.length > 1 ? "s" : ""}`}
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Validation</span>
+            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+              errors.length === 0 && warnings.length === 0
+                ? "bg-emerald-100 text-emerald-700"
+                : errors.length > 0
+                ? "bg-rose-100 text-rose-700"
+                : "bg-amber-100 text-amber-700"
+            }`}>
+              {errors.length === 0 && warnings.length === 0 ? "Passed" :
+               errors.length > 0 ? `${errors.length} error${errors.length > 1 ? "s" : ""}` :
+               `${warnings.length} warning${warnings.length > 1 ? "s" : ""}`}
             </span>
           </div>
-          <div className={`text-xs ${embedded ? "text-gray-500" : "text-gray-500"}`}>
-            {state.stages.length} stages · {warnings.length} warning{warnings.length !== 1 ? "s" : ""}
+          <div className="text-[11px] text-gray-400">
+            {state.stages.length} stages · {state.stages.filter((s) => s.sla_hours > 0).length} with SLA
           </div>
-          {errors.map((err, i) => (
-            <div key={i} className="flex items-center gap-1 text-xs text-red-500">
-              <AlertTriangle className="w-3 h-3" /> {err}
+          {issues.map((iss, i) => (
+            <div
+              key={i}
+              onClick={() => iss.stageIndex !== undefined && focusStage(iss.stageIndex)}
+              className={`flex items-center gap-1.5 text-xs rounded px-2 py-1 cursor-pointer transition-colors ${
+                iss.severity === "error"
+                  ? "text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-900/10"
+                  : "text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-900/10"
+              } ${iss.stageIndex !== undefined ? "hover:underline" : ""}`}
+            >
+              {iss.severity === "error"
+                ? <AlertTriangle className="w-3 h-3 shrink-0 text-rose-500" />
+                : <AlertTriangle className="w-3 h-3 shrink-0 text-amber-500" />
+              }
+              <span>{iss.message}</span>
+              {iss.stageIndex !== undefined && (
+                <span className="text-[10px] text-gray-400 ml-auto shrink-0">Stage {iss.stageIndex + 1} →</span>
+              )}
             </div>
           ))}
-          {warnings.map((warn, i) => (
-            <div key={i} className="flex items-center gap-1 text-xs text-amber-600">
-              <AlertTriangle className="w-3 h-3" /> {warn}
+          {issues.length === 0 && (
+            <div className="flex items-center gap-1.5 text-xs text-emerald-600">
+              <CheckCircle className="w-3 h-3" />
+              No issues found
             </div>
-          ))}
+          )}
         </div>
 
         {/* Save / Back — hidden in embedded drawer mode */}
