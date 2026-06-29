@@ -293,10 +293,13 @@ export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
 
         <div className="space-y-2">
           {rules.map((rule, i) => (
-            <button
+            <div
               key={rule.id}
               onClick={() => setSelectedRuleIdx(i)}
-              className={`w-full p-3 rounded-lg border text-left transition-colors ${
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSelectedRuleIdx(i); }}
+              className={`w-full p-3 rounded-lg border text-left transition-colors cursor-pointer ${
                 i === selectedRuleIdx
                   ? embedded ? "bg-white border-navy-400 ring-1 ring-navy-200" : "bg-navy-700 border-gold-500/50"
                   : embedded ? "bg-gray-50 border-gray-200 hover:border-gray-300" : "bg-navy-800/50 border-navy-700 hover:border-navy-600"
@@ -311,14 +314,14 @@ export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
                 {rule.assignee_role || "No assignee"}
               </div>
               {i > 0 && (
-                <button
+                <div
                   onClick={(e) => { e.stopPropagation(); deleteRule(i); }}
-                  className="mt-1 text-xs text-red-400 hover:text-red-300"
+                  className="mt-1 text-xs text-red-400 hover:text-red-300 cursor-pointer"
                 >
                   Remove
-                </button>
+                </div>
               )}
-            </button>
+            </div>
           ))}
         </div>
 
