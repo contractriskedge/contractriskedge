@@ -133,7 +133,7 @@ export function WorkflowPackCard({ pack, viewMode, onClick }: Props) {
     <div className="relative">
       <button
         onClick={onClick}
-        className="relative w-full rounded-xl border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-4 hover:shadow-md transition-shadow text-left"
+        className="relative w-full rounded-xl border border-gray-200 dark:border-navy-700 bg-white dark:bg-navy-800 p-4 hover:shadow-md transition-shadow text-left min-h-[220px]"
       >
         {/* Header */}
         <div className="flex items-start justify-between mb-3">

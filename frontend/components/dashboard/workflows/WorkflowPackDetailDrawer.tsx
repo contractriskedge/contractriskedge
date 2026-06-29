@@ -588,7 +588,7 @@ function VersionsTab({
   return (
     <div className="space-y-3">
       {versions.map((v) => (
-        <div key={v.version_id} className="rounded-xl border border-gray-200 bg-white p-4 hover:shadow-sm transition-shadow">
+        <div key={v.version_id} className="rounded-xl border border-gray-200 bg-white p-5 hover:shadow-sm transition-shadow">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-semibold text-gray-900">v{v.version_number}</span>

@@ -128,7 +128,7 @@ export function KpiCard({
               </span>
             )}
           </div>
-          <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{displayValue}</p>
+          <p className="mt-1 text-3xl font-bold text-gray-900 dark:text-gray-100">{displayValue}</p>
           {subtitle && (
             <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{subtitle}</p>
           )}
