@@ -39,12 +39,14 @@ async def get_pack_service(
 @router.get("/", response_model=list[WorkflowPackSummary])
 async def list_workflow_packs(
     category: Optional[WorkflowPackCategory] = Query(None),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
     include_builtin: bool = Query(True),
     service: WorkflowPackService = Depends(get_pack_service),
     _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
 ):
     """List available workflow packs, including built-in and tenant-created."""
-    return await service.list_packs(category=category, include_builtin=include_builtin)
+    return await service.list_packs(category=category, status=status, search=search, include_builtin=include_builtin)
 
 
 @router.get("/{pack_id}", response_model=WorkflowPackResponse)

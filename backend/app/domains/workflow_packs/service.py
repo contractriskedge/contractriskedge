@@ -34,6 +34,8 @@ class WorkflowPackService:
     async def list_packs(
         self,
         category: Optional[WorkflowPackCategory] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
         include_builtin: bool = True,
     ) -> list[WorkflowPackSummary]:
         """List available workflow packs, including built-in and tenant-created."""
@@ -45,6 +47,18 @@ class WorkflowPackService:
                 cat = pack_def.get("category", WorkflowPackCategory.CUSTOM)
                 if category and cat != category:
                     continue
+                # Apply status filter
+                if status:
+                    pack_status = "published" if pack_def.get("last_published") else "draft"
+                    if pack_status != status:
+                        continue
+                # Apply search filter
+                if search:
+                    q = search.lower()
+                    name = pack_def.get("name", "").lower()
+                    desc = pack_def.get("description", "").lower()
+                    if q not in name and q not in desc:
+                        continue
                 stages = pack_def.get("stages", [])
                 last_published_str = pack_def.get("last_published")
                 last_published = None
