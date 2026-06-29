@@ -326,25 +326,25 @@ export function WorkflowSimulator({ onBack, embedded = false, packId, versionId 
 
       <div className={`flex gap-4 ${embedded ? "flex-col lg:flex-row" : "gap-6"}`}>
         {/* Left: Input Panel */}
-        <div className={`${embedded ? "w-full lg:w-80" : "w-96"} shrink-0 space-y-4`}>
+        <div className={`${embedded ? "w-full lg:w-72" : "w-80"} shrink-0 space-y-4`}>
           {/* Mode Toggle */}
-          <div className={`flex rounded-lg p-1 ${embedded ? "bg-gray-100" : "bg-navy-800"}`}>
+          <div className="flex bg-gray-100 rounded-lg p-1">
             <button
               onClick={() => setMode("manual")}
-              className={`flex-1 px-4 py-2 text-sm rounded-md ${
+              className={`flex-1 px-4 py-2 text-sm rounded-md transition-all ${
                 mode === "manual"
-                  ? embedded ? "bg-white text-gray-900 shadow-sm" : "bg-navy-700 text-gray-100"
-                  : embedded ? "text-gray-500" : "text-gray-400"
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
               }`}
             >
               Manual Entry
             </button>
             <button
               onClick={() => setMode("contract")}
-              className={`flex-1 px-4 py-2 text-sm rounded-md ${
+              className={`flex-1 px-4 py-2 text-sm rounded-md transition-all ${
                 mode === "contract"
-                  ? embedded ? "bg-white text-gray-900 shadow-sm" : "bg-navy-700 text-gray-100"
-                  : embedded ? "text-gray-500" : "text-gray-400"
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
               }`}
             >
               From Contract
@@ -462,10 +462,10 @@ export function WorkflowSimulator({ onBack, embedded = false, packId, versionId 
           ) : (
             <>
               {/* Summary Card */}
-              <div className="p-4 bg-navy-800/30 border border-navy-700 rounded-xl">
+              <div className="p-4 bg-white border border-gray-200 rounded-xl shadow-sm">
                 <div className="flex items-center gap-3 mb-3">
-                  <CheckCircle className="w-5 h-5 text-green-400" />
-                  <span className="text-lg font-medium text-gray-100">Matched: {result.workflow_name}</span>
+                  <CheckCircle className="w-5 h-5 text-emerald-500" />
+                  <span className="text-base font-semibold text-gray-900">Matched: {result.workflow_name}</span>
                 </div>
                 <div className="grid grid-cols-4 gap-4">
                   <SummaryStat label="Approvers" value={String(result.total_approvers)} />
@@ -476,11 +476,11 @@ export function WorkflowSimulator({ onBack, embedded = false, packId, versionId 
               </div>
 
               {/* Rule Evaluation */}
-              <div className="p-4 bg-navy-800/30 border border-navy-700 rounded-xl">
-                <h3 className="text-sm font-medium text-gray-300 mb-3">Rule Evaluation</h3>
+              <div className="p-4 bg-white border border-gray-200 rounded-xl shadow-sm">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Rule Evaluation</h3>
                 <div className="space-y-2">
                   {result.rules.map((rule) => (
-                    <div key={rule.rule_id} className="border border-navy-700 rounded-lg overflow-hidden">
+                    <div key={rule.rule_id} className="border border-gray-200 rounded-lg overflow-hidden">
                       <button
                         onClick={() => toggleRule(rule.rule_id)}
                         className="w-full flex items-center justify-between p-3 hover:bg-navy-700/50 text-left"
@@ -490,7 +490,7 @@ export function WorkflowSimulator({ onBack, embedded = false, packId, versionId 
                             ? <CheckCircle className="w-4 h-4 text-green-400" />
                             : <AlertTriangle className="w-4 h-4 text-gray-500" />
                           }
-                          <span className={`text-sm font-medium ${rule.matched ? "text-green-400" : "text-gray-400"}`}>
+                          <span className={`text-sm font-medium ${rule.matched ? "text-emerald-600" : "text-gray-500"}`}>
                             {rule.rule_name}
                           </span>
                         </div>
@@ -512,14 +512,14 @@ export function WorkflowSimulator({ onBack, embedded = false, packId, versionId 
                                 ? <CheckCircle className="w-3.5 h-3.5 text-green-400 shrink-0" />
                                 : <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />
                               }
-                              <span className={cond.result ? "text-gray-300" : "text-gray-500"}>{cond.label}</span>
+                              <span className={cond.result ? "text-gray-700" : "text-gray-400"}>{cond.label}</span>
                             </div>
                           ))}
                           {rule.matched && (
-                            <div className="ml-6 mt-2 p-2 bg-navy-800 rounded text-xs text-gray-400 space-y-1">
-                              <div>→ Assign: <span className="text-gray-200">{rule.assignee_role}</span></div>
-                              <div>→ Mode: <span className="text-gray-200 capitalize">{rule.approval_mode.replace(/_/g, " ")}</span></div>
-                              <div>→ SLA: <span className="text-gray-200">{rule.sla_hours}h</span></div>
+                            <div className="ml-6 mt-2 p-2 bg-gray-50 rounded text-xs text-gray-500 space-y-1">
+                              <div>→ Assign: <span className="text-gray-800 font-medium">{rule.assignee_role}</span></div>
+                              <div>→ Mode: <span className="text-gray-800 font-medium capitalize">{rule.approval_mode.replace(/_/g, " ")}</span></div>
+                              <div>→ SLA: <span className="text-gray-800 font-medium">{rule.sla_hours}h</span></div>
                             </div>
                           )}
                         </div>
@@ -530,8 +530,8 @@ export function WorkflowSimulator({ onBack, embedded = false, packId, versionId 
               </div>
 
               {/* Timeline */}
-              <div className="p-4 bg-navy-800/30 border border-navy-700 rounded-xl">
-                <h3 className="text-sm font-medium text-gray-300 mb-3">Execution Timeline</h3>
+              <div className="p-4 bg-white border border-gray-200 rounded-xl shadow-sm">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Execution Timeline</h3>
                 <div className="space-y-0">
                   {result.stages.map((stage, i) => (
                     <React.Fragment key={i}>
@@ -540,11 +540,11 @@ export function WorkflowSimulator({ onBack, embedded = false, packId, versionId 
                           <div className={`w-3 h-3 rounded-full ${
                             stage.stage_type === "automatic" ? "bg-blue-400" : "bg-gold-400"
                           }`} />
-                          {i < result.stages.length - 1 && <div className="w-0.5 h-8 bg-navy-600" />}
+                          {i < result.stages.length - 1 && <div className="w-0.5 h-8 bg-gray-300" />}
                         </div>
                         <div className="flex-1">
                           <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium text-gray-200">{stage.name}</span>
+                            <span className="text-sm font-medium text-gray-900">{stage.name}</span>
                             <span className="text-xs text-gray-500">
                               {stage.estimated_days > 0 ? `${stage.estimated_days} days` : "Instant"}
                             </span>
@@ -597,8 +597,8 @@ export function WorkflowSimulator({ onBack, embedded = false, packId, versionId 
               )}
 
               {/* Explanation Tree */}
-              <div className="p-4 bg-navy-800/30 border border-navy-700 rounded-xl">
-                <h3 className="text-sm font-medium text-gray-300 mb-3">Explanation</h3>
+              <div className="p-4 bg-white border border-gray-200 rounded-xl shadow-sm">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Explanation Tree</h3>
                 <div className="text-sm text-gray-400 space-y-2">
                   <div className="flex items-center gap-2">
                     <CheckCircle className="w-4 h-4 text-green-400" />

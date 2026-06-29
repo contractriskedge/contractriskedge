@@ -259,14 +259,14 @@ export function WorkflowDesigner({ initialStages, onSave, onBack, embedded = fal
       <div className="w-80 lg:w-96 shrink-0 space-y-4 overflow-y-auto pr-2">
         {/* Toolbar */}
         <div className="flex items-center justify-between">
-          <h2 className={`text-sm font-semibold ${embedded ? "text-gray-900" : "text-lg text-gray-100"}`}>Workflow Stages</h2>
+          <h2 className={`text-sm font-semibold ${embedded ? "text-gray-900" : "text-gray-900"}`}>Workflow Stages</h2>
           <div className="flex items-center gap-1">
             <div
               onClick={undo}
               className={`px-2 py-1 text-xs rounded cursor-pointer ${
                 state.history.length === 0
                   ? embedded ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-navy-900 text-gray-600 cursor-not-allowed"
-                  : embedded ? "bg-gray-100 text-gray-600 hover:bg-gray-200" : "bg-navy-800 text-gray-300 hover:bg-navy-700"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
               }`}
             >
               Undo
@@ -275,8 +275,8 @@ export function WorkflowDesigner({ initialStages, onSave, onBack, embedded = fal
               onClick={redo}
               className={`px-2 py-1 text-xs rounded cursor-pointer ${
                 state.future.length === 0
-                  ? embedded ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-navy-900 text-gray-600 cursor-not-allowed"
-                  : embedded ? "bg-gray-100 text-gray-600 hover:bg-gray-200" : "bg-navy-800 text-gray-300 hover:bg-navy-700"
+                  ? embedded ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
               }`}
             >
               Redo
@@ -289,9 +289,7 @@ export function WorkflowDesigner({ initialStages, onSave, onBack, embedded = fal
           <select
             value=""
             onChange={(e) => { if (e.target.value) addStage(e.target.value as StageConfig["stage_type"]); }}
-            className={`flex-1 px-3 py-2 border rounded-lg text-sm ${
-              embedded ? "bg-white border-gray-200 text-gray-700" : "bg-navy-800 border-navy-600 text-gray-300"
-            }`}
+            className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-700"
           >
             <option value="">+ Add Stage</option>
             {stageTypeOptions.filter((o) => o.value !== "start" && o.value !== "end").map((o) => (
@@ -312,12 +310,12 @@ export function WorkflowDesigner({ initialStages, onSave, onBack, embedded = fal
                 onClick={() => setState((prev) => ({ ...prev, selectedIndex: i }))}
                 className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left ${
                   state.selectedIndex === i
-                    ? embedded ? "bg-white border-navy-400 ring-1 ring-navy-200 shadow-sm" : "bg-navy-700 border-gold-500/50"
+                    ? "bg-white border-navy-400 ring-1 ring-navy-200 shadow-sm"
                     : hasError
-                    ? embedded ? "bg-rose-50 border-rose-300 hover:border-rose-400" : "bg-navy-800/50 border-red-700 hover:border-red-500"
+                    ? "bg-rose-50 border-rose-300 hover:border-rose-400"
                     : hasWarning
-                    ? embedded ? "bg-amber-50 border-amber-300 hover:border-amber-400" : "bg-navy-800/50 border-amber-700 hover:border-amber-500"
-                    : embedded ? "bg-gray-50 border-gray-200 hover:border-gray-300" : "bg-navy-800/50 border-navy-700 hover:border-navy-600"
+                    ? "bg-amber-50 border-amber-300 hover:border-amber-400"
+                    : "bg-gray-50 border-gray-200 hover:border-gray-300"
                 }`}
               >
                 <GripVertical className="w-4 h-4 text-gray-600 shrink-0" />
@@ -329,7 +327,7 @@ export function WorkflowDesigner({ initialStages, onSave, onBack, embedded = fal
                       stage.stage_type === "approval" ? "bg-amber-500" :
                       "bg-blue-500"
                     }`} />
-                    <span className={`text-sm font-medium truncate ${embedded ? "text-gray-900" : "text-gray-200"}`}>
+                    <span className="text-sm font-medium truncate text-gray-900">
                       {stage.name || `Stage ${i + 1}`}
                     </span>
                     <span className="text-xs text-gray-500 capitalize">{stage.stage_type}</span>
@@ -381,9 +379,7 @@ export function WorkflowDesigner({ initialStages, onSave, onBack, embedded = fal
         </div>
 
         {/* Live Validation Summary */}
-        <div className={`p-3 border rounded-lg space-y-1.5 ${
-          embedded ? "bg-gray-50 border-gray-200" : "bg-white border-gray-200 shadow-sm"
-        }`}>
+        <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Validation</span>
             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
@@ -432,13 +428,13 @@ export function WorkflowDesigner({ initialStages, onSave, onBack, embedded = fal
         {/* Save / Back — hidden in embedded drawer mode */}
         {!embedded && (
         <div className="flex gap-2">
-          <button onClick={onBack} className="flex-1 px-4 py-2 bg-navy-800 text-gray-300 rounded-lg hover:bg-navy-700">
+          <button onClick={onBack} className="flex-1 px-3 py-2 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
             Back
           </button>
           <button
             onClick={() => onSave(state.stages)}
             disabled={errors.length > 0}
-            className="flex-1 px-4 py-2 bg-gold-500 text-navy-900 rounded-lg hover:bg-gold-400 font-medium disabled:opacity-50"
+            className="flex-1 px-3 py-2 text-xs font-medium rounded-lg bg-navy-700 text-white hover:bg-navy-800 disabled:opacity-50 transition-colors shadow-sm"
           >
             Save Stages
           </button>
@@ -455,9 +451,9 @@ export function WorkflowDesigner({ initialStages, onSave, onBack, embedded = fal
             onUpdate={(updates) => updateStage(state.selectedIndex!, updates)}
           />
         ) : (
-          <div className={`flex items-center justify-center h-full ${embedded ? "text-gray-400" : "text-gray-500"}`}>
+          <div className="flex items-center justify-center h-full text-gray-400">
             <div className="text-center">
-              <Settings className={`w-12 h-12 mx-auto mb-3 ${embedded ? "text-gray-300" : "text-gray-600"}`} />
+              <Settings className="w-12 h-12 mx-auto mb-3 text-gray-300" />
               <p className="text-sm">Select a stage to configure</p>
             </div>
           </div>
