@@ -176,7 +176,7 @@ function simulate(input: SimInput): SimResult {
     rules,
     stages,
     total_days: Math.round(totalDays * 10) / 10,
-    total_approvers,
+    total_approvers: totalApprovers,
     escalation_count: escalationCount,
   };
 }
