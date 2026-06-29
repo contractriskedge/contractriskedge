@@ -237,25 +237,28 @@ export function WorkflowAdminCenter() {
         }
       />
 
-      {/* KPI Cards */}
+      {/* KPI Cards — clickable, matching Executive Dashboard pattern */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiCard
           title="Total Workflows"
           value={total}
           icon={<Layers className="h-5 w-5 text-white" />}
           color="bg-navy-500"
+          onClick={() => { setCategoryFilter(""); setStatusFilter(""); setSearch(""); }}
         />
         <KpiCard
           title="Published"
           value={kpis.published}
           icon={<CheckCircle className="h-5 w-5 text-white" />}
           color="bg-emerald-500"
+          onClick={() => setStatusFilter("published")}
         />
         <KpiCard
           title="Draft"
           value={kpis.draft}
           icon={<Clock className="h-5 w-5 text-white" />}
           color="bg-amber-500"
+          onClick={() => setStatusFilter("draft")}
         />
         <KpiCard
           title="Running Instances"
