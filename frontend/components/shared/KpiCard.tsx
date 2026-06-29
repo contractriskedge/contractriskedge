@@ -91,6 +91,7 @@ export function KpiCard({
 
   const card = (
     <div
+      onClick={onClick}
       className={`rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-all dark:border-gray-700 dark:bg-gray-800 ${
         onClick
           ? "cursor-pointer hover:shadow-md hover:border-navy-300 dark:hover:border-navy-500 active:scale-[0.98]"
@@ -158,6 +159,5 @@ export function KpiCard({
     </div>
   );
 
-  // If onClick is provided and we're in a client component context, wrap behavior
   return card;
 }

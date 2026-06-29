@@ -83,9 +83,10 @@ interface Props {
   initialStages?: StageDefinition[];
   onSave: (stages: StageConfig[]) => void;
   onBack: () => void;
+  embedded?: boolean;
 }
 
-export function WorkflowDesigner({ initialStages, onSave, onBack }: Props) {
+export function WorkflowDesigner({ initialStages, onSave, onBack, embedded = false }: Props) {
   const [state, setState] = useState<DesignerState>(() => ({
     stages: initialStages?.length
       ? initialStages.map((s) => ({
@@ -223,22 +224,30 @@ export function WorkflowDesigner({ initialStages, onSave, onBack }: Props) {
   }, [undo, redo]);
 
   return (
-    <div className="flex gap-6 h-[calc(100vh-12rem)]">
+    <div className={`flex gap-4 ${embedded ? "h-full p-4" : "gap-6 h-[calc(100vh-12rem)]"}`}>
       {/* Left: Stage List */}
-      <div className="w-96 shrink-0 space-y-4 overflow-y-auto pr-2">
+      <div className="w-80 lg:w-96 shrink-0 space-y-4 overflow-y-auto pr-2">
         {/* Toolbar */}
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-100">Workflow Stages</h2>
+          <h2 className={`text-sm font-semibold ${embedded ? "text-gray-900" : "text-lg text-gray-100"}`}>Workflow Stages</h2>
           <div className="flex items-center gap-1">
             <div
               onClick={undo}
-              className={`px-2 py-1 text-xs rounded cursor-pointer ${state.history.length === 0 ? "bg-navy-900 text-gray-600 cursor-not-allowed" : "bg-navy-800 text-gray-300 hover:bg-navy-700"}`}
+              className={`px-2 py-1 text-xs rounded cursor-pointer ${
+                state.history.length === 0
+                  ? embedded ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-navy-900 text-gray-600 cursor-not-allowed"
+                  : embedded ? "bg-gray-100 text-gray-600 hover:bg-gray-200" : "bg-navy-800 text-gray-300 hover:bg-navy-700"
+              }`}
             >
               Undo
             </div>
             <div
               onClick={redo}
-              className={`px-2 py-1 text-xs rounded cursor-pointer ${state.future.length === 0 ? "bg-navy-900 text-gray-600 cursor-not-allowed" : "bg-navy-800 text-gray-300 hover:bg-navy-700"}`}
+              className={`px-2 py-1 text-xs rounded cursor-pointer ${
+                state.future.length === 0
+                  ? embedded ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-navy-900 text-gray-600 cursor-not-allowed"
+                  : embedded ? "bg-gray-100 text-gray-600 hover:bg-gray-200" : "bg-navy-800 text-gray-300 hover:bg-navy-700"
+              }`}
             >
               Redo
             </div>
@@ -250,7 +259,9 @@ export function WorkflowDesigner({ initialStages, onSave, onBack }: Props) {
           <select
             value=""
             onChange={(e) => { if (e.target.value) addStage(e.target.value as StageConfig["stage_type"]); }}
-            className="flex-1 px-3 py-2 bg-navy-800 border border-navy-600 rounded-lg text-gray-300 text-sm"
+            className={`flex-1 px-3 py-2 border rounded-lg text-sm ${
+              embedded ? "bg-white border-gray-200 text-gray-700" : "bg-navy-800 border-navy-600 text-gray-300"
+            }`}
           >
             <option value="">+ Add Stage</option>
             {stageTypeOptions.filter((o) => o.value !== "start" && o.value !== "end").map((o) => (
@@ -267,8 +278,8 @@ export function WorkflowDesigner({ initialStages, onSave, onBack }: Props) {
                 onClick={() => setState((prev) => ({ ...prev, selectedIndex: i }))}
                 className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-colors text-left ${
                   state.selectedIndex === i
-                    ? "bg-navy-700 border-gold-500/50"
-                    : "bg-navy-800/50 border-navy-700 hover:border-navy-600"
+                    ? embedded ? "bg-white border-navy-400 ring-1 ring-navy-200" : "bg-navy-700 border-gold-500/50"
+                    : embedded ? "bg-gray-50 border-gray-200 hover:border-gray-300" : "bg-navy-800/50 border-navy-700 hover:border-navy-600"
                 }`}
               >
                 <GripVertical className="w-4 h-4 text-gray-600 shrink-0" />
@@ -280,7 +291,7 @@ export function WorkflowDesigner({ initialStages, onSave, onBack }: Props) {
                       stage.stage_type === "approval" ? "bg-gold-400" :
                       "bg-blue-400"
                     }`} />
-                    <span className="text-sm font-medium text-gray-200 truncate">
+                    <span className={`text-sm font-medium truncate ${embedded ? "text-gray-900" : "text-gray-200"}`}>
                       {stage.name || `Stage ${i + 1}`}
                     </span>
                     <span className="text-xs text-gray-500 capitalize">{stage.stage_type}</span>
@@ -319,29 +330,32 @@ export function WorkflowDesigner({ initialStages, onSave, onBack }: Props) {
         </div>
 
         {/* Live Validation Summary */}
-        <div className="p-3 bg-navy-800/50 border border-navy-700 rounded-lg space-y-1">
+        <div className={`p-3 border rounded-lg space-y-1 ${
+          embedded ? "bg-gray-50 border-gray-200" : "bg-navy-800/50 border-navy-700"
+        }`}>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-400">Workflow Health</span>
-            <span className={`font-medium ${errors.length === 0 ? "text-green-400" : "text-red-400"}`}>
-              {errors.length === 0 ? "✅ Valid" : `${errors.length} error${errors.length > 1 ? "s" : ""}`}
+            <span className={embedded ? "text-gray-500" : "text-gray-400"}>Workflow Health</span>
+            <span className={`font-medium ${errors.length === 0 ? "text-emerald-600" : "text-red-600"}`}>
+              {errors.length === 0 ? "Valid" : `${errors.length} error${errors.length > 1 ? "s" : ""}`}
             </span>
           </div>
-          <div className="text-xs text-gray-500">
+          <div className={`text-xs ${embedded ? "text-gray-500" : "text-gray-500"}`}>
             {state.stages.length} stages · {warnings.length} warning{warnings.length !== 1 ? "s" : ""}
           </div>
           {errors.map((err, i) => (
-            <div key={i} className="flex items-center gap-1 text-xs text-red-400">
+            <div key={i} className="flex items-center gap-1 text-xs text-red-500">
               <AlertTriangle className="w-3 h-3" /> {err}
             </div>
           ))}
           {warnings.map((warn, i) => (
-            <div key={i} className="flex items-center gap-1 text-xs text-yellow-400">
+            <div key={i} className="flex items-center gap-1 text-xs text-amber-600">
               <AlertTriangle className="w-3 h-3" /> {warn}
             </div>
           ))}
         </div>
 
-        {/* Save / Back */}
+        {/* Save / Back — hidden in embedded drawer mode */}
+        {!embedded && (
         <div className="flex gap-2">
           <button onClick={onBack} className="flex-1 px-4 py-2 bg-navy-800 text-gray-300 rounded-lg hover:bg-navy-700">
             Back
@@ -354,6 +368,7 @@ export function WorkflowDesigner({ initialStages, onSave, onBack }: Props) {
             Save Stages
           </button>
         </div>
+        )}
       </div>
 
       {/* Right: Configuration Panel */}
@@ -365,10 +380,10 @@ export function WorkflowDesigner({ initialStages, onSave, onBack }: Props) {
             onUpdate={(updates) => updateStage(state.selectedIndex!, updates)}
           />
         ) : (
-          <div className="flex items-center justify-center h-full text-gray-500">
+          <div className={`flex items-center justify-center h-full ${embedded ? "text-gray-400" : "text-gray-500"}`}>
             <div className="text-center">
-              <Settings className="w-12 h-12 mx-auto mb-3 text-gray-600" />
-              <p>Select a stage to configure</p>
+              <Settings className={`w-12 h-12 mx-auto mb-3 ${embedded ? "text-gray-300" : "text-gray-600"}`} />
+              <p className="text-sm">Select a stage to configure</p>
             </div>
           </div>
         )}

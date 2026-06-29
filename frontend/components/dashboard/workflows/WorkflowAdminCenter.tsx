@@ -13,28 +13,19 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { useWorkflowPacks } from "@/services/hooks/useWorkflowAdmin";
 import { WorkflowPackCard } from "./WorkflowPackCard";
-import { WorkflowPackDetailDrawer } from "./WorkflowPackDetailDrawer";
+import { WorkflowPackDetailDrawer, type WorkflowPackTabId } from "./WorkflowPackDetailDrawer";
 import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
-import { WorkflowDesigner } from "./WorkflowDesigner";
-import { RuleBuilder } from "./RuleBuilder";
-import { WorkflowSimulator } from "./WorkflowSimulator";
-import { PublishingFlow } from "./PublishingFlow";
-import { VersionComparison } from "./VersionComparison";
-import { UsageDashboard } from "./UsageDashboard";
 import { WorkflowOperationsCenter } from "./WorkflowOperationsCenter";
+import { getHealthTier } from "./workflowHealthUtils";
 
 export function WorkflowAdminCenter() {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const [healthFilter, setHealthFilter] = useState<string>("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [selectedPackId, setSelectedPackId] = useState<string | null>(null);
-  const [designerPackId, setDesignerPackId] = useState<string | null>(null);
-  const [ruleBuilderOpen, setRuleBuilderOpen] = useState(false);
-  const [simulatorOpen, setSimulatorOpen] = useState(false);
-  const [publishOpen, setPublishOpen] = useState(false);
-  const [compareOpen, setCompareOpen] = useState(false);
-  const [dashboardOpen, setDashboardOpen] = useState(false);
+  const [drawerInitialTab, setDrawerInitialTab] = useState<WorkflowPackTabId>("overview");
   const [operationsOpen, setOperationsOpen] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
 
@@ -44,143 +35,43 @@ export function WorkflowAdminCenter() {
     status: statusFilter || undefined,
   });
 
-  const packs = data?.items ?? [];
-  const total = data?.total ?? 0;
+  const allPacks = data?.items ?? [];
 
-  // Derived KPI data
+  // Client-side health filter (KPI drill-down)
+  const packs = useMemo(() => {
+    if (!healthFilter) return allPacks;
+    return allPacks.filter((p) => getHealthTier(p.health_score ?? 0) === healthFilter);
+  }, [allPacks, healthFilter]);
+
+  const total = healthFilter ? packs.length : (data?.total ?? 0);
+
   const kpis = useMemo(() => {
-    const published = packs.filter((p) => p.status === "published").length;
-    const draft = packs.filter((p) => p.status === "draft").length;
-    const running = packs.reduce((sum, p) => sum + (p.running_instances || 0), 0);
-    const avgHealth = packs.length > 0
-      ? Math.round(packs.reduce((sum, p) => sum + (p.health_score || 0), 0) / packs.length)
+    const published = allPacks.filter((p) => p.status === "published").length;
+    const draft = allPacks.filter((p) => p.status === "draft").length;
+    const running = allPacks.reduce((sum, p) => sum + (p.running_instances || 0), 0);
+    const avgHealth = allPacks.length > 0
+      ? Math.round(allPacks.reduce((sum, p) => sum + (p.health_score || 0), 0) / allPacks.length)
       : 0;
-    const mostUsed = packs.reduce((best, p) => (p.usage_count > (best?.usage_count || 0) ? p : best), packs[0]);
+    const mostUsed = allPacks.reduce(
+      (best, p) => (p.usage_count > (best?.usage_count || 0) ? p : best),
+      allPacks[0],
+    );
     return { published, draft, running, avgHealth, mostUsed };
-  }, [packs]);
+  }, [allPacks]);
 
-  // If Designer is open, show it instead of the library
-  if (designerPackId) {
-    return (
-      <div className="space-y-4">
-        <button
-          onClick={() => setDesignerPackId(null)}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          Back to Workflow Packs
-        </button>
-        <WorkflowDesigner
-          initialStages={[]}
-          onSave={(stages) => {
-            console.log("Saving stages:", stages);
-            setDesignerPackId(null);
-          }}
-          onBack={() => setDesignerPackId(null)}
-        />
-      </div>
-    );
-  }
+  const openPack = (packId: string, tab: WorkflowPackTabId = "overview") => {
+    setDrawerInitialTab(tab);
+    setSelectedPackId(packId);
+  };
 
-  // If Rule Builder is open, show it
-  if (ruleBuilderOpen) {
-    return (
-      <div className="space-y-4">
-        <button
-          onClick={() => setRuleBuilderOpen(false)}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          Back to Workflow Packs
-        </button>
-        <RuleBuilder
-          onSave={(rules) => {
-            console.log("Saving rules:", rules);
-            setRuleBuilderOpen(false);
-          }}
-          onBack={() => setRuleBuilderOpen(false)}
-        />
-      </div>
-    );
-  }
+  const resetFilters = () => {
+    setCategoryFilter("");
+    setStatusFilter("");
+    setHealthFilter("");
+    setSearch("");
+  };
 
-  // If Simulator is open, show it
-  if (simulatorOpen) {
-    return (
-      <div className="space-y-4">
-        <button
-          onClick={() => setSimulatorOpen(false)}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          Back to Workflow Packs
-        </button>
-        <WorkflowSimulator onBack={() => setSimulatorOpen(false)} />
-      </div>
-    );
-  }
-
-  // If Publishing Flow is open, show it
-  if (publishOpen) {
-    return (
-      <div className="space-y-4">
-        <button
-          onClick={() => setPublishOpen(false)}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          Back to Workflow Packs
-        </button>
-        <PublishingFlow
-          packName="NDA Review"
-          versionInfo={{ current_version: 2, current_status: "published", new_version: 3 }}
-          onPublish={(data) => {
-            console.log("Publishing:", data);
-            setPublishOpen(false);
-          }}
-          onRollback={(targetVersion) => {
-            console.log("Rollback to:", targetVersion);
-            setPublishOpen(false);
-          }}
-          onBack={() => setPublishOpen(false)}
-        />
-      </div>
-    );
-  }
-
-  // If Version Comparison is open, show it
-  if (compareOpen) {
-    return (
-      <div className="space-y-4">
-        <button
-          onClick={() => setCompareOpen(false)}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          Back to Workflow Packs
-        </button>
-        <VersionComparison onBack={() => setCompareOpen(false)} />
-      </div>
-    );
-  }
-
-  // If Usage Dashboard is open, show it
-  if (dashboardOpen) {
-    return (
-      <div className="space-y-4">
-        <button
-          onClick={() => setDashboardOpen(false)}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          Back to Workflow Packs
-        </button>
-        <UsageDashboard onBack={() => setDashboardOpen(false)} />
-      </div>
-    );
-  }
-
-  // If Operations Center is open, show it
+  // Operations Center remains a separate operational view
   if (operationsOpen) {
     return (
       <div className="space-y-4">
@@ -189,7 +80,7 @@ export function WorkflowAdminCenter() {
           className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
-          Back to Workflow Packs
+          Back to Workflow Library
         </button>
         <WorkflowOperationsCenter onBack={() => setOperationsOpen(false)} />
       </div>
@@ -198,7 +89,6 @@ export function WorkflowAdminCenter() {
 
   return (
     <div className="space-y-4 pb-24">
-      {/* Header */}
       <PageHeader
         title="Workflow Administration"
         description="Configure, validate, simulate, and publish workflow packs"
@@ -237,40 +127,45 @@ export function WorkflowAdminCenter() {
         }
       />
 
-      {/* KPI Cards — clickable, matching Executive Dashboard pattern */}
+      {/* KPI Cards — clickable drill-down to filtered views */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiCard
           title="Total Workflows"
-          value={total}
+          value={data?.total ?? 0}
           icon={<Layers className="h-5 w-5 text-white" />}
           color="bg-navy-500"
-          onClick={() => { setCategoryFilter(""); setStatusFilter(""); setSearch(""); }}
+          onClick={resetFilters}
         />
         <KpiCard
           title="Published"
           value={kpis.published}
           icon={<CheckCircle className="h-5 w-5 text-white" />}
           color="bg-emerald-500"
-          onClick={() => setStatusFilter("published")}
+          onClick={() => { setHealthFilter(""); setStatusFilter("published"); }}
         />
         <KpiCard
           title="Draft"
           value={kpis.draft}
           icon={<Clock className="h-5 w-5 text-white" />}
           color="bg-amber-500"
-          onClick={() => setStatusFilter("draft")}
+          onClick={() => { setHealthFilter(""); setStatusFilter("draft"); }}
         />
         <KpiCard
           title="Running Instances"
           value={kpis.running}
           icon={<Activity className="h-5 w-5 text-white" />}
           color="bg-blue-500"
+          onClick={() => setOperationsOpen(true)}
         />
         <KpiCard
           title="Avg Health Score"
           value={`${kpis.avgHealth}%`}
           icon={<TrendingUp className="h-5 w-5 text-white" />}
           color={kpis.avgHealth >= 80 ? "bg-emerald-500" : kpis.avgHealth >= 50 ? "bg-amber-500" : "bg-red-500"}
+          onClick={() => {
+            setStatusFilter("");
+            setHealthFilter(kpis.avgHealth >= 80 ? "healthy" : kpis.avgHealth >= 50 ? "warning" : "critical");
+          }}
         />
         <KpiCard
           title="Most Used"
@@ -278,6 +173,9 @@ export function WorkflowAdminCenter() {
           subtitle={kpis.mostUsed ? `${kpis.mostUsed.usage_count}x used` : undefined}
           icon={<BarChart3 className="h-5 w-5 text-white" />}
           color="bg-purple-500"
+          onClick={() => {
+            if (kpis.mostUsed) openPack(kpis.mostUsed.pack_id, "analytics");
+          }}
         />
       </div>
 
@@ -331,9 +229,9 @@ export function WorkflowAdminCenter() {
             <List className="w-3.5 h-3.5" />
           </button>
         </div>
-        {(categoryFilter || statusFilter || search) && (
+        {(categoryFilter || statusFilter || healthFilter || search) && (
           <button
-            onClick={() => { setCategoryFilter(""); setStatusFilter(""); setSearch(""); }}
+            onClick={resetFilters}
             className="text-[10px] text-gray-400 hover:text-red-500 flex items-center gap-0.5 transition-colors"
           >
             Reset
@@ -342,11 +240,12 @@ export function WorkflowAdminCenter() {
         {!isLoading && (
           <span className="text-[11px] text-gray-400 ml-auto tabular-nums">
             {total} workflow{total !== 1 ? "s" : ""}
+            {healthFilter && ` · ${healthFilter} health`}
           </span>
         )}
       </div>
 
-      {/* Content */}
+      {/* Workflow Library */}
       {isLoading ? (
         <CardSkeleton count={6} columns={3} />
       ) : error ? (
@@ -354,16 +253,29 @@ export function WorkflowAdminCenter() {
       ) : packs.length === 0 ? (
         <EmptyState
           icon={<Workflow className="w-12 h-12" />}
-          title="No workflow packs yet"
-          message="Clone a built-in pack or create a new one to get started."
+          title={healthFilter || statusFilter || search ? "No matching workflows" : "No workflow packs yet"}
+          message={
+            healthFilter || statusFilter || search
+              ? "Try adjusting your filters or reset to see all workflows."
+              : "Clone a built-in pack or create a new one to get started."
+          }
           action={
-            <button
-              onClick={() => setShowCreateDialog(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-navy-700 text-white rounded-lg hover:bg-navy-800 transition-colors text-sm font-medium shadow-sm"
-            >
-              <Plus className="w-4 h-4" />
-              Create Workflow Pack
-            </button>
+            healthFilter || statusFilter || search ? (
+              <button
+                onClick={resetFilters}
+                className="inline-flex items-center gap-2 px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
+              >
+                Reset Filters
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowCreateDialog(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-navy-700 text-white rounded-lg hover:bg-navy-800 transition-colors text-sm font-medium shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                Create Workflow Pack
+              </button>
+            )
           }
         />
       ) : (
@@ -376,25 +288,21 @@ export function WorkflowAdminCenter() {
               key={pack.pack_id}
               pack={pack}
               viewMode={viewMode}
-              onClick={() => setSelectedPackId(pack.pack_id)}
+              onClick={() => openPack(pack.pack_id)}
             />
           ))}
         </div>
       )}
 
-      {/* Detail Drawer */}
       {selectedPackId && (
         <WorkflowPackDetailDrawer
+          key={`${selectedPackId}-${drawerInitialTab}`}
           packId={selectedPackId}
+          initialTab={drawerInitialTab}
           onClose={() => setSelectedPackId(null)}
-          onOpenDesigner={(id: string) => {
-            setSelectedPackId(null);
-            setDesignerPackId(id);
-          }}
         />
       )}
 
-      {/* Create Dialog */}
       {showCreateDialog && (
         <CreateWorkflowDialog onClose={() => setShowCreateDialog(false)} />
       )}

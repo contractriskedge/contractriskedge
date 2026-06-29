@@ -166,9 +166,10 @@ function explainCondition(c: Condition, fields: FieldDef[]): string {
 interface Props {
   onSave: (rules: Rule[]) => void;
   onBack: () => void;
+  embedded?: boolean;
 }
 
-export function RuleBuilder({ onSave, onBack }: Props) {
+export function RuleBuilder({ onSave, onBack, embedded = false }: Props) {
   const [rules, setRules] = useState<Rule[]>([defaultRule(1), defaultRule(2)]);
   const [selectedRuleIdx, setSelectedRuleIdx] = useState(0);
   const [testValues, setTestValues] = useState<Record<string, string>>({});
@@ -284,10 +285,11 @@ export function RuleBuilder({ onSave, onBack }: Props) {
   // ── Render ──────────────────────────────────────────────────────
 
   return (
-    <div className="flex gap-6 h-[calc(100vh-12rem)]">
+    <div className={`flex gap-4 ${embedded ? "h-full p-4" : "gap-6 h-[calc(100vh-12rem)]"}`}>
       {/* Left: Rule List */}
       <div className="w-80 shrink-0 space-y-4 overflow-y-auto pr-2">
-        <h2 className="text-lg font-semibold text-gray-100">Routing Rules</h2>
+        {!embedded && <h2 className="text-lg font-semibold text-gray-100">Routing Rules</h2>}
+        {embedded && <h2 className="text-sm font-semibold text-gray-900">Routing Rules</h2>}
 
         <div className="space-y-2">
           {rules.map((rule, i) => (
@@ -296,12 +298,12 @@ export function RuleBuilder({ onSave, onBack }: Props) {
               onClick={() => setSelectedRuleIdx(i)}
               className={`w-full p-3 rounded-lg border text-left transition-colors ${
                 i === selectedRuleIdx
-                  ? "bg-navy-700 border-gold-500/50"
-                  : "bg-navy-800/50 border-navy-700 hover:border-navy-600"
+                  ? embedded ? "bg-white border-navy-400 ring-1 ring-navy-200" : "bg-navy-700 border-gold-500/50"
+                  : embedded ? "bg-gray-50 border-gray-200 hover:border-gray-300" : "bg-navy-800/50 border-navy-700 hover:border-navy-600"
               }`}
             >
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-200">{rule.name}</span>
+                <span className={`text-sm font-medium ${embedded ? "text-gray-900" : "text-gray-200"}`}>{rule.name}</span>
                 <span className="text-xs text-gray-500">#{rule.priority}</span>
               </div>
               <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
@@ -322,27 +324,34 @@ export function RuleBuilder({ onSave, onBack }: Props) {
 
         <button
           onClick={addRule}
-          className="w-full flex items-center justify-center gap-2 p-3 border border-dashed border-navy-600 rounded-lg text-sm text-gray-400 hover:text-gray-200 hover:border-navy-500"
+          className={`w-full flex items-center justify-center gap-2 p-3 border border-dashed rounded-lg text-sm transition-colors ${
+            embedded
+              ? "border-gray-300 text-gray-500 hover:text-gray-700 hover:border-gray-400"
+              : "border-navy-600 text-gray-400 hover:text-gray-200 hover:border-navy-500"
+          }`}
         >
           <Plus className="w-4 h-4" /> Add Rule
         </button>
 
         {/* Validation Summary */}
-        <div className="p-3 bg-navy-800/50 border border-navy-700 rounded-lg space-y-1">
+        <div className={`p-3 border rounded-lg space-y-1 ${
+          embedded ? "bg-gray-50 border-gray-200" : "bg-navy-800/50 border-navy-700"
+        }`}>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-400">Validation</span>
-            <span className={errors.length === 0 ? "text-green-400" : "text-red-400"}>
-              {errors.length === 0 ? "✅ Valid" : `${errors.length} issue${errors.length > 1 ? "s" : ""}`}
+            <span className={embedded ? "text-gray-500" : "text-gray-400"}>Validation</span>
+            <span className={errors.length === 0 ? "text-emerald-600" : "text-red-600"}>
+              {errors.length === 0 ? "Valid" : `${errors.length} issue${errors.length > 1 ? "s" : ""}`}
             </span>
           </div>
           {errors.map((err, i) => (
-            <div key={i} className="flex items-center gap-1 text-xs text-red-400">
+            <div key={i} className="flex items-center gap-1 text-xs text-red-500">
               <AlertTriangle className="w-3 h-3" /> {err}
             </div>
           ))}
         </div>
 
-        {/* Save / Back */}
+        {/* Save / Back — hidden in embedded drawer mode */}
+        {!embedded && (
         <div className="flex gap-2">
           <button onClick={onBack} className="flex-1 px-4 py-2 bg-navy-800 text-gray-300 rounded-lg hover:bg-navy-700">
             Back
@@ -355,6 +364,7 @@ export function RuleBuilder({ onSave, onBack }: Props) {
             Save Rules
           </button>
         </div>
+        )}
       </div>
 
       {/* Center: Rule Editor */}

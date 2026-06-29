@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import type { WorkflowPackSummary } from "@/services/api/workflowAdmin";
+import { getHealthColors, getHealthLabel } from "./workflowHealthUtils";
 
 interface Props {
   pack: WorkflowPackSummary;
@@ -26,24 +27,6 @@ const categoryColors: Record<string, string> = {
   custom: "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400",
 };
 
-function healthScoreColor(score: number): string {
-  if (score >= 90) return "text-emerald-600 dark:text-emerald-400";
-  if (score >= 70) return "text-amber-600 dark:text-amber-400";
-  return "text-red-600 dark:text-red-400";
-}
-
-function healthScoreLabel(score: number): string {
-  if (score >= 90) return "Healthy";
-  if (score >= 70) return "Warning";
-  return "Critical";
-}
-
-function healthScoreBg(score: number): string {
-  if (score >= 90) return "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800";
-  if (score >= 70) return "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800";
-  return "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800";
-}
-
 function formatRelativeTime(dateStr: string): string {
   const now = Date.now();
   const date = new Date(dateStr).getTime();
@@ -57,7 +40,10 @@ function formatRelativeTime(dateStr: string): string {
 }
 
 export function WorkflowPackCard({ pack, viewMode, onClick }: Props) {
-  const healthColor = healthScoreColor(pack.health_score);
+  const healthColors = getHealthColors(pack.health_score);
+  const healthColor = healthColors.text;
+  const healthLabel = getHealthLabel(healthColors.tier);
+  const healthBg = healthColors.bg;
 
   if (viewMode === "list") {
     return (
@@ -143,14 +129,14 @@ export function WorkflowPackCard({ pack, viewMode, onClick }: Props) {
       </div>
 
       {/* Health Score Card */}
-      <div className={`rounded-lg border p-2.5 mb-3 ${healthScoreBg(pack.health_score)}`}>
+      <div className={`rounded-lg border p-2.5 mb-3 ${healthBg}`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className={`text-lg font-bold ${healthColor}`}>{pack.health_score}</span>
             <span className="text-[10px] opacity-75">/ 100</span>
           </div>
           <div className="text-right">
-            <div className={`text-[10px] font-semibold ${healthColor}`}>{healthScoreLabel(pack.health_score)}</div>
+            <div className={`text-[10px] font-semibold ${healthColor}`}>{healthLabel}</div>
             {pack.warning_count > 0 && (
               <div className="flex items-center gap-0.5 text-[9px] text-amber-600 dark:text-amber-400">
                 <AlertTriangle className="w-2.5 h-2.5" />

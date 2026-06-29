@@ -173,6 +173,17 @@ async def compare_workflow_versions(
     return await service.compare_versions(pack_id, version_id_a, version_id_b)
 
 
+@router.get("/{pack_id}/analytics", response_model=dict)
+async def get_pack_analytics(
+    pack_id: str,
+    days: int = Query(30, ge=1, le=365),
+    service: WorkflowPackService = Depends(get_pack_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Get analytics for a workflow pack."""
+    return await service.get_pack_analytics(pack_id, days=days)
+
+
 # ── Pack Activation ─────────────────────────────────────────────────
 
 

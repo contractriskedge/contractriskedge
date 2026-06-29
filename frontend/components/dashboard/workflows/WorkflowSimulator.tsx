@@ -207,9 +207,12 @@ const defaultTestCases: TestCase[] = [
 
 interface Props {
   onBack: () => void;
+  embedded?: boolean;
+  packId?: string;
+  versionId?: string;
 }
 
-export function WorkflowSimulator({ onBack }: Props) {
+export function WorkflowSimulator({ onBack, embedded = false, packId, versionId }: Props) {
   const [mode, setMode] = useState<"manual" | "contract">("manual");
   const [input, setInput] = useState<SimInput>(defaultInput);
   const [result, setResult] = useState<SimResult | null>(null);
@@ -238,8 +241,8 @@ export function WorkflowSimulator({ onBack }: Props) {
 
     try {
       const apiResult = await simulationMutation.mutateAsync({
-        packId: "nda", // Will be selected from UI in production
-        versionId: "latest",
+        packId: packId ?? "nda",
+        versionId: versionId ?? "latest",
         input: apiInput,
       });
 
@@ -278,7 +281,7 @@ export function WorkflowSimulator({ onBack }: Props) {
       setResult(res);
       setExpandedRules(new Set(res.rules.map((r) => r.rule_id)));
     }
-  }, [input, simulationMutation]);
+  }, [input, simulationMutation, packId, versionId]);
 
   const loadTestCase = (tc: TestCase) => {
     setInput(tc.input);
@@ -288,8 +291,9 @@ export function WorkflowSimulator({ onBack }: Props) {
   // ── Render ──────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6">
+    <div className={embedded ? "p-4 space-y-4" : "space-y-6"}>
       {/* Header */}
+      {!embedded && (
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold text-gray-100">Workflow Simulator</h2>
@@ -307,21 +311,41 @@ export function WorkflowSimulator({ onBack }: Props) {
           </button>
         </div>
       </div>
+      )}
+      {embedded && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-gray-500">Test routing with sample contract data</p>
+          <button
+            onClick={runSimulation}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-navy-700 text-white hover:bg-navy-800 transition-colors shadow-sm"
+          >
+            <Play className="w-3.5 h-3.5" /> Run Simulation
+          </button>
+        </div>
+      )}
 
-      <div className="flex gap-6">
+      <div className={`flex gap-4 ${embedded ? "flex-col lg:flex-row" : "gap-6"}`}>
         {/* Left: Input Panel */}
-        <div className="w-96 shrink-0 space-y-4">
+        <div className={`${embedded ? "w-full lg:w-80" : "w-96"} shrink-0 space-y-4`}>
           {/* Mode Toggle */}
-          <div className="flex bg-navy-800 rounded-lg p-1">
+          <div className={`flex rounded-lg p-1 ${embedded ? "bg-gray-100" : "bg-navy-800"}`}>
             <button
               onClick={() => setMode("manual")}
-              className={`flex-1 px-4 py-2 text-sm rounded-md ${mode === "manual" ? "bg-navy-700 text-gray-100" : "text-gray-400"}`}
+              className={`flex-1 px-4 py-2 text-sm rounded-md ${
+                mode === "manual"
+                  ? embedded ? "bg-white text-gray-900 shadow-sm" : "bg-navy-700 text-gray-100"
+                  : embedded ? "text-gray-500" : "text-gray-400"
+              }`}
             >
               Manual Entry
             </button>
             <button
               onClick={() => setMode("contract")}
-              className={`flex-1 px-4 py-2 text-sm rounded-md ${mode === "contract" ? "bg-navy-700 text-gray-100" : "text-gray-400"}`}
+              className={`flex-1 px-4 py-2 text-sm rounded-md ${
+                mode === "contract"
+                  ? embedded ? "bg-white text-gray-900 shadow-sm" : "bg-navy-700 text-gray-100"
+                  : embedded ? "text-gray-500" : "text-gray-400"
+              }`}
             >
               From Contract
             </button>
