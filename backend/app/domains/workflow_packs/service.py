@@ -88,20 +88,23 @@ class WorkflowPackService:
                 ))
 
         # Include tenant-created packs from DB
+        db_conditions = "tenant_id = :tid"
+        db_params: dict[str, Any] = {"tid": self.tenant_id}
         if category:
-            sql = sa_text("""
-                SELECT * FROM workflow_packs
-                WHERE tenant_id = :tid AND category = :cat
-                ORDER BY created_at DESC
-            """)
-            result = await self.session.execute(sql, {"tid": self.tenant_id, "cat": category.value if hasattr(category, 'value') else category})
-        else:
-            sql = sa_text("""
-                SELECT * FROM workflow_packs
-                WHERE tenant_id = :tid
-                ORDER BY created_at DESC
-            """)
-            result = await self.session.execute(sql, {"tid": self.tenant_id})
+            db_conditions += " AND category = :cat"
+            db_params["cat"] = category.value if hasattr(category, 'value') else category
+        if status:
+            db_conditions += " AND status = :status"
+            db_params["status"] = status
+        if search:
+            db_conditions += " AND (LOWER(name) LIKE :search OR LOWER(COALESCE(description, '')) LIKE :search)"
+            db_params["search"] = f"%{search.lower()}%"
+        sql = sa_text(f"""
+            SELECT * FROM workflow_packs
+            WHERE {db_conditions}
+            ORDER BY created_at DESC
+        """)
+        result = await self.session.execute(sql, db_params)
 
         existing_ids = {p.pack_id for p in packs}
         for row in result.fetchall():
