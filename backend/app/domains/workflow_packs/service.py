@@ -294,6 +294,56 @@ class WorkflowPackService:
             raise ValueError(f"Workflow pack '{pack_id}' not found")
         return {"pack_id": str(row.pack_id), "status": row.status}
 
+    async def clone_pack(self, pack_id: str, actor: str, new_name: Optional[str] = None) -> dict:
+        """Clone a workflow pack with a new name."""
+        import uuid
+        new_id = uuid.uuid4().hex[:12]
+        now = datetime.now(timezone.utc)
+
+        # Get source pack data
+        source = await self.get_pack(pack_id)
+        if not source:
+            raise ValueError(f"Workflow pack '{pack_id}' not found")
+
+        name = new_name or f"{source.name} (Copy)"
+
+        # Insert cloned pack into DB
+        sql = sa_text("""
+            INSERT INTO workflow_packs (pack_id, tenant_id, name, description, category,
+                industry, region, jurisdiction, stages, rules,
+                compliance_requirements, clause_requirements,
+                approval_chains, notification_templates,
+                is_active, status, version, created_by, created_at, updated_at)
+            VALUES (:pid, :tid, :name, :desc, :cat,
+                :industry, :region, :jurisdiction,
+                CAST(:stages AS jsonb), CAST(:rules AS jsonb),
+                CAST(:compliance AS jsonb), CAST(:clauses AS jsonb),
+                CAST(:chains AS jsonb), CAST(:notifications AS jsonb),
+                TRUE, 'draft', 1, :actor, :now, :now)
+            RETURNING pack_id
+        """)
+        result = await self.session.execute(sql, {
+            "pid": new_id,
+            "tid": self.tenant_id,
+            "name": name,
+            "desc": source.description or "",
+            "cat": source.category.value if hasattr(source.category, 'value') else str(source.category),
+            "industry": source.industry,
+            "region": source.region,
+            "jurisdiction": source.jurisdiction,
+            "stages": json.dumps([s.model_dump() for s in source.stages]),
+            "rules": json.dumps([r.model_dump() for r in source.rules]),
+            "compliance": json.dumps([c.model_dump() for c in source.compliance_requirements]),
+            "clauses": json.dumps([c.model_dump() for c in source.clause_requirements]),
+            "chains": json.dumps([a.model_dump() for a in source.approval_chains]),
+            "notifications": json.dumps([n.model_dump() for n in source.notification_templates]),
+            "actor": actor,
+            "now": now,
+        })
+        await self.session.commit()
+        row = result.fetchone()
+        return {"pack_id": str(row.pack_id), "name": name, "status": "draft"}
+
     async def restore_pack(self, pack_id: str) -> dict:
         """Restore an archived workflow pack."""
         if pack_id in BUILTIN_PACKS:

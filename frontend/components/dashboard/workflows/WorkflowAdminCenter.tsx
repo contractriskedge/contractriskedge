@@ -11,7 +11,7 @@ import { KpiCard } from "@/components/shared/KpiCard";
 import { LoadingSkeleton, CardSkeleton } from "@/components/shared/LoadingSkeleton";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { useWorkflowPacks, useArchiveWorkflowPack } from "@/services/hooks/useWorkflowAdmin";
+import { useWorkflowPacks, useArchiveWorkflowPack, useCloneWorkflowPack } from "@/services/hooks/useWorkflowAdmin";
 import { WorkflowPackCard } from "./WorkflowPackCard";
 import { WorkflowPackDetailDrawer, type WorkflowPackTabId } from "./WorkflowPackDetailDrawer";
 import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
@@ -35,6 +35,7 @@ export function WorkflowAdminCenter() {
     status: statusFilter || undefined,
   });
   const archiveMutation = useArchiveWorkflowPack();
+  const cloneMutation = useCloneWorkflowPack();
 
   const allPacks = data?.items ?? [];
 
@@ -288,6 +289,10 @@ export function WorkflowAdminCenter() {
                 if (confirm('Archive this workflow pack? It can be restored later.')) {
                   archiveMutation.mutate(packId);
                 }
+              }}
+              onClone={(packId: string) => {
+                const name = prompt('Enter a name for the cloned workflow pack:', 'Copy');
+                if (name) cloneMutation.mutate({ packId, name });
               }}
             />
           ))}

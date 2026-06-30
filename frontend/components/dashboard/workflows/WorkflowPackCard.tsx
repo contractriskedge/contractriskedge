@@ -14,6 +14,7 @@ interface Props {
   viewMode: "grid" | "list";
   onClick: () => void;
   onArchive?: (packId: string) => void;
+  onClone?: (packId: string) => void;
 }
 
 const categoryColors: Record<string, string> = {
@@ -40,7 +41,7 @@ function formatRelativeTime(dateStr: string): string {
   return `${Math.floor(diffDays / 30)}mo ago`;
 }
 
-export function WorkflowPackCard({ pack, viewMode, onClick, onArchive }: Props) {
+export function WorkflowPackCard({ pack, viewMode, onClick, onArchive, onClone }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -68,7 +69,10 @@ export function WorkflowPackCard({ pack, viewMode, onClick, onArchive }: Props) 
       <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-navy-700 cursor-pointer">
         <Edit className="w-3.5 h-3.5" /> Edit
       </div>
-      <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-navy-700 cursor-pointer">
+      <div
+        onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onClone?.(pack.pack_id); }}
+        className="flex items-center gap-2 px-3 py-2 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-navy-700 cursor-pointer"
+      >
         <Copy className="w-3.5 h-3.5" /> Clone
       </div>
       <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-navy-700 cursor-pointer">

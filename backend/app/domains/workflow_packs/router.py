@@ -101,6 +101,19 @@ async def archive_workflow_pack(
         raise HTTPException(status_code=404, detail=str(e))
 
 
+@router.post("/{pack_id}/clone")
+async def clone_workflow_pack(
+    pack_id: str,
+    data: Optional[dict] = None,
+    service: WorkflowPackService = Depends(get_pack_service),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Clone a workflow pack."""
+    name = data.get("name") if data else None
+    return await service.clone_pack(pack_id, actor=user.id, new_name=name)
+
+
 @router.post("/{pack_id}/restore")
 async def restore_workflow_pack(
     pack_id: str,
