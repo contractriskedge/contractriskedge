@@ -212,8 +212,8 @@ class WorkflowPackService:
                 is_active, version, created_by, created_at, updated_at)
             VALUES (:pid, :tid, :name, :desc,
                 :cat, :industry, :region, :jurisdiction,
-                :stages::jsonb, :rules::jsonb, :compliance::jsonb, :clauses::jsonb,
-                :chains::jsonb, :notifications::jsonb,
+                CAST(:stages AS jsonb), CAST(:rules AS jsonb), CAST(:compliance AS jsonb), CAST(:clauses AS jsonb),
+                CAST(:chains AS jsonb), CAST(:notifications AS jsonb),
                 TRUE, 1, :actor, :now, :now)
             RETURNING pack_id, name, description, category, industry, region, jurisdiction,
                 stages, rules, compliance_requirements, clause_requirements,
@@ -429,9 +429,9 @@ class WorkflowPackService:
             INSERT INTO pack_activations (activation_id, pack_id, tenant_id,
                 business_unit, config_overrides, is_active, activated_by, activated_at)
             VALUES (:aid, :pid, :tid,
-                :bu, :overrides::jsonb, TRUE, :actor, :now)
+                :bu, CAST(:overrides AS jsonb), TRUE, :actor, :now)
             ON CONFLICT (pack_id, tenant_id, business_unit) WHERE is_active = TRUE
-            DO UPDATE SET config_overrides = :overrides::jsonb, updated_at = :now
+            DO UPDATE SET config_overrides = CAST(:overrides AS jsonb), updated_at = :now
             RETURNING activation_id, pack_id, tenant_id, business_unit, config_overrides,
                 is_active, activated_by, activated_at
         """)
