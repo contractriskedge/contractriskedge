@@ -281,6 +281,21 @@ class WorkflowPackService:
         if "description" in data:
             updates.append("description = :desc")
             params["desc"] = data["description"]
+        if "owner" in data:
+            updates.append("owner = :owner")
+            params["owner"] = data["owner"]
+        if "health_score" in data:
+            updates.append("health_score = :health")
+            params["health"] = data["health_score"]
+        if "usage_count" in data:
+            updates.append("usage_count = :usage")
+            params["usage"] = data["usage_count"]
+        if "running_instances" in data:
+            updates.append("running_instances = :running")
+            params["running"] = data["running_instances"]
+        if "warning_count" in data:
+            updates.append("warning_count = :warnings")
+            params["warnings"] = data["warning_count"]
         if not updates:
             return {"pack_id": pack_id, "note": "No changes"}
 
@@ -375,9 +390,12 @@ class WorkflowPackService:
         return {"pack_id": str(row.pack_id), "name": name, "status": "draft"}
 
     async def import_pack(self, data: Any, actor: str) -> dict:
-        """Import a workflow pack from JSON data (supports single dict or list of dicts)."""
+        """Import a workflow pack from JSON data (supports single dict or list of dicts).
+
+        Uses UPSERT: if a pack with the same pack_id exists, it updates it.
+        Otherwise creates a new pack.
+        """
         import uuid
-        new_id = uuid.uuid4().hex[:12]
         now = datetime.now(timezone.utc)
 
         # Handle both single object and array of objects
@@ -387,6 +405,7 @@ class WorkflowPackService:
             # Import the first pack from the list
             data = data[0]
 
+        pack_id = data.get("pack_id") or uuid.uuid4().hex[:12]
         name = data.get("name", "Imported Workflow")
         description = data.get("description", "")
 
@@ -395,17 +414,43 @@ class WorkflowPackService:
                 industry, region, jurisdiction, stages, rules,
                 compliance_requirements, clause_requirements,
                 approval_chains, notification_templates,
-                is_active, status, version, created_by, created_at, updated_at)
+                is_active, status, version, owner, health_score, usage_count,
+                running_instances, warning_count, last_published, created_by, created_at, updated_at)
             VALUES (:pid, :tid, :name, :desc, :cat,
                 :industry, :region, :jurisdiction,
                 CAST(:stages AS jsonb), CAST(:rules AS jsonb),
                 CAST(:compliance AS jsonb), CAST(:clauses AS jsonb),
                 CAST(:chains AS jsonb), CAST(:notifications AS jsonb),
-                TRUE, 'draft', 1, :actor, :now, :now)
-            RETURNING pack_id
+                TRUE, :status, 1, :owner, :health, :usage,
+                :running, :warnings, :last_pub, :actor, :now, :now)
+            ON CONFLICT (pack_id) DO UPDATE SET
+                name = EXCLUDED.name,
+                description = EXCLUDED.description,
+                category = EXCLUDED.category,
+                stages = EXCLUDED.stages,
+                rules = EXCLUDED.rules,
+                compliance_requirements = EXCLUDED.compliance_requirements,
+                clause_requirements = EXCLUDED.clause_requirements,
+                approval_chains = EXCLUDED.approval_chains,
+                notification_templates = EXCLUDED.notification_templates,
+                owner = EXCLUDED.owner,
+                health_score = EXCLUDED.health_score,
+                usage_count = EXCLUDED.usage_count,
+                running_instances = EXCLUDED.running_instances,
+                warning_count = EXCLUDED.warning_count,
+                last_published = EXCLUDED.last_published,
+                updated_at = NOW()
+            RETURNING pack_id, name
         """)
+        last_published_str = data.get("last_published")
+        last_published = None
+        if last_published_str:
+            try:
+                last_published = datetime.fromisoformat(str(last_published_str).replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
         result = await self.session.execute(sql, {
-            "pid": new_id,
+            "pid": pack_id,
             "tid": self.tenant_id,
             "name": name,
             "desc": description,
@@ -419,12 +464,19 @@ class WorkflowPackService:
             "clauses": json.dumps(data.get("clause_requirements", [])),
             "chains": json.dumps(data.get("approval_chains", [])),
             "notifications": json.dumps(data.get("notification_templates", [])),
+            "status": data.get("status", "draft"),
+            "owner": data.get("owner"),
+            "health": data.get("health_score", 100),
+            "usage": data.get("usage_count", 0),
+            "running": data.get("running_instances", 0),
+            "warnings": data.get("warning_count", 0),
+            "last_pub": last_published,
             "actor": actor,
             "now": now,
         })
         await self.session.commit()
         row = result.fetchone()
-        return {"pack_id": str(row.pack_id), "name": name, "status": "draft"}
+        return {"pack_id": str(row.pack_id), "name": row.name, "status": "updated"}
 
     async def restore_pack(self, pack_id: str) -> dict:
         """Restore an archived workflow pack."""
