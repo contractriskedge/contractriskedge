@@ -58,7 +58,7 @@ const STATUS_COLOR_MAP: Record<string, BadgeColor> = {
   review: "blue",
   draft: "gray",
   ai_analyzed: "gray",
-  archived: "gray",
+  archived: "indigo",
   closed: "gray",
   expired: "red",
   critical: "red",
