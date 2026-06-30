@@ -68,6 +68,15 @@ export function useUpdateWorkflowPack(packId: string) {
   });
 }
 
+export function useRenameWorkflowPack() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ packId, name }: { packId: string; name: string }) =>
+      workflowAdmin.updateWorkflowPack(packId, { name } as any),
+    onSuccess: () => qc.invalidateQueries({ queryKey: workflowAdminKeys.packs() }),
+  });
+}
+
 export function useDeleteWorkflowPack() {
   const qc = useQueryClient();
   return useMutation({

@@ -11,7 +11,7 @@ import { KpiCard } from "@/components/shared/KpiCard";
 import { LoadingSkeleton, CardSkeleton } from "@/components/shared/LoadingSkeleton";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { useWorkflowPacks, useArchiveWorkflowPack, useCloneWorkflowPack } from "@/services/hooks/useWorkflowAdmin";
+import { useWorkflowPacks, useArchiveWorkflowPack, useCloneWorkflowPack, useRenameWorkflowPack } from "@/services/hooks/useWorkflowAdmin";
 import { WorkflowPackCard } from "./WorkflowPackCard";
 import { WorkflowPackDetailDrawer, type WorkflowPackTabId } from "./WorkflowPackDetailDrawer";
 import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
@@ -36,6 +36,7 @@ export function WorkflowAdminCenter() {
   });
   const archiveMutation = useArchiveWorkflowPack();
   const cloneMutation = useCloneWorkflowPack();
+  const renameMutation = useRenameWorkflowPack();
 
   const allPacks = data?.items ?? [];
 
@@ -293,6 +294,11 @@ export function WorkflowAdminCenter() {
               onClone={(packId: string) => {
                 const name = prompt('Enter a name for the cloned workflow pack:', 'Copy');
                 if (name) cloneMutation.mutate({ packId, name });
+              }}
+              onRename={(packId: string) => {
+                const pack = allPacks.find((p) => p.pack_id === packId);
+                const newName = prompt('Enter a new name for this workflow pack:', pack?.name || '');
+                if (newName && newName !== pack?.name) renameMutation.mutate({ packId, name: newName });
               }}
             />
           ))}

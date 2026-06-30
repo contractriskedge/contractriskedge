@@ -15,6 +15,7 @@ interface Props {
   onClick: () => void;
   onArchive?: (packId: string) => void;
   onClone?: (packId: string) => void;
+  onRename?: (packId: string) => void;
 }
 
 const categoryColors: Record<string, string> = {
@@ -41,7 +42,7 @@ function formatRelativeTime(dateStr: string): string {
   return `${Math.floor(diffDays / 30)}mo ago`;
 }
 
-export function WorkflowPackCard({ pack, viewMode, onClick, onArchive, onClone }: Props) {
+export function WorkflowPackCard({ pack, viewMode, onClick, onArchive, onClone, onRename }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -66,8 +67,11 @@ export function WorkflowPackCard({ pack, viewMode, onClick, onArchive, onClone }
       ref={menuRef}
       className="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-600 rounded-lg shadow-lg z-20 py-1"
     >
-      <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-navy-700 cursor-pointer">
-        <Edit className="w-3.5 h-3.5" /> Edit
+      <div
+        onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onRename?.(pack.pack_id); }}
+        className="flex items-center gap-2 px-3 py-2 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-navy-700 cursor-pointer"
+      >
+        <Edit className="w-3.5 h-3.5" /> Rename
       </div>
       <div
         onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onClone?.(pack.pack_id); }}

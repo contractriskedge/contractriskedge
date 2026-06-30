@@ -74,6 +74,20 @@ async def create_workflow_pack(
     return await service.create_pack(pack, actor=user.id)
 
 
+@router.put("/{pack_id}")
+async def update_workflow_pack(
+    pack_id: str,
+    data: dict,
+    service: WorkflowPackService = Depends(get_pack_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Update a workflow pack (name, description, etc.)."""
+    result = await service.update_pack(pack_id, data)
+    if not result:
+        raise HTTPException(status_code=404, detail="Workflow pack not found")
+    return result
+
+
 @router.delete("/{pack_id}")
 async def delete_workflow_pack(
     pack_id: str,

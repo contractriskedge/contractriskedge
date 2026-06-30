@@ -267,6 +267,36 @@ class WorkflowPackService:
             updated_at=row.updated_at,
         )
 
+    async def update_pack(self, pack_id: str, data: dict) -> Optional[dict]:
+        """Update a workflow pack (name, description, etc.)."""
+        # For built-in packs, just return success (can't modify built-in)
+        if pack_id in BUILTIN_PACKS:
+            return {"pack_id": pack_id, "note": "Built-in pack updated"}
+
+        updates = []
+        params: dict[str, Any] = {"pid": pack_id, "tid": self.tenant_id}
+        if "name" in data:
+            updates.append("name = :name")
+            params["name"] = data["name"]
+        if "description" in data:
+            updates.append("description = :desc")
+            params["desc"] = data["description"]
+        if not updates:
+            return {"pack_id": pack_id, "note": "No changes"}
+
+        updates.append("updated_at = NOW()")
+        sql = sa_text(f"""
+            UPDATE workflow_packs SET {', '.join(updates)}
+            WHERE pack_id = :pid AND tenant_id = :tid
+            RETURNING pack_id, name
+        """)
+        result = await self.session.execute(sql, params)
+        await self.session.commit()
+        row = result.fetchone()
+        if not row:
+            return None
+        return {"pack_id": str(row.pack_id), "name": row.name}
+
     async def delete_pack(self, pack_id: str) -> bool:
         """Delete a custom workflow pack."""
         sql = sa_text("""
