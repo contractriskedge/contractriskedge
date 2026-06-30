@@ -132,6 +132,27 @@ class WorkflowPackService:
 
         return packs
 
+    async def _fetch_db_pack(self, pack_id: str) -> Optional[dict]:
+        """Fetch a pack's DB record as a dict (for merging overrides)."""
+        try:
+            sql = sa_text("""
+                SELECT owner, health_score, usage_count, running_instances, warning_count
+                FROM workflow_packs WHERE pack_id = :pid AND tenant_id = :tid
+            """)
+            result = await self.session.execute(sql, {"pid": pack_id, "tid": self.tenant_id})
+            row = result.fetchone()
+            if row:
+                return {
+                    "owner": row.owner,
+                    "health_score": row.health_score,
+                    "usage_count": row.usage_count,
+                    "running_instances": row.running_instances,
+                    "warning_count": row.warning_count,
+                }
+        except Exception:
+            pass
+        return None
+
     async def get_pack(self, pack_id: str) -> Optional[WorkflowPackResponse]:
         """Get a workflow pack by ID (checks built-in packs first, then DB)."""
         # Check built-in packs
@@ -145,7 +166,7 @@ class WorkflowPackService:
                     last_published = datetime.fromisoformat(last_published_str.replace("Z", "+00:00"))
                 except (ValueError, TypeError):
                     pass
-            return WorkflowPackResponse(
+            result = WorkflowPackResponse(
                 pack_id=pack_id,
                 name=pack_def["name"],
                 description=pack_def.get("description"),
@@ -173,6 +194,20 @@ class WorkflowPackService:
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
             )
+            # Check DB for any overrides (e.g., owner updated via import)
+            db_row = await self._fetch_db_pack(pack_id)
+            if db_row:
+                if db_row.get("owner"):
+                    result.owner = db_row["owner"]
+                if db_row.get("health_score"):
+                    result.health_score = db_row["health_score"]
+                if db_row.get("usage_count") is not None:
+                    result.usage_count = db_row["usage_count"]
+                if db_row.get("running_instances") is not None:
+                    result.running_instances = db_row["running_instances"]
+                if db_row.get("warning_count") is not None:
+                    result.warning_count = db_row["warning_count"]
+            return result
 
         # Check DB
         sql = sa_text("""
@@ -390,10 +425,10 @@ class WorkflowPackService:
         return {"pack_id": str(row.pack_id), "name": name, "status": "draft"}
 
     async def import_pack(self, data: Any, actor: str) -> dict:
-        """Import a workflow pack from JSON data (supports single dict or list of dicts).
+        """Import workflow pack(s) from JSON data (supports single dict or list of dicts).
 
         Uses UPSERT: if a pack with the same pack_id exists, it updates it.
-        Otherwise creates a new pack.
+        Otherwise creates a new pack. Processes ALL packs in a list.
         """
         import uuid
         now = datetime.now(timezone.utc)
@@ -402,9 +437,17 @@ class WorkflowPackService:
         if isinstance(data, list):
             if len(data) == 0:
                 raise ValueError("No workflow packs to import")
-            # Import the first pack from the list
-            data = data[0]
+            results = []
+            for item in data:
+                result = await self._import_single_pack(item, actor, now)
+                results.append(result)
+            return {"imported": len(results), "packs": results}
 
+        return await self._import_single_pack(data, actor, now)
+
+    async def _import_single_pack(self, data: dict, actor: str, now: datetime) -> dict:
+        """Import a single workflow pack (UPSERT)."""
+        import uuid
         pack_id = data.get("pack_id") or uuid.uuid4().hex[:12]
         name = data.get("name", "Imported Workflow")
         description = data.get("description", "")
