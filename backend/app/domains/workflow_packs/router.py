@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db, get_current_user, get_tenant_id
@@ -239,6 +240,39 @@ async def get_pack_analytics(
 ):
     """Get analytics for a workflow pack."""
     return await service.get_pack_analytics(pack_id, days=days)
+
+
+# ── Export / Import ─────────────────────────────────────────────────
+
+
+@router.get("/{pack_id}/export")
+async def export_workflow_pack(
+    pack_id: str,
+    service: WorkflowPackService = Depends(get_pack_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_READ)),
+):
+    """Export a workflow pack as JSON (Excel-compatible format)."""
+    pack = await service.get_pack(pack_id)
+    if not pack:
+        raise HTTPException(status_code=404, detail="Workflow pack not found")
+    return JSONResponse(
+        content=pack.model_dump(mode="json"),
+        headers={"Content-Disposition": f'attachment; filename="workflow-{pack_id}.json"'},
+    )
+
+
+@router.post("/import", response_model=dict, status_code=201)
+async def import_workflow_pack(
+    file: UploadFile = File(...),
+    service: WorkflowPackService = Depends(get_pack_service),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Import a workflow pack from JSON file."""
+    import json
+    content = await file.read()
+    data = json.loads(content)
+    return await service.import_pack(data, actor=user.id)
 
 
 # ── Pack Activation ─────────────────────────────────────────────────

@@ -374,6 +374,51 @@ class WorkflowPackService:
         row = result.fetchone()
         return {"pack_id": str(row.pack_id), "name": name, "status": "draft"}
 
+    async def import_pack(self, data: dict, actor: str) -> dict:
+        """Import a workflow pack from JSON data."""
+        import uuid
+        new_id = uuid.uuid4().hex[:12]
+        now = datetime.now(timezone.utc)
+
+        name = data.get("name", "Imported Workflow")
+        description = data.get("description", "")
+
+        sql = sa_text("""
+            INSERT INTO workflow_packs (pack_id, tenant_id, name, description, category,
+                industry, region, jurisdiction, stages, rules,
+                compliance_requirements, clause_requirements,
+                approval_chains, notification_templates,
+                is_active, status, version, created_by, created_at, updated_at)
+            VALUES (:pid, :tid, :name, :desc, :cat,
+                :industry, :region, :jurisdiction,
+                CAST(:stages AS jsonb), CAST(:rules AS jsonb),
+                CAST(:compliance AS jsonb), CAST(:clauses AS jsonb),
+                CAST(:chains AS jsonb), CAST(:notifications AS jsonb),
+                TRUE, 'draft', 1, :actor, :now, :now)
+            RETURNING pack_id
+        """)
+        result = await self.session.execute(sql, {
+            "pid": new_id,
+            "tid": self.tenant_id,
+            "name": name,
+            "desc": description,
+            "cat": data.get("category", "custom"),
+            "industry": data.get("industry"),
+            "region": data.get("region"),
+            "jurisdiction": data.get("jurisdiction"),
+            "stages": json.dumps(data.get("stages", [])),
+            "rules": json.dumps(data.get("rules", [])),
+            "compliance": json.dumps(data.get("compliance_requirements", [])),
+            "clauses": json.dumps(data.get("clause_requirements", [])),
+            "chains": json.dumps(data.get("approval_chains", [])),
+            "notifications": json.dumps(data.get("notification_templates", [])),
+            "actor": actor,
+            "now": now,
+        })
+        await self.session.commit()
+        row = result.fetchone()
+        return {"pack_id": str(row.pack_id), "name": name, "status": "draft"}
+
     async def restore_pack(self, pack_id: str) -> dict:
         """Restore an archived workflow pack."""
         if pack_id in BUILTIN_PACKS:

@@ -108,11 +108,52 @@ export function WorkflowAdminCenter() {
               <Activity className="w-3.5 h-3.5" />
               Operations
             </button>
-            <button className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-navy-600 px-3 py-2 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors">
+            <button
+              onClick={() => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.json';
+                input.onchange = async (e) => {
+                  const file = (e.target as HTMLInputElement).files?.[0];
+                  if (!file) return;
+                  try {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    const res = await fetch('/api/v1/workflow-packs/import', {
+                      method: 'POST',
+                      headers: { 'Authorization': 'Bearer dev-token' },
+                      body: formData,
+                    });
+                    if (res.ok) { refetch(); alert('Workflow imported successfully.'); }
+                    else alert('Import failed.');
+                  } catch { alert('Import failed.'); }
+                };
+                input.click();
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-navy-600 px-3 py-2 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors"
+            >
               <Upload className="w-3.5 h-3.5" />
               Import
             </button>
-            <button className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-navy-600 px-3 py-2 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors">
+            <button
+              onClick={async () => {
+                if (packs.length === 0) { alert('No workflows to export.'); return; }
+                try {
+                  const res = await fetch('/api/v1/workflow-packs', {
+                    headers: { 'Authorization': 'Bearer dev-token' },
+                  });
+                  const data = await res.json();
+                  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `workflows-export-${new Date().toISOString().split('T')[0]}.json`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                } catch { alert('Export failed.'); }
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-navy-600 px-3 py-2 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-navy-700 transition-colors"
+            >
               <Download className="w-3.5 h-3.5" />
               Export
             </button>
