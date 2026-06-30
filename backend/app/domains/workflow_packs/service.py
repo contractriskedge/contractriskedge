@@ -374,11 +374,18 @@ class WorkflowPackService:
         row = result.fetchone()
         return {"pack_id": str(row.pack_id), "name": name, "status": "draft"}
 
-    async def import_pack(self, data: dict, actor: str) -> dict:
-        """Import a workflow pack from JSON data."""
+    async def import_pack(self, data: Any, actor: str) -> dict:
+        """Import a workflow pack from JSON data (supports single dict or list of dicts)."""
         import uuid
         new_id = uuid.uuid4().hex[:12]
         now = datetime.now(timezone.utc)
+
+        # Handle both single object and array of objects
+        if isinstance(data, list):
+            if len(data) == 0:
+                raise ValueError("No workflow packs to import")
+            # Import the first pack from the list
+            data = data[0]
 
         name = data.get("name", "Imported Workflow")
         description = data.get("description", "")
