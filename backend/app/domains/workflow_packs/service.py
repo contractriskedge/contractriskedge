@@ -318,6 +318,30 @@ class WorkflowPackService:
         import uuid
         version_id = uuid.uuid4().hex[:12]
 
+        # Ensure the pack exists in DB (built-in packs may not have a DB record)
+        pack_check = await self.session.execute(
+            sa_text("SELECT pack_id FROM workflow_packs WHERE pack_id = :pid AND tenant_id = :tid"),
+            {"pid": pack_id, "tid": self.tenant_id},
+        )
+        if not pack_check.fetchone():
+            # Create a minimal pack record for FK compliance
+            pack_def = BUILTIN_PACKS.get(pack_id, {})
+            await self.session.execute(
+                sa_text("""
+                    INSERT INTO workflow_packs (pack_id, tenant_id, name, description, category, status, is_active, version, created_by, created_at, updated_at)
+                    VALUES (:pid, :tid, :name, :desc, :cat, 'published', TRUE, 1, :actor, :now, :now)
+                """),
+                {
+                    "pid": pack_id,
+                    "tid": self.tenant_id,
+                    "name": pack_def.get("name", pack_id),
+                    "desc": pack_def.get("description", ""),
+                    "cat": pack_def.get("category", "custom").value if hasattr(pack_def.get("category", ""), "value") else str(pack_def.get("category", "custom")),
+                    "actor": actor,
+                    "now": now,
+                },
+            )
+
         # Get next version number
         sql = sa_text("""
             SELECT COALESCE(MAX(version_number), 0) + 1 FROM workflow_versions
