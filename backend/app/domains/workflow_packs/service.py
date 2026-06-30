@@ -129,6 +129,13 @@ class WorkflowPackService:
         if pack_id in BUILTIN_PACKS:
             pack_def = BUILTIN_PACKS[pack_id]
             stages_data = pack_def.get("stages", [])
+            last_published_str = pack_def.get("last_published")
+            last_published = None
+            if last_published_str:
+                try:
+                    last_published = datetime.fromisoformat(last_published_str.replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    pass
             return WorkflowPackResponse(
                 pack_id=pack_id,
                 name=pack_def["name"],
@@ -144,7 +151,15 @@ class WorkflowPackService:
                 approval_chains=[ApprovalChainDef(**a) for a in pack_def.get("approval_chains", [])],
                 notification_templates=[NotificationTemplate(**n) for n in pack_def.get("notification_templates", [])],
                 is_active=True,
+                status="published" if last_published else "draft",
                 version=1,
+                health_score=pack_def.get("health_score", 100),
+                usage_count=pack_def.get("usage_count", 0),
+                running_instances=pack_def.get("running_instances", 0),
+                warning_count=pack_def.get("warning_count", 0),
+                stage_count=len(stages_data),
+                last_published=last_published,
+                owner=pack_def.get("owner"),
                 created_by="system",
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
@@ -311,10 +326,10 @@ class WorkflowPackService:
         sql = sa_text("""
             INSERT INTO workflow_versions (version_id, pack_id, tenant_id,
                 version_number, status, stages_definition, rules_definition,
-                change_summary, created_by, created_at)
+                snapshot, change_summary, created_by, created_at)
             VALUES (:vid, :pid, :tid,
-                :vnum, 'draft', :stages::jsonb, :rules::jsonb,
-                :summary, :actor, :now)
+                :vnum, 'draft', CAST(:stages AS jsonb), CAST(:rules AS jsonb),
+                CAST(:snapshot AS jsonb), :summary, :actor, :now)
             RETURNING version_id, version_number
         """)
         result = await self.session.execute(sql, {
@@ -324,6 +339,7 @@ class WorkflowPackService:
             "vnum": next_version,
             "stages": json.dumps(data.get("stages", [])),
             "rules": json.dumps(data.get("rules", [])),
+            "snapshot": json.dumps({"stages": data.get("stages", []), "rules": data.get("rules", [])}),
             "summary": data.get("change_summary", ""),
             "actor": actor,
             "now": now,

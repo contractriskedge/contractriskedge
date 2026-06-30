@@ -161,8 +161,21 @@ class WorkflowPackResponse(BaseModel):
     approval_chains: list[ApprovalChainDef] = Field(default_factory=list)
     notification_templates: list[NotificationTemplate] = Field(default_factory=list)
     is_active: bool = True
+    status: str = "draft"
     version: int = 1
+    health_score: int = 100
     usage_count: int = 0
+    running_instances: int = 0
+    warning_count: int = 0
+    stage_count: int = 0
+    templates_using: int = 0
+    contracts_running: int = 0
+    referenced_rule_count: int = 0
+    referenced_action_count: int = 0
+    contract_types: list[str] = Field(default_factory=list)
+    default_for_template: Optional[str] = None
+    last_published: Optional[datetime] = None
+    owner: Optional[str] = None
     created_by: str = ""
     created_at: datetime
     updated_at: datetime
