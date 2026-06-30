@@ -87,6 +87,34 @@ async def delete_workflow_pack(
     return {"status": "deleted"}
 
 
+@router.post("/{pack_id}/archive")
+async def archive_workflow_pack(
+    pack_id: str,
+    service: WorkflowPackService = Depends(get_pack_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Archive a workflow pack (set status to archived)."""
+    try:
+        result = await service.archive_pack(pack_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/{pack_id}/restore")
+async def restore_workflow_pack(
+    pack_id: str,
+    service: WorkflowPackService = Depends(get_pack_service),
+    _: None = Depends(require_permission(Permissions.CONTRACTS_WRITE)),
+):
+    """Restore an archived workflow pack."""
+    try:
+        result = await service.restore_pack(pack_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 # ── Versions ─────────────────────────────────────────────────────────
 
 

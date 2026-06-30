@@ -76,6 +76,22 @@ export function useDeleteWorkflowPack() {
   });
 }
 
+export function useArchiveWorkflowPack() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: workflowAdmin.archiveWorkflowPack,
+    onSuccess: () => qc.invalidateQueries({ queryKey: workflowAdminKeys.packs() }),
+  });
+}
+
+export function useRestoreWorkflowPack() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: workflowAdmin.restoreWorkflowPack,
+    onSuccess: () => qc.invalidateQueries({ queryKey: workflowAdminKeys.packs() }),
+  });
+}
+
 export function useCloneWorkflowPack() {
   const qc = useQueryClient();
   return useMutation({

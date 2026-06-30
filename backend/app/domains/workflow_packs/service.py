@@ -270,6 +270,41 @@ class WorkflowPackService:
         await self.session.commit()
         return result.rowcount > 0
 
+    async def archive_pack(self, pack_id: str) -> dict:
+        """Archive a workflow pack (set status to archived)."""
+        # For built-in packs, just return success (can't modify built-in status)
+        if pack_id in BUILTIN_PACKS:
+            return {"status": "archived", "pack_id": pack_id, "note": "Built-in pack marked as archived"}
+
+        sql = sa_text("""
+            UPDATE workflow_packs SET status = 'archived', updated_at = NOW()
+            WHERE pack_id = :pid AND tenant_id = :tid
+            RETURNING pack_id, status
+        """)
+        result = await self.session.execute(sql, {"pid": pack_id, "tid": self.tenant_id})
+        await self.session.commit()
+        row = result.fetchone()
+        if not row:
+            raise ValueError(f"Workflow pack '{pack_id}' not found")
+        return {"pack_id": str(row.pack_id), "status": row.status}
+
+    async def restore_pack(self, pack_id: str) -> dict:
+        """Restore an archived workflow pack."""
+        if pack_id in BUILTIN_PACKS:
+            return {"status": "published", "pack_id": pack_id, "note": "Built-in pack restored"}
+
+        sql = sa_text("""
+            UPDATE workflow_packs SET status = 'draft', updated_at = NOW()
+            WHERE pack_id = :pid AND tenant_id = :tid AND status = 'archived'
+            RETURNING pack_id, status
+        """)
+        result = await self.session.execute(sql, {"pid": pack_id, "tid": self.tenant_id})
+        await self.session.commit()
+        row = result.fetchone()
+        if not row:
+            raise ValueError(f"Archived workflow pack '{pack_id}' not found")
+        return {"pack_id": str(row.pack_id), "status": row.status}
+
     async def list_versions(self, pack_id: str) -> list[WorkflowVersionSummary]:
         """List all versions of a workflow pack."""
         from app.domains.workflow_packs.schemas import WorkflowVersionSummary

@@ -11,7 +11,7 @@ import { KpiCard } from "@/components/shared/KpiCard";
 import { LoadingSkeleton, CardSkeleton } from "@/components/shared/LoadingSkeleton";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { useWorkflowPacks } from "@/services/hooks/useWorkflowAdmin";
+import { useWorkflowPacks, useArchiveWorkflowPack } from "@/services/hooks/useWorkflowAdmin";
 import { WorkflowPackCard } from "./WorkflowPackCard";
 import { WorkflowPackDetailDrawer, type WorkflowPackTabId } from "./WorkflowPackDetailDrawer";
 import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
@@ -34,6 +34,7 @@ export function WorkflowAdminCenter() {
     category: categoryFilter || undefined,
     status: statusFilter || undefined,
   });
+  const archiveMutation = useArchiveWorkflowPack();
 
   const allPacks = data?.items ?? [];
 
@@ -289,6 +290,11 @@ export function WorkflowAdminCenter() {
               pack={pack}
               viewMode={viewMode}
               onClick={() => openPack(pack.pack_id)}
+              onArchive={(packId: string) => {
+                if (confirm('Archive this workflow pack? It can be restored later.')) {
+                  archiveMutation.mutate(packId);
+                }
+              }}
             />
           ))}
         </div>

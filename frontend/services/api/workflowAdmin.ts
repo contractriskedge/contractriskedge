@@ -245,6 +245,14 @@ export async function deleteWorkflowPack(packId: string): Promise<void> {
   return api.delete(`/workflow-packs/${packId}`);
 }
 
+export async function archiveWorkflowPack(packId: string): Promise<{ status: string }> {
+  return api.post(`/workflow-packs/${packId}/archive`);
+}
+
+export async function restoreWorkflowPack(packId: string): Promise<{ status: string }> {
+  return api.post(`/workflow-packs/${packId}/restore`);
+}
+
 export async function cloneWorkflowPack(
   packId: string,
   name?: string
