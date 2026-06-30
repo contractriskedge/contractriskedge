@@ -118,9 +118,15 @@ class WorkflowPackService:
                     industry=row.industry,
                     region=row.region,
                     is_active=row.is_active,
+                    status=getattr(row, 'status', 'draft') or 'draft',
                     version=row.version or 1,
+                    health_score=getattr(row, 'health_score', 100) or 100,
                     usage_count=row.usage_count or 0,
+                    running_instances=getattr(row, 'running_instances', 0) or 0,
                     stage_count=len(row.stages or []),
+                    warning_count=getattr(row, 'warning_count', 0) or 0,
+                    owner=getattr(row, 'owner', None),
+                    last_published=getattr(row, 'last_published', None),
                     created_at=row.created_at,
                 ))
 

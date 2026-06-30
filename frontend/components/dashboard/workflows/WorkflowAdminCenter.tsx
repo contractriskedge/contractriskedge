@@ -4,7 +4,7 @@ import React, { useState, useMemo } from "react";
 import {
   Workflow, Plus, Search, LayoutGrid, List, ArrowLeft, Activity,
   RefreshCw, Download, Upload, Layers, CheckCircle, Clock,
-  TrendingUp, BarChart3, Filter,
+  TrendingUp, BarChart3, Filter, Archive,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { KpiCard } from "@/components/shared/KpiCard";
@@ -49,15 +49,12 @@ export function WorkflowAdminCenter() {
   const kpis = useMemo(() => {
     const published = allPacks.filter((p) => p.status === "published").length;
     const draft = allPacks.filter((p) => p.status === "draft").length;
+    const archived = allPacks.filter((p) => p.status === "archived").length;
     const running = allPacks.reduce((sum, p) => sum + (p.running_instances || 0), 0);
     const avgHealth = allPacks.length > 0
       ? Math.round(allPacks.reduce((sum, p) => sum + (p.health_score || 0), 0) / allPacks.length)
       : 0;
-    const mostUsed = allPacks.reduce(
-      (best, p) => (p.usage_count > (best?.usage_count || 0) ? p : best),
-      allPacks[0],
-    );
-    return { published, draft, running, avgHealth, mostUsed };
+    return { published, draft, archived, running, avgHealth };
   }, [allPacks]);
 
   const openPack = (packId: string, tab: WorkflowPackTabId = "overview") => {
@@ -129,7 +126,7 @@ export function WorkflowAdminCenter() {
       />
 
       {/* KPI Cards — clickable drill-down to filtered views */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
         <KpiCard
           title="Total Workflows"
           value={data?.total ?? 0}
@@ -169,14 +166,11 @@ export function WorkflowAdminCenter() {
           }}
         />
         <KpiCard
-          title="Most Used"
-          value={kpis.mostUsed?.name?.split(" ").slice(0, 2).join(" ") || "—"}
-          subtitle={kpis.mostUsed ? `${kpis.mostUsed.usage_count}x used` : undefined}
-          icon={<BarChart3 className="h-5 w-5 text-white" />}
-          color="bg-purple-500"
-          onClick={() => {
-            if (kpis.mostUsed) openPack(kpis.mostUsed.pack_id, "analytics");
-          }}
+          title="Archived"
+          value={kpis.archived}
+          icon={<Archive className="h-5 w-5 text-white" />}
+          color="bg-gray-500"
+          onClick={() => { setHealthFilter(""); setStatusFilter("archived"); }}
         />
       </div>
 
