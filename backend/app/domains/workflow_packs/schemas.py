@@ -17,6 +17,10 @@ class WorkflowPackCategory(str, Enum):
     HEALTHCARE = "healthcare"
     SAAS_VENDOR = "saas_vendor"
     FINANCE_LEGAL = "finance_legal"
+    LEGAL = "legal"
+    SALES = "sales"
+    HR = "hr"
+    PRIVACY = "privacy"
     REGIONAL_COMPLIANCE = "regional_compliance"
     CUSTOM = "custom"
 
