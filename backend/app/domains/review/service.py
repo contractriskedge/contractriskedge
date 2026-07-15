@@ -854,7 +854,9 @@ class ReviewService:
         from app.domains.review.clause_category import resolve_mitigation_plan
         from app.domains.review.redline_coverage import audit_finding_redline_coverage
 
-        findings = await self.review_repo.get_findings(review_id, self.tenant_id)
+        findings, _ = await self.review_repo.get_findings(
+            review_id, self.tenant_id, page_size=10_000,
+        )
         redlines = await self.review_repo.get_redlines(review_id, self.tenant_id)
 
         before = audit_finding_redline_coverage(findings, redlines)
@@ -947,7 +949,9 @@ class ReviewService:
         )
         from app.domains.review.models import ReviewRedline as RRModel, RedlineStatus
 
-        findings = await self.review_repo.get_findings(review_id, self.tenant_id)
+        findings, _ = await self.review_repo.get_findings(
+            review_id, self.tenant_id, page_size=10_000,
+        )
         redlines = await self.review_repo.get_redlines(review_id, self.tenant_id)
         findings_by_id = {str(f.finding_id): f for f in findings}
 
@@ -1007,7 +1011,9 @@ class ReviewService:
         """Return finding→redline coverage audit for a review."""
         from app.domains.review.redline_coverage import audit_finding_redline_coverage
 
-        findings = await self.review_repo.get_findings(review_id, self.tenant_id)
+        findings, _ = await self.review_repo.get_findings(
+            review_id, self.tenant_id, page_size=10_000,
+        )
         redlines = await self.review_repo.get_redlines(review_id, self.tenant_id)
         return audit_finding_redline_coverage(findings, redlines)
 
